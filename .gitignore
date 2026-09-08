@@ -1,0 +1,63 @@
+# CapsulePulse .gitignore
+
+## 密钥与本地配置
+.env
+.env.*
+*.key
+key.json
+
+## Rust 构建产物
+target/
+**/*.rs.bk
+
+## Node / 前端
+node_modules/
+dist/
+
+## Tauri / 打包产物
+*.dmg
+*.msi
+
+## Tauri 生成（schema 与平台文件）
+core/gen/
+
+## 日志
+*.log
+.logs/
+
+## 备份
+backups/
+*.bak
+
+## 临时与缓存
+.temp/
+*.tmp
+.cache/
+
+## 测试与覆盖率
+coverage/
+
+## 用户数据（pulse.db 实际存 ~/.capsule-pulse/，仓库内不应出现；误落仓库根的 db 与备份一律不入库）
+*.db
+*.db.bak
+*.db.corrupt
+
+## IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.history/
+
+## Agent 工具本地目录（不入库）
+.claude/
+.agents/
+.mimosa/
+.zcode/
+!.zcode/config.json
+
+## Git worktrees
+.worktrees/

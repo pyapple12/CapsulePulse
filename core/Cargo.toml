@@ -1,0 +1,14 @@
+[package]
+name = "capsule-pulse"
+version = "0.1.0"
+edition = "2021"
+description = "CapsulePulse——玻璃质感的工作计时看板"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+tauri = { version = "2", features = [] }
+thiserror = "2.0.20"
+window-vibrancy = "0.8.0"

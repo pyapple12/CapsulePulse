@@ -1,0 +1,6 @@
+/* 全局基础样式：透明窗口底色让 Acrylic 透过（玻璃卡片样式在 App.vue 内） */
+body {
+  margin: 0;
+  background: transparent;
+  font-family: system-ui, sans-serif;
+}
