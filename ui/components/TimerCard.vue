@@ -12,6 +12,9 @@ interface SessionStatus {
 // 10 次/s 本地 IPC 开销可忽略。（演进：1s→250ms 修秒进位迟到，2026-09-08 用户定案改十分秒位后→100ms）
 const TICK_MS = 100;
 
+// 动作（开始/暂停/继续/重开）后通知父组件刷新统计行
+const emit = defineEmits<{ changed: [] }>();
+
 const state = ref<"idle" | "running" | "paused">("idle");
 const totalMs = ref(0);
 let timer: number | undefined;
@@ -27,11 +30,12 @@ async function refresh(): Promise<void> {
   }
 }
 
-/** 执行命令后立即刷新快照（不等下一秒） */
+/** 执行命令后立即刷新快照与统计（不等下一 tick） */
 async function act(command: string): Promise<void> {
   try {
     await invoke(command);
     await refresh();
+    emit("changed");
   } catch (err) {
     console.error(`${command} 调用失败`, err);
   }

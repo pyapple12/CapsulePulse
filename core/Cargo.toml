@@ -8,6 +8,9 @@ description = "CapsulePulse——玻璃质感的工作计时看板"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+chrono = "0.4.45"
+dirs = "7.0.0"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 tauri = { version = "2", features = [] }
 thiserror = "2.0.20"

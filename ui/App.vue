@@ -1,12 +1,56 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+
+import StatsCard from "./components/StatsCard.vue";
 import TimerCard from "./components/TimerCard.vue";
-// 玻璃卡片 + 拖动区沿用 PL001 阶段 B 判定通过的形态（G1–G4）；计时与按钮逻辑在 TimerCard
+
+// 玻璃卡片 + 拖动区沿用 PL001 阶段 B 判定通过的形态（G1–G4）；计时在 TimerCard，统计聚合在 Rust
+
+/** stats 命令返回体（镜像 Rust 侧 SessionStats serde 结构，单一来源在 Rust） */
+interface SessionStats {
+  today_secs: number;
+  week_secs: number;
+  all_secs: number;
+}
+
+// 统计为低频数据：挂载 + 动作后（TimerCard changed 事件）+ 30s 兜底，不进 100ms tick
+const STATS_TICK_MS = 30_000;
+
+const todaySecs = ref(0);
+const weekSecs = ref(0);
+const allSecs = ref(0);
+let statsTimer: number | undefined;
+
+/** 拉取统计快照 */
+async function refreshStats(): Promise<void> {
+  try {
+    const s = await invoke<SessionStats>("session_stats");
+    todaySecs.value = s.today_secs;
+    weekSecs.value = s.week_secs;
+    allSecs.value = s.all_secs;
+  } catch (err) {
+    console.error("session_stats 调用失败", err);
+  }
+}
+
+onMounted(() => {
+  void refreshStats();
+  statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
+});
+
+onUnmounted(() => {
+  if (statsTimer !== undefined) {
+    window.clearInterval(statsTimer);
+  }
+});
 </script>
 
 <template>
   <main class="glass-card" data-tauri-drag-region>
     <h1 class="title" data-tauri-drag-region>CapsulePulse</h1>
-    <TimerCard />
+    <StatsCard :today-secs="todaySecs" :week-secs="weekSecs" :all-secs="allSecs" />
+    <TimerCard @changed="refreshStats" />
   </main>
 </template>
 

@@ -5,11 +5,12 @@
 
 ## 一、已完成 ✅
 
+- **PL002 存储与统计聚合**（2026-09-09 收口）→ 附录 PL002
 - **PL001 玻璃壳与最小计时闭环**（2026-09-08 收口）→ 附录 PL001
 
 ## 二、待完成
 
-- （暂无——下一个大件：计划书 Phase 1 存储与统计聚合（PL002 候选）或 Phase 3 提醒调度，未立项）
+- （暂无——下一个大件：计划书 Phase 3 提醒调度（PL003 候选）或 Phase 2 托盘常驻，未立项）
 
 ## 三、主题规划
 
@@ -142,3 +143,91 @@
 ### 拆分 todo
 
 见 x.progress.md「PL001」任务组（13 条子任务，按 阶段 A/B/C/D 四小节分层，每条含做法与验证方式）。
+
+---
+
+## 附录 PL002：存储与统计聚合（2026-09-09 立项）
+
+> 背景：PL001 收口后计时活在内存里，关掉 app 数据归零——产品完整性最大缺口。计划书 §2.2 数据模型已有定案（单表 sessions、暂停时落库、今日/本周/累计 SUM），设计风险低，正适合做下一刀垂直切片：存储层 → 时间边界聚合 → 命令接线 → StatsCard 统计行 UI（复刻 PL001 的打穿方法论）。
+> 关键洞察：① 本次唯一"有陷阱"的逻辑是时间边界（本地时区 + 跨零点 + 跨周），全部走注入时间的纯函数测试（AGENTS 陷阱清单既有要求）；② 落库取数源 = 暂停时的"本段时长"，状态机 pause() 演进为返回段时长即可，session.rs 纯度不破；③ 重开语义升级为"先落库再重开"（数据不丢原则，用户拍板）。
+> 目标：收口时"计时 → 暂停 → 统计行更新 → 重启 app 数据仍在"端到端成立，跨零点/跨周边界用例全绿。
+> 状态：✅ 已完成（2026-09-09 收口，T1–T3/U1 全过；任务清单见 x.progress.md「PL002」；实测结论见下）
+
+### 方向定案（2026-09-09，用户拍板）
+
+1. **范围 = 存储+统计闭环**：SQLite 落库 + 今日/本周/累计聚合 + 统计行 UI；提醒调度排 PL003、托盘常驻排 PL004
+2. **本周 = 周一起自然周**（与 ISO 8601 一致）
+3. **重开语义 = 先落库再重开**：Running 态重开时当前段落库再归零（"重开"= 结束本段并立刻开新段，数据不丢）
+4. **tick 架构沿用**：前端拉取、Rust 唯一时间权威；本地时区经 chrono，边界核心逻辑以本地朴素时间入参保持机器时区无关可测
+
+### 实现措施（按层拆解到文件/函数级）
+
+#### 阶段 A：依赖与时间边界（TDD）
+
+- **依赖接入**：`rusqlite`（bundled feature，SQLite 编译进二进制免系统 dll）、`chrono`（本地时区）、`dirs`（用户目录，AGENTS 路径处理要求）；首次编译变长如实记录
+- **`core/src/period.rs`**：今日起点/本周起点纯函数——入参本地朴素时间（NaiveDateTime），出参 Unix 秒；本周起点 = 周一 00:00:00；生产入口薄函数以 `Local::now().naive_local()` 转换，核心逻辑机器时区无关可测
+- 边界用例：跨零点、周日 23:59:59 → 周一 00:00:00 翻转、周内各天、恰在边界值 00:00:00
+
+#### 阶段 B：存储层 Repository（TDD，内存 db）
+
+- **`core/src/storage.rs`**：`Storage`——`open(path)`（运行时）/ `open_in_memory()`（测试）；建表按计划书 §2.2 schema：`sessions(id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER NOT NULL, seconds INTEGER NOT NULL)`
+- `add_session(started_at, seconds)`：参数绑定，禁 SQL 拼接（审计维度 7 锚点）
+- 聚合：`today_total / week_total / all_total`——SUM(seconds) WHERE started_at ≥ 边界（all 无条件）；`StorageError`（thiserror：Sqlite 透传）
+- 全部用例跑内存 db，零用户数据写入（红线）
+
+#### 阶段 C：命令层接线
+
+- **pause() 返回段时长**：`WorkSession::pause()` 演进为 `Result<Duration>`（本段 = 落库取数源；resume 重挂起点使段语义精确），既有用例同步演进（演进式 TDD）
+- **AppContext 扩展**：现 SessionHandle 扩为 session + storage 双成员（或并列 managed state，实现时取简）；pause 命令：段 > 0 才落库（零秒段跳过不写噪音行），`started_at = wall_now - 段秒`（SystemTime 在命令层取，session.rs 纯度不破）
+- **restart 先落库**：Running → 先 pause 落本段；Paused/Idle → 无未落库段；再 reset + start（单锁原子保持）
+- **`session_stats` 命令**：返回 today/week/all 三值秒数
+- **运行时路径**：`~/.capsule-pulse/pulse.db`（dirs 解析 + 目录自建）；打开失败严格报错、启动失败（错误策略主线，不登记容错）；测试一律注入路径/内存库，禁触真实用户目录（红线）
+
+#### 阶段 D：统计行 UI 与收口
+
+- **StatsCard 统计行**：`今日 Xh Ym ｜ 本周 Xh Ym ｜ 累计 Xh Ym` 三值（计划书 §1 产品定义含历史累计，覆盖 §4 mock 的两值形态）；玻璃样式沿用 B 阶段定案
+- 刷新时机 = 挂载 + 每次动作后 + 30s 兜底轮询（统计非实时数据，不进 100ms tick）
+- 收口：门禁全绿 + 结论回写 + 状态行 + 勾结
+
+### 验证方案（全部可执行、可断言）
+
+| #   | 层级     | 检验内容                      | 手段与通过标准                                                             |
+| --- | -------- | ----------------------------- | -------------------------------------------------------------------------- |
+| T1  | 时间边界 | 今日/本周起点                 | 注入朴素时间用例先 FAIL 后 PASS：跨零点、周日→周一翻转、边界值恰等         |
+| T2  | 存储聚合 | 插入/聚合/边界排除            | 内存 db 用例：插入→往返、跨零点/跨周排除、多段求和、空表为零               |
+| T3  | 命令接线 | pause 落库/restart 落库/stats | 内存 Storage 注入用例：pause→库内一行、Running 重开→段入库、stats 三值正确 |
+| U1  | 闭环人工 | 持久化端到端                  | 计时→暂停→统计行增长；重开→段计入；重启 app→统计仍在                       |
+| —   | 门禁     | 四件套全绿                    | cargo fmt --check / clippy -D warnings / test / npm build（含 vue-tsc）    |
+
+### 验收标准
+
+1. T1–T3 全绿（含跨零点/跨周边界）
+2. U1 人工闭环通过（含 app 重启持久性）
+3. 重开落库语义按定案执行（数据不丢）
+4. 门禁全绿 + 实测结论回写本附录 + 状态行同步
+
+### 明确不做（YAGNI 边界）
+
+- 提醒调度/设置持久化 → PL003；托盘/全局快捷键/关闭最小化 → PL004
+- 历史记录页面、数据备份、图表 → 远期
+- 运行中崩溃/关机丢当前段的恢复提示（计划书 §8）→ 远期（§2.2 已接受最多丢当前段）
+
+### 拆分 todo
+
+见 x.progress.md「PL002」任务组（13 条子任务，按 阶段 A/B/C/D 四小节分层，每条含做法与验证方式）。
+
+> **阶段开展结论（2026-09-09，PL002.1–2.12 完成，TDD 红→绿 ×3 + U1 人工验收一次通过）**
+>
+> - **TDD 轨迹**：period（E0425 红→绿）/ storage（红→绿）/ commands 重写 + session 演进（编译红→绿）三批；终态 24 项测试全绿（lib 23 + 探针 1），零真实时间、零真实用户数据
+> - **关键实现决策四笔**：① WorkSession 内部演进为"本段起点 + 段累计"分离——pause() 返回本段时长（落库取数源），SessionState 形状与对外语义不变；② rusqlite Connection 非 Sync → Storage 入 Mutex 解 tauri manage 的 Send+Sync（锁序恒 session→storage 单向，无死锁面）；③ started_at = wall_now − 段秒在命令层推导，SystemTime 不进 session.rs；④ 零秒段跳过不写噪音行
+> - **chrono 0.4.45 API 校正**：num_days_from_monday 在 Weekday 枚举上（now.weekday().num_days_from_monday()），Datelike 直调已移除
+> - **U1 人工六项一次通过**：统计行（首启自建库）/ 暂停落库即增 / 多段累计 / 重开先落库 / 重启 app 持久性 / 玻璃无退化
+> - **过程违规自纠一处**：中途误用 python 脚本改源码（违反 AGENTS 文件修改规则），当场改回 edit 通道；一处测试断言语义写错由测试失败暴露后修正
+> - **依赖**：rusqlite 0.40（bundled）/ chrono 0.4.45 / dirs 7.0（@tauri-apps/api 2.11.1 已于 PL001 期间入账）
+
+> **PL002 收口结论（2026-09-09，全组完结）**
+>
+> - **验收标准逐条**：T1–T3 全绿 ✅ / U1 六项 ✅（含重启持久性）/ 重开落库语义按定案 ✅ / 门禁 + 回写 ✅
+> - **最终形态**：暂停/重开即落库（零秒段跳过）；统计行 `今日｜本周｜累计`；数据落 `~/.capsule-pulse/pulse.db`；统计刷新 = 挂载 + 动作后 + 30s 兜底
+> - **13 条勾结**；门禁基线：fmt --check / clippy -D warnings / test 24 / doc 0 告警 / npm build
+> - **遗留**：无阻塞项；统计行目前不含当日运行中段的实时增量（暂停才落库，§2.2 定案的自然结果），如有需要 PL003+ 可在快照命令里并入 session.total()

@@ -6,37 +6,35 @@
 
 ## 已完成 ✅
 
-### PL001: 玻璃壳与最小计时闭环 [plan#Phase 0/1/2]
+### PL002: 存储与统计聚合 [plan#Phase 1/2]
 
-> 结果：玻璃栈判定通过（G1–G4 全过，Windows Acrylic 实测）+ 计时状态机/命令层 TDD 全绿（11/11）+ 玻璃 UI 计时闭环交付；U1 三轮验收通过，终版显示定案 = 十分秒位 HH:MM:SS.d。全组 15 条勾结。详见 z.plan.md 附录 PL001。
+> 结果：暂停/重开即落库（零秒段跳过），今日/本周/累计三聚合 + 统计行 UI；跨零点/跨周边界用例全绿；U1 人工六项一次通过（含重启 app 持久性）。全组 13 条勾结。详见 z.plan.md 附录 PL002。
 
-#### 阶段 A：工程骨架
+#### 阶段 A：依赖与时间边界（TDD）
 
-- [x] PL001.1 工具链探测与 git 仓库 —— 盘点 cargo/rustc/node/npm/Tauri CLI 在位与版本，缺口安装清单交用户安装；git init 由用户执行（.gitignore 已就位）；验证：`cargo --version`/`node --version` 等全在位且版本满足 AGENTS.md 要求（2026-09-08 已验证：cargo 1.96.1 / Node 26.7.0 / VS Build Tools 18 全在位零缺口；Tauri CLI 决策走 npm devDep `@tauri-apps/cli` 免 cargo install 长编译，探测记录 `.temp/pl001a-toolchain.md`；git 仓库未初始化，待用户执行）
-- [x] PL001.2 Tauri 2 工程骨架 —— `src-tauri/`（Cargo.toml + tauri.conf.json 透明无边框 360×480 + main.rs 空壳）+ `src/`（Vue3+TS+Vite + App.vue 占位）；验证：开发窗口能打开、控制台无错误（长驻 dev 不适合自动化，人工或等价验证）（2026-09-08 已验证：npm build + cargo build 全绿；等价验证 = debug exe 启动 5 秒探测 MainWindowTitle=[CapsulePulse]、进程存活后受控关闭；无 devUrl 自包含形态规避系列已知的 debug exe 连 dev server 白屏坑；占位图标由 `.temp/gen-icon.mjs` 程序生成；依赖版本锚定 typescript 5.9.3——npm 默认解析到 TS 7.0.2 与 vue-tsc 3.3 不兼容 ERR_PACKAGE_PATH_NOT_EXPORTED，降级定案）
-- [x] PL001.3 门禁四件套接入与首跑 —— cargo fmt/clippy -D warnings/check + prettier/vue-tsc/npm build 全部接入；验证：首跑全绿并记录耗时基线（回写 z.plan 附录 PL001）（2026-09-08 已验证：四件套首跑全绿——fmt <1s / clippy 2m10s（含全量依赖编译）/ check 5s / cargo build 2m12s / npm build 4s；基线已回写 z.plan 附录 PL001）
+- [x] PL002.1 依赖接入与探针 —— cargo add rusqlite（bundled）/chrono/dirs；`Connection::open_in_memory` 探针（编译 + 建表查询 smoke）；验证：cargo test 编译绿 + smoke 用例过（2026-09-09 已验证：rusqlite 0.40 bundled/chrono 0.4.45/dirs 7.0 入账；探针 `core/tests/storage_probe.rs` 过——bundled SQLite 编译走全局缓存，未现长编译）
+- [x] PL002.2 时间边界纯函数 TDD —— `core/src/period.rs`：今日起点/本周起点（周一起，入参本地朴素时间，出参 Unix 秒）；用例：跨零点、周日 23:59:59→周一 00:00:00 翻转、周内各天、恰在边界 00:00:00；验证：T1 用例先 FAIL 后 PASS，零真实时间依赖（2026-09-09 已验证：红灯 E0425 → 实现转绿 4 用例；实现修正一处——chrono 0.4.45 的 num_days_from_monday 在 Weekday 枚举上（now.weekday().num_days_from_monday()），Datelike 直调已移除；泛型 over TimeZone 使测试固定时区、生产 Local，机器时区无关）
+- [x] PL002.3 period 生产接线 —— `Local::now().naive_local()` 转换薄入口（核心逻辑已时区无关，本条只接生产时区）；验证：clippy/check 过（2026-09-09 已验证：随 PL002.10 stats_snapshot 以 Local::now() 接线完成；时区无关设计使生产接线为零逻辑）
 
-#### 阶段 B：玻璃可行性打样（★ 判定点，先于一切 UI 功能）
+#### 阶段 B：存储层 Repository（TDD，内存 db）
 
-- [x] PL001.4 透明窗口 + Acrylic —— window-vibrancy `apply_acrylic`（#[cfg(windows)]）+ tauri.conf `transparent: true` + `decorations: false`；验证：G1——透明生效、无黑底、无可接受度以下的闪烁（人工，桌面背景透过可见）（2026-09-08 已验证：**G1 过**——用户确认边缘透明 Acrylic 生效、无黑底无闪烁；apply_acrylic tint (32,32,32,125)，setup 失败严格抛错）
-- [x] PL001.5 玻璃卡片与深浅色跟随 —— 卡片半透明底 + `backdrop-filter: blur()`；`prefers-color-scheme` 双主题样式；验证：G2 毛玻璃观感生效 + G3 切换系统主题卡片跟随可读（人工）（2026-09-08 已验证：**G2 过 + G3 过**——用户确认卡片毛玻璃质感成立、深浅色主题跟随实现）
-- [x] PL001.6 无边框拖动 —— `data-tauri-drag-region` 拖动区覆盖 + 窗口固定 360×480；验证：G4 拖动流畅、无文字选中副作用、尺寸固定（人工）（2026-09-08 已验证：**G4 首测不过 → 修复后复测过**——根因 = `core:window:default` 不含 `allow-start-dragging`，ACL 静默拒绝拖动 IPC（症状同 CapsuleRetro listen() 静默拒）；capabilities 显式补授 `core:window:allow-start-dragging` 后用户复测拖动正常、无文字误选、尺寸固定；陷阱已沉淀 w.study §3.1 + AGENTS 素材与环境陷阱）
-- [x] PL001.7 玻璃判定书 —— G1–G4 逐项结论登记本条目；判死条件 = Acrylic 不可用或闪烁不可接受 → 降级"半透明纯色"并重议产品形态，书面结论回写 z.plan 附录；验证：判定书完成（全过或降级，二选一有书面结论）（2026-09-08 已定案：**全过，不触发降级**——G1 透明/G2 毛玻璃/G3 深浅色/G4 拖动（修复后）全部用户确认通过，判定书见 z.plan 附录 PL001 阶段 B 开展结论）
+- [x] PL002.4 Storage 骨架与建表 —— `core/src/storage.rs`：`StorageError`（thiserror：Sqlite 透传）、`open(path)`/`open_in_memory()`、建表（计划书 §2.2 schema：started_at/seconds 均非空）；验证：open_in_memory 建表用例过（2026-09-09 已验证：另加 Io/HomeDirUnavailable 变体与 open_default（PL002.11 前置）；建表幂等 CREATE TABLE IF NOT EXISTS）
+- [x] PL002.5 add_session 与参数化查询 —— insert 全参数绑定（禁 SQL 拼接）；验证：插入→查询往返用例过（2026-09-09 已验证：?1/?2 绑定 + COALESCE 空表为零）
+- [x] PL002.6 聚合查询 —— today/week/all 三 SUM（started_at ≥ 边界，all 无条件，边界经 period）；用例：跨零点排除、跨周排除、多段求和、空表为零；验证：T2 用例先 FAIL 后 PASS（2026-09-09 已验证：上周/本周早于今日/昨日/今晨四记录断言 today=300/week=900/all=1000；边界恰等计入（>= 语义）另有专用例）
 
-#### 阶段 C：计时状态机（TDD：先 FAIL 后 PASS）
+#### 阶段 C：命令层接线
 
-- [x] PL001.8 Clock 注入与状态骨架 —— `core/session.rs`：`trait Clock`（测试注入手拨假钟）+ 三态 Idle/Running/Paused（enum 或 WorkSession 持态，实现时取简）+ `SessionError`（thiserror）；验证：cargo clippy/check 过（2026-09-08 已验证：WorkSession\<C: Clock = RealClock\> 持态 + SessionState 三态 Copy enum + thiserror 三变体（NotIdle/NotRunning/NotPaused）；Clock 契约 = 单调不减，违约 panic 属程序错误并文档化）
-- [x] PL001.9 四操作 TDD —— 先写测试确认 FAIL 再实现：start（仅 Idle）/pause（仅 Running）/resume（仅 Paused，继承累计）/total()（Running 现算、Paused 返累计、Idle 零）+ 多轮循环累计用例；验证：S1 用例全绿（2026-09-08 已验证：红灯 E0405/E0433（仅测试模块编译失败）→ 实现后转绿；实现定案新增第五操作 reset()（任意态回 Idle 清零）——U1"暂停态重开归零"场景所需的最小扩展，start 保持"仅 Idle"严格语义）
-- [x] PL001.10 边界与严格抛错用例 —— Idle 下 pause/resume、Running 下重复 start 返回 `Result<_, SessionError>`；零时长会话；假钟任意拨动无 panic；验证：S2/S3 用例全绿，测试零真实 sleep（2026-09-08 已验证：7 用例全绿——含零步进/超大步进混合百轮循环；绿灯阶段修两处测试侧编译错（matches! 守卫 &Duration 绑定、Instant 无 Default 实现改手写），业务代码零 unwrap/expect）
-- [x] PL001.10a 结构定案（阶段内决策）—— dead_code 门禁暴露 bin crate 形态问题后转 Tauri 2 标准骨架：`lib.rs`（pub mod core + run() 装配）+ `main.rs` 薄入口——lib pub 项即公开 API，永久消除 dead_code 误报，阶段 D commands.rs 落 lib 侧；验证：门禁全套过（2026-09-08 已验证：fmt/clippy --all-targets -D warnings/check/doc 0 告警/test 7 过/build 全绿）
-- [x] PL001.10b 目录风格改造（用户拍板）—— `src-tauri/`→`core/`（整体改名，框架文件与 Cargo.toml 同住已源码实证）、`src/`→`ui/`、内层 `core/` 模块摊平（session.rs 上移 src 根，lib.rs 改 `pub mod session;`，原 mod.rs 层职责并入 lib.rs 模块注释）、`configs/` 预建占位；同步 .gitignore/AGENTS/README/w.study/两 skill 路径；验证：V1–V6 全过（2026-09-08 已验证：npm build 绿；cargo fmt/clippy/check/test 7 过/doc 0 告警/build 绿；exe 启动 TITLE=[CapsulePulse]；`npx tauri info` 从新目录读出版本清单（CLI 探测实证）；prettier 收口。cargo clean 一次——target 缓存烘焙旧绝对路径搬家后失效，属预期代价）
+- [x] PL002.7 pause 返回段时长 —— `WorkSession::pause()` 演进为 `Result<Duration>`（本段时长 = 落库取数源），既有用例同步演进；验证：演进式 TDD，全组测试绿（2026-09-09 已验证：内部重构 = "本段起点 + 段累计"分离（SessionState 形状与对外语义不变）；multi_round 用例强化为逐段断言 100/30/45；invalid 用例 Ok(())→Ok(ZERO)）
+- [x] PL002.8 落库接线 —— managed state 扩为 session + storage；pause 命令段 > 0 落库（started_at = wall_now − 段秒，SystemTime 取自命令层，session.rs 纯度不破）；验证：T3 内存 db 断言 pause→库内一行（2026-09-09 已验证：AppContext\<C: Clock=RealClock\>{session, storage: Mutex\<Storage\>}——rusqlite Connection 非 Sync 入 Mutex 解 tauri manage Send+Sync，锁序恒 session→storage；零秒段跳过另有专用例）
+- [x] PL002.9 restart 先落库 —— restart：Running → 先 pause 落本段；Paused/Idle → 无未落库段；再 reset + start（单锁原子保持）；用例：Running 重开 → 库内一段 + 新会话 running；验证：T3 用例过（2026-09-09 已验证：双用例——Running 重开落库 100s、Paused 重开不重复落库（段已在最近一次 pause 入库））
+- [x] PL002.10 stats 命令 —— `session_stats` 返回 today/week/all 秒数；验证：T3 内存 db 断言三值聚合正确（2026-09-09 已验证：边界内/外注入断言 100/300/700；Local::now() 生产定界即 PL002.3 接线）
+- [x] PL002.11 运行时 db 路径 —— `~/.capsule-pulse/pulse.db`（dirs 解析 + 目录自建），打开失败严格报错启动失败；测试一律注入路径/内存库，禁触真实用户目录；验证：构建绿 + 临时路径集成用例过（2026-09-09 已验证：open_default 三错误变体（Sqlite/Io/HomeDirUnavailable）；临时目录文件库"写入→重开→数据在"用例过；run() 初始化失败 eprintln + exit(1)）
 
-#### 阶段 D：UI 接线（最薄闭环）
+#### 阶段 D：统计行 UI 与收口
 
-- [x] PL001.11 命令层 —— `commands.rs`：session_start/pause/resume/status 四命令（会话存 `Mutex<WorkSession>`，status 返回 state + total_secs）；验证：U2——命令状态逻辑 cargo test 覆盖，不经窗口不依赖前端（2026-09-08 已验证：TDD 红→绿；SessionHandle(Mutex\<WorkSession\>) 经 .manage() 注册，命令核心抽为接收 &SessionHandle 的自由函数脱离 tauri::State 直测；**四命令之外新增 session_restart**（reset + start 同锁原子，U1"重开归零"承载，实现决策记录）；CommandError（Session 透传/Poisoned）严格报错跨 IPC 序列化；DTO 仅暴露 state 标识 + total_ms（内部计时字段不出 IPC）；U2 4 用例，全组 cargo test 11/11）
-- [x] PL001.12 TimerCard 与 App 布局 —— 大计时器等宽数字（HH:MM:SS）+ 按钮状态切换（开始 ↔ 暂停/继续）；setInterval 1s invoke status、组件卸载清理；玻璃卡片沿用 B 阶段定案；验证：vue-tsc 过 + U1 人工完整流程（开始→数字走→暂停→停走→继续→续走→重开归零）（2026-09-08 已验证：vue-tsc/npm build 绿；TimerCard 等宽数字（tabular-nums）+ 按钮三态（开始/暂停/继续+重开）+ tick 拉取卸载清理 + 动作后立即刷新；**U1 三轮**：轮1 秒进位最坏迟到 2s（1s 轮询相位错配 + 秒截断）判不可接受 → tick 250ms；轮2 确认 1.0~1.25s 属 HH:MM:SS 秒表语义、静止感仍在 → 用户拍板显示定案变更 **HH:MM:SS → HH:MM:SS.d 十分秒位**（计划书 §4 偏差，z.plan 为权威定案）+ tick 100ms + DTO total_secs→total_ms；轮3 用户确认通过）
-- [x] PL001.13 PL001 收口 —— 门禁四件套全绿；G/S/U 实测结论回写 z.plan 附录 PL001；README/AGENTS 状态行回改；验证：门禁全绿 + 文档一致性核对（2026-09-08 已验证：收口轮门禁全绿（fmt --check/clippy -D warnings/test 11/doc 0 告警/npm build）+ exe 启动探测；U1–U3 结论回写 z.plan 阶段 D 开展结论 + 收口结论；README/AGENTS 状态行改"PL001 已完成"；反向验收与过程记录 `.temp/pl001-verification.md`）
+- [x] PL002.12 StatsCard 统计行 —— 今日/本周/累计三值（Xh Ym 格式）；刷新 = 挂载 + 动作后 + 30s 兜底（不进 100ms tick）；玻璃样式沿用；验证：vue-tsc 过 + U1 人工闭环（计时→暂停→统计行增长；重开→段计入；重启 app→统计仍在）（2026-09-09 已验证：StatsCard 纯展示组件 + TimerCard changed 事件驱动刷新；vue-tsc/npm build 绿；**U1 六项一次通过**——统计行/暂停落库/多段累计/重开先落库/重启持久性/玻璃无退化）
+- [x] PL002.13 PL002 收口 —— 门禁全绿；T1–T3/U1 结论回写 z.plan 附录 PL002；README/AGENTS 状态行回改；验证：门禁全绿 + 文档一致性核对（2026-09-09 已验证：收口轮门禁全绿（fmt --check/clippy -D warnings/test 24/doc 0 告警/npm build/prettier）；结论回写 z.plan 阶段开展结论 + 收口结论；状态行同步；反向验收与过程记录 `.temp/pl002-verification.md`——含一处 python 改源码违规的自纠记录）
 
 ## 未完成
 
-（暂无——下一个大件：计划书 Phase 1 存储与统计聚合（PL002 候选）或 Phase 3 提醒调度，未立项）
+（暂无——下一个大件：计划书 Phase 3 提醒调度（PL003 候选）或 Phase 2 托盘常驻，未立项）

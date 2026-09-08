@@ -10,7 +10,7 @@ use thiserror::Error;
 
 /// 单调时钟抽象：`now()` 返回自任意起点的单调时长，仅供差值计算。
 /// 契约：返回值必须单调不减——[`RealClock`] 由 `Instant` 保证；测试假钟须守同一契约，
-/// 违约（时间倒流）会使 `resume` 处 Duration 减法 panic，属程序错误而非运行时错误。
+/// 违约（时间倒流）会使 `total()`/`pause()` 处 Duration 减法 panic，属程序错误而非运行时错误。
 pub trait Clock {
     /// 当前单调时刻（起点任意）。
     fn now(&self) -> Duration;
@@ -75,10 +75,13 @@ pub enum SessionError {
 }
 
 /// 工作会话：三态状态机 + 可注入时钟。
+/// 内部把"本段起点"与"已完成段累计"分离——`pause()` 因此能返回本段时长（PL002 落库取数源），
+/// 而对外的 `total()`（= 累计 + 本段）与三态枚举形状保持 PL001 语义不变。
 /// 泛型默认 [`RealClock`]，业务侧直接 `WorkSession::default()`；测试注入假钟。
 pub struct WorkSession<C: Clock = RealClock> {
     clock: C,
     state: SessionState,
+    accumulated: Duration,
 }
 
 impl Default for WorkSession {
@@ -88,11 +91,12 @@ impl Default for WorkSession {
 }
 
 impl<C: Clock> WorkSession<C> {
-    /// 以给定时钟创建 Idle 会话。
+    /// 以给定时钟创建 Idle 会话（不变量：`start()` 仅可自 Idle 进入，此时 accumulated 恒为零）。
     pub fn new(clock: C) -> Self {
         Self {
             clock,
             state: SessionState::Idle,
+            accumulated: Duration::ZERO,
         }
     }
 
@@ -114,28 +118,30 @@ impl<C: Clock> WorkSession<C> {
         Ok(())
     }
 
-    /// 暂停：仅 Running 合法，本段时长并入累计。
+    /// 暂停：仅 Running 合法；本段时长并入累计并返回（PL002 落库取数源）。
     /// # 错误
     /// 非 Running 态返回 [`SessionError::NotRunning`]。
-    pub fn pause(&mut self) -> Result<(), SessionError> {
+    pub fn pause(&mut self) -> Result<Duration, SessionError> {
         let SessionState::Running { start } = self.state else {
             return Err(SessionError::NotRunning);
         };
+        let segment = self.clock.now() - start;
+        self.accumulated += segment;
         self.state = SessionState::Paused {
-            elapsed: self.clock.now() - start,
+            elapsed: self.accumulated,
         };
-        Ok(())
+        Ok(segment)
     }
 
-    /// 继续：仅 Paused 合法；起点回拨使累计被继承（历史段落不丢）。
+    /// 继续：仅 Paused 合法；本段起点重新记为当前时刻（累计保留在 `accumulated`）。
     /// # 错误
     /// 非 Paused 态返回 [`SessionError::NotPaused`]。
     pub fn resume(&mut self) -> Result<(), SessionError> {
-        let SessionState::Paused { elapsed } = self.state else {
+        let SessionState::Paused { .. } = self.state else {
             return Err(SessionError::NotPaused);
         };
         self.state = SessionState::Running {
-            start: self.clock.now() - elapsed,
+            start: self.clock.now(),
         };
         Ok(())
     }
@@ -143,13 +149,14 @@ impl<C: Clock> WorkSession<C> {
     /// 重置回 Idle 并清零累计（UI"重开归零"路径）；任意态合法、幂等。
     pub fn reset(&mut self) {
         self.state = SessionState::Idle;
+        self.accumulated = Duration::ZERO;
     }
 
-    /// 累计工作时长：Idle 为零；Running 现算（历史累计 + 本段实时）；Paused 返累计。
+    /// 累计工作时长：Idle 为零；Running = 已完成段累计 + 本段实时；Paused = 已完成段累计。
     pub fn total(&self) -> Duration {
         match self.state {
             SessionState::Idle => Duration::ZERO,
-            SessionState::Running { start } => self.clock.now() - start,
+            SessionState::Running { start } => self.accumulated + (self.clock.now() - start),
             SessionState::Paused { elapsed } => elapsed,
         }
     }
@@ -203,7 +210,7 @@ mod tests {
         assert_eq!(s.state(), &SessionState::Idle);
     }
 
-    /// S1：多轮 start-pause-resume 循环累计正确；暂停期间 total 冻结；Running 现算含历史。
+    /// S1：多轮 start-pause-resume 循环累计正确；暂停期间 total 冻结；每次 pause 返回本段时长。
     #[test]
     fn multi_round_accumulation() {
         let clock = FakeClock::new();
@@ -211,7 +218,7 @@ mod tests {
         // 第 1 段 100s
         s.start().unwrap();
         clock.advance(secs(100));
-        s.pause().unwrap();
+        assert_eq!(s.pause().unwrap(), secs(100));
         assert_eq!(s.total(), secs(100));
         // 暂停期间推进 50s 不计入
         clock.advance(secs(50));
@@ -219,13 +226,13 @@ mod tests {
         // 第 2 段 30s，resume 继承累计
         s.resume().unwrap();
         clock.advance(secs(30));
-        s.pause().unwrap();
+        assert_eq!(s.pause().unwrap(), secs(30));
         assert_eq!(s.total(), secs(130));
         // 第 3 段 45s：Running 态 total() 现算 = 历史 + 本段实时
         s.resume().unwrap();
         clock.advance(secs(45));
         assert_eq!(s.total(), secs(175));
-        s.pause().unwrap();
+        assert_eq!(s.pause().unwrap(), secs(45));
         assert_eq!(s.total(), secs(175));
     }
 
@@ -252,7 +259,7 @@ mod tests {
         // Running 下重复 start
         s.start().unwrap();
         assert_eq!(s.start(), Err(SessionError::NotIdle));
-        assert_eq!(s.pause(), Ok(()));
+        assert_eq!(s.pause(), Ok(Duration::ZERO));
         // Paused 下 start（重开须先 reset）与 resume 正常路径
         assert_eq!(s.start(), Err(SessionError::NotIdle));
         assert_eq!(s.resume(), Ok(()));

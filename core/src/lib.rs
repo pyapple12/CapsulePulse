@@ -6,25 +6,40 @@
 //! 玻璃效果：Windows 实机走 Acrylic（PL001 阶段 B 已判定通过）；macOS/Linux 延后（y.problems.md #1）。
 
 pub mod commands;
+pub mod period;
 pub mod session;
+pub mod storage;
 
 use std::sync::Mutex;
 
 use tauri::Manager;
 
-use crate::commands::SessionHandle;
+use crate::commands::AppContext;
 use crate::session::WorkSession;
+use crate::storage::Storage;
 
 /// 装配并运行 Tauri 应用：窗口属性由 tauri.conf.json 声明（透明无边框 360×480），玻璃效果在 setup 挂载。
 pub fn run() {
+    // 存储：默认用户路径（~/.capsule-pulse/pulse.db），打不开严格报错退出（错误策略主线）
+    let storage = match Storage::open_default() {
+        Ok(storage) => storage,
+        Err(err) => {
+            eprintln!("存储初始化失败：{err}");
+            std::process::exit(1);
+        }
+    };
     tauri::Builder::default()
-        .manage(SessionHandle(Mutex::new(WorkSession::default())))
+        .manage(AppContext {
+            session: Mutex::new(WorkSession::default()),
+            storage: Mutex::new(storage),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::session_start,
             commands::session_pause,
             commands::session_resume,
             commands::session_restart,
-            commands::session_status
+            commands::session_status,
+            commands::session_stats
         ])
         .setup(|app| {
             // 玻璃效果挂载：失败严格抛错（setup 错误会上抛阻断启动），不静默降级

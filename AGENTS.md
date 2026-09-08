@@ -2,7 +2,7 @@
 
 玻璃质感的工作计时看板：一个大的开始/暂停按钮记录工作时间，连续工作超阈值时声音 + 系统通知提醒休息，三端（Windows / macOS / Linux）通用。总体规划见 `CapsulePulse_plan.md`。
 
-**当前状态**：PL001「玻璃壳与最小计时闭环」已完成（2026-09-08 收口）——玻璃栈判定通过（Windows Acrylic 实测）+ 计时状态机/命令层纯 Rust 全测（11 项）+ 玻璃 UI 计时闭环；macOS/Linux 延后 [problems#1]。下一个大件（存储/统计聚合或提醒调度）未立项。方案与实测结论见 `z.plan.md` 附录 PL001，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
+**当前状态**：PL001「玻璃壳与最小计时闭环」（2026-09-08 收口，首提交 V0.1.0.1）与 PL002「存储与统计聚合」（2026-09-09 收口）均已完结——玻璃 UI + 计时状态机 + SQLite 落库（暂停/重开即落库）+ 今日/本周/累计统计行，24 项测试全绿；macOS/Linux 延后 [problems#1]。下一个大件：Phase 3 提醒调度（PL003 候选）或托盘常驻，未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
 
 ## 技术栈
 
