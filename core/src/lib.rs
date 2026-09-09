@@ -12,6 +12,8 @@ pub mod session;
 pub mod settings;
 pub mod storage;
 
+mod paths;
+
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -19,12 +21,12 @@ use tauri::Manager;
 use crate::commands::AppContext;
 use crate::reminder::ReminderFire;
 use crate::session::WorkSession;
-use crate::settings::{default_path, ReminderSettings};
+use crate::settings::ReminderSettings;
 use crate::storage::Storage;
 
 /// 装配并运行 Tauri 应用：窗口属性由 tauri.conf.json 声明（透明无边框 360×480），玻璃效果在 setup 挂载。
 pub fn run() {
-    // 存储 + 设置：默认用户路径；失败严格报错退出（错误策略主线）
+    // 存储 + 设置：默认运行时路径（configs/ + data/，双落址见 paths）；失败严格报错退出（错误策略主线）
     let storage = match Storage::open_default() {
         Ok(storage) => storage,
         Err(err) => {
@@ -32,7 +34,7 @@ pub fn run() {
             std::process::exit(1);
         }
     };
-    let settings_path = match default_path() {
+    let settings_path = match paths::default_config_path() {
         Ok(path) => path,
         Err(err) => {
             eprintln!("设置路径解析失败：{err}");

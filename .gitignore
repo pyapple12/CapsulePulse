@@ -37,7 +37,8 @@ backups/
 ## 测试与覆盖率
 coverage/
 
-## 用户数据（pulse.db 实际存 ~/.capsule-pulse/，仓库内不应出现；误落仓库根的 db 与备份一律不入库）
+## 运行时数据（双落址定案 2026-09-10：dev 落项目根 configs/ 与 data/，release 落 exe 同级；内容不入仓库，.gitkeep 保目录）
+configs/config.json
 *.db
 *.db.bak
 *.db.corrupt

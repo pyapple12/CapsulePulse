@@ -1,8 +1,8 @@
-//! 提醒设置：阈值与开关的用户持久化（~/.capsule-pulse/config.json，路径由调用方注入）。
+//! 提醒设置：阈值与开关的用户持久化（configs/config.json，双落址见 crate::paths，路径由调用方注入）。
 //! 语义：文件不存在 = 首次启动 → 返回默认值（容错白名单登记项 PL003.3）；
 //! JSON 损坏 / 字段非法 → 严格报错（AGENTS 错误策略主线）。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -78,16 +78,6 @@ impl ReminderSettings {
     }
 }
 
-/// 默认设置文件路径：`~/.capsule-pulse/config.json`（目录不存在则自建）。
-pub fn default_path() -> Result<PathBuf, SettingsError> {
-    let Some(home) = dirs::home_dir() else {
-        return Err(SettingsError::HomeDirUnavailable);
-    };
-    let dir = home.join(".capsule-pulse");
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir.join("config.json"))
-}
-
 /// 设置层错误：底层错误透传 + 阈值校验，不静默兜底。
 #[derive(Debug, Error)]
 pub enum SettingsError {
@@ -97,9 +87,6 @@ pub enum SettingsError {
     /// 文件读写错误。
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// 无法定位用户主目录。
-    #[error("无法定位用户主目录")]
-    HomeDirUnavailable,
     /// 提醒阈值越界（合法范围 1–240 分钟）。
     #[error("提醒阈值非法：{0} 分钟（应为 1–240）")]
     InvalidThreshold(u32),

@@ -2,7 +2,7 @@
 //! 全程参数化查询（禁拼接）；聚合边界经 period 纯函数（泛型时区，测试固定时区）；
 //! 测试一律内存库/临时目录，零真实用户数据写入（AGENTS 红线）。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::{DateTime, TimeZone};
 use rusqlite::Connection;
@@ -19,9 +19,6 @@ pub enum StorageError {
     /// 数据目录创建失败。
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// 无法定位用户主目录（home 目录不可用）。
-    #[error("无法定位用户主目录")]
-    HomeDirUnavailable,
 }
 
 /// 会话存储：单表 sessions，一条记录 = 一次暂停/重开时的一个工作段。
@@ -40,14 +37,9 @@ impl Storage {
         Self::init(Connection::open_in_memory()?)
     }
 
-    /// 以默认用户路径打开：`~/.capsule-pulse/pulse.db`（目录不存在则自建，PL002.11）。
+    /// 以默认路径打开：<运行时根>/data/pulse.db（双落址见 crate::paths；目录不存在则自建）。
     pub fn open_default() -> Result<Self, StorageError> {
-        let Some(home) = dirs::home_dir() else {
-            return Err(StorageError::HomeDirUnavailable);
-        };
-        let dir: PathBuf = home.join(".capsule-pulse");
-        std::fs::create_dir_all(&dir)?;
-        Self::open(&dir.join("pulse.db"))
+        Self::open(&crate::paths::default_db_path()?)
     }
 
     /// 建表（幂等）：schema 为计划书 §2.2 定案。

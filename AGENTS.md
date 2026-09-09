@@ -2,7 +2,7 @@
 
 玻璃质感的工作计时看板：一个大的开始/暂停按钮记录工作时间，连续工作超阈值时声音 + 系统通知提醒休息，三端（Windows / macOS / Linux）通用。总体规划见 `CapsulePulse_plan.md`。
 
-**当前状态**：PL001（玻璃壳与计时闭环，V0.1.0.1）、PL002（存储与统计聚合，V0.1.0.2）、PL003（提醒调度与设置持久化）均已完结——玻璃 UI + 状态机 + SQLite 落库 + 统计行 + 提醒三通道（通知/提示音/文案，降级互不依赖）+ ⚙ 设置持久化，35 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]。下一个大件：托盘常驻/打包分发（PL004 候选），未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
+**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）均已完结——38 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]。下一个大件：托盘常驻/打包分发（PL004 候选），未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
 
 ## 技术栈
 
@@ -11,7 +11,7 @@
 | 框架     | Tauri 2（Rust 后端 + 系统 WebView）                              |
 | 前端 UI  | Vue 3 + TypeScript + Vite（只做展示，业务零含量）                |
 | 核心逻辑 | 纯 Rust（状态机/统计/持久化/提醒调度，cargo test 直测）          |
-| 存储     | rusqlite（SQLite，`~/.capsule-pulse/pulse.db`）                  |
+| 存储     | rusqlite（SQLite，`data/pulse.db`，双落址见目录规划）            |
 | 玻璃效果 | window-vibrancy（macOS vibrancy / Windows acrylic / Linux blur） |
 | 通知提醒 | tauri-plugin-notification + 前端 `<audio>` 提示音                |
 | 常驻     | Tauri 内置 tray API + 全局快捷键                                 |
@@ -35,11 +35,11 @@ npm run build          # 前端构建校验（含 vue-tsc；产物 dist/ 内嵌�
 - **提醒调度**（计划书 §2.3）：阈值可配置（默认 50 分钟，设置界面修改、持久化）；tauri_plugin_notification 系统通知 + 前端 `<audio>` 提示音；通知与声音降级互不依赖
 - **玻璃效果三端**（计划书 §2.4）：macOS `apply_vibrancy(HudWindow)` / Windows `apply_acrylic`（当前实机验证平台）/ Linux `apply_blur` + 半透明妥协；编译期 `#[cfg(target_os)]` 分支互不影响；前端玻璃卡片用 CSS `backdrop-filter` 叠加系统级模糊；macOS/Linux 适配延后至 Windows 版成熟后 [problems#1]
 - **常驻形态**：托盘/菜单栏常驻、关闭最小化到托盘、全局快捷键唤起、后台持续计时
-- **运行时数据**：`~/.capsule-pulse/pulse.db`（用户目录，不入仓库）；备份 = 直接拷 db（计划书 Phase 4）
+- **运行时数据**：config.json 落 `configs/`、pulse.db 落 `data/`——dev=项目根、release=exe 同级（双落址，2026-09-10 热更新定案杜绝机器用户目录）；备份 = 直接拷 configs/ + data/（计划书 Phase 4）
 
 ## 目录规划
 
-（2026-09-08 目录风格改造后实态；根目录分类学 = ui / core / configs / modules，modules 待规模需要再建）
+（2026-09-08 目录风格改造后实态；根目录分类学 = ui / core / configs / data / modules，modules 待规模需要再建）
 
 ```
 core/             # Tauri 2 后端（原框架默认名 src-tauri，整体改名；框架文件须与 Cargo.toml 同住）
@@ -168,7 +168,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 
 ## 素材与环境陷阱
 
-- **运行时数据不入仓库**：`~/.capsule-pulse/`（pulse.db 等）是用户数据；测试用临时 db 一律落 `.temp/` 或系统临时目录，禁止对真实用户数据做测试写入
+- **运行时数据不入仓库**：config.json（configs/）与 pulse.db（data/）是用户运行时数据——dev 落项目根、release 落 exe 同级，均已 gitignore（双落址，2026-09-10 定案）；测试用临时 db 一律落 `.temp/` 或系统临时目录，禁止对真实用户数据做测试写入
 - **玻璃效果平台差异**：macOS 真 vibrancy / Windows Acrylic / Linux 依赖 compositor（计划书 §2.4/§8 风险项）；当前仅 Windows 实机可验——改玻璃相关代码须注明"Windows 实机验证 + macOS/Linux 按分支逻辑推演"，三端实测按计划 Phase 4 排期，不提前宣布跨平台可用
 - **提醒通知三端差异**（计划书 §2.3/§8）：通知与声音可能分别不可用，降级互不依赖；通知/声音相关改动要单独验证降级路径，不能只测正常路径
 - **深浅色主题**：跟随系统（计划书 §4）；硬编码纯色会破坏主题感知，玻璃卡片用半透明 + 系统模糊适配两种主题

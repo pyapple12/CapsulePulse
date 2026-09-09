@@ -1,6 +1,6 @@
 # CapsulePulse — 玻璃质感的工作计时看板
 
-[![Version](https://img.shields.io/badge/Version-0.1.0.5-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.0.6-blue.svg)](core/Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Phase](https://img.shields.io/badge/Phase-PL003_完成-brightgreen.svg)](z.plan.md)
 
@@ -18,14 +18,14 @@
 
 ## 技术栈
 
-| 层   | 选型                                       | 说明                                          |
-| ---- | ------------------------------------------ | --------------------------------------------- |
-| 框架 | Tauri 2（Rust + 系统 WebView）             | 三端玻璃插件成熟、包体小（~10MB）             |
-| 语言 | Rust（后端全部业务逻辑）                   | 学习目标：状态机/SQLite/调度表达自然、可单测  |
-| 前端 | Vue 3 + TypeScript + Vite                  | 与系列一致，只做展示                          |
-| 存储 | rusqlite（SQLite）                         | 零配置本地库，`~/.capsule-pulse/pulse.db`     |
-| 玻璃 | window-vibrancy                            | macOS vibrancy / Windows acrylic / Linux blur |
-| 通知 | tauri-plugin-notification + 前端 `<audio>` | 通知与声音降级互不依赖                        |
+| 层   | 选型                                       | 说明                                                                  |
+| ---- | ------------------------------------------ | --------------------------------------------------------------------- |
+| 框架 | Tauri 2（Rust + 系统 WebView）             | 三端玻璃插件成熟、包体小（~10MB）                                     |
+| 语言 | Rust（后端全部业务逻辑）                   | 学习目标：状态机/SQLite/调度表达自然、可单测                          |
+| 前端 | Vue 3 + TypeScript + Vite                  | 与系列一致，只做展示                                                  |
+| 存储 | rusqlite（SQLite）                         | 零配置本地库，`data/pulse.db`（配置 `configs/config.json`，便携布局） |
+| 玻璃 | window-vibrancy                            | macOS vibrancy / Windows acrylic / Linux blur                         |
+| 通知 | tauri-plugin-notification + 前端 `<audio>` | 通知与声音降级互不依赖                                                |
 
 ## 项目目标（除产品外）
 
@@ -66,7 +66,8 @@ CapsulePulse/
 │       ├── settings.rs   # 提醒设置持久化（JSON 原子写）
 │       └── commands/     # Tauri 命令层（mod / session / stats / reminder 按职责分文件）
 ├── ui/                   # Vue 前端（App + TimerCard / StatsCard / SettingsPanel，types.ts 镜像 DTO）
-├── configs/              # 程序读的固定参数与用户参数（预建占位）
+├── configs/              # 用户参数 config.json（运行时写入，gitignore）+ 固定参数占位
+├── data/                 # 运行时数据 pulse.db（gitignore，运行时自建）
 ├── assets/               # 提示音、图标
 ├── AGENTS.md             # 项目规范（AI 协作必读）
 ├── CapsulePulse_plan.md  # 总体规划（Phase 0-5）
