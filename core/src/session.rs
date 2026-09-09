@@ -152,6 +152,14 @@ impl<C: Clock> WorkSession<C> {
         self.accumulated = Duration::ZERO;
     }
 
+    /// 当前段时长：Running = 本段实时；Paused/Idle 为零（"暂停即重置"提醒语义的取数源）。
+    pub fn segment_secs(&self) -> Duration {
+        match self.state {
+            SessionState::Running { start } => self.clock.now() - start,
+            SessionState::Idle | SessionState::Paused { .. } => Duration::ZERO,
+        }
+    }
+
     /// 累计工作时长：Idle 为零；Running = 已完成段累计 + 本段实时；Paused = 已完成段累计。
     pub fn total(&self) -> Duration {
         match self.state {
@@ -296,6 +304,23 @@ mod tests {
         }
         s.pause().unwrap();
         assert_eq!(s.total(), expect);
+    }
+
+    /// PL003.5：segment_secs——仅 Running 有本段时长，Paused/Idle 为零（暂停即重置取数源）。
+    #[test]
+    fn segment_secs_semantics() {
+        let clock = FakeClock::new();
+        let mut s = WorkSession::new(clock.clone());
+        assert_eq!(s.segment_secs(), Duration::ZERO);
+        s.start().unwrap();
+        clock.advance(secs(10));
+        assert_eq!(s.segment_secs(), secs(10));
+        s.pause().unwrap();
+        assert_eq!(s.segment_secs(), Duration::ZERO);
+        s.resume().unwrap();
+        clock.advance(secs(5));
+        assert_eq!(s.segment_secs(), secs(5));
+        assert_eq!(s.total(), secs(15));
     }
 
     /// reset：任意态回 Idle 清零（UI"重开"路径），重开后先前累计不带入。
