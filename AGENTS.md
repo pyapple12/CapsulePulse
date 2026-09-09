@@ -49,9 +49,11 @@ core/             # Tauri 2 后端（原框架默认名 src-tauri，整体改名
     lib.rs        # 应用装配：玻璃挂载 + 模块注册
     main.rs       # 薄入口（调 capsule_pulse::run()）
     session.rs    # 计时状态机（纯逻辑，可单测；业务纯逻辑平铺于此，禁 import tauri）
-    commands.rs   # Tauri 命令层（PL001 阶段 D）
+    commands/     # Tauri 命令层（PL001 阶段 D；按职责分文件：mod 上下文与共享 / session 会话 / stats 统计 / reminder 副作用与设置）
     storage.rs    # SQLite Repository（PL002）
-    reminder.rs   # 提醒调度（PL003）
+    period.rs     # 统计周期边界纯函数（PL002）
+    reminder.rs   # 提醒评估器（PL003）
+    settings.rs   # 提醒设置持久化（PL003）
 ui/               # Vue 前端（展示层）
   App.vue
   components/

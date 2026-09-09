@@ -56,14 +56,14 @@ pub fn run() {
             settings_path,
         })
         .invoke_handler(tauri::generate_handler![
-            commands::session_start,
-            commands::session_pause,
-            commands::session_resume,
-            commands::session_restart,
-            commands::session_status,
-            commands::session_stats,
-            commands::get_settings,
-            commands::set_settings
+            commands::session::session_start,
+            commands::session::session_pause,
+            commands::session::session_resume,
+            commands::session::session_restart,
+            commands::session::session_status,
+            commands::stats::session_stats,
+            commands::reminder::get_settings,
+            commands::reminder::set_settings
         ])
         .setup(|app| {
             // 玻璃效果挂载：失败严格抛错（setup 错误会上抛阻断启动），不静默降级

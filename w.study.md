@@ -28,7 +28,7 @@ core/               # Tauri 2 后端（版本单一来源 Cargo.toml；原框架
     lib.rs          # 应用装配：Acrylic 挂载 + 模块注册 + 存储/设置初始化
     main.rs         # 薄入口（调 capsule_pulse::run()）
     session.rs      # 计时状态机（已落地）
-    commands.rs     # Tauri 命令层（已落地：八命令转发 + AppContext，T3 无窗口直测）
+    commands/       # Tauri 命令层（已落地：按职责分文件——mod 上下文与共享 / session 会话与提醒评估 / stats 统计 / reminder 副作用与设置，测试随职责分布）
     storage.rs      # SQLite 会话存储（已落地：PL002）
     period.rs       # 统计周期边界纯函数（已落地：PL002）
     reminder.rs     # 提醒评估器（已落地：PL003）
