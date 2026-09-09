@@ -74,6 +74,29 @@ pub enum SessionError {
     NotPaused,
 }
 
+/// 计时切换热键的动作（三态循环：Idle→start / Running→pause / Paused→resume）。
+/// 托盘菜单与全局热键共用的纯逻辑推导，不依赖任何外部状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimerAction {
+    /// 开始新会话。
+    Start,
+    /// 暂停进行中的会话。
+    Pause,
+    /// 继续暂停的会话。
+    Resume,
+}
+
+impl SessionState {
+    /// 本状态下计时切换热键应执行的动作（托盘与全局热键共用）。
+    pub fn toggle_action(&self) -> TimerAction {
+        match self {
+            SessionState::Idle => TimerAction::Start,
+            SessionState::Running { .. } => TimerAction::Pause,
+            SessionState::Paused { .. } => TimerAction::Resume,
+        }
+    }
+}
+
 /// 工作会话：三态状态机 + 可注入时钟。
 /// 内部把"本段起点"与"已完成段累计"分离——`pause()` 因此能返回本段时长（PL002 落库取数源），
 /// 而对外的 `total()`（= 累计 + 本段）与三态枚举形状保持 PL001 语义不变。
@@ -341,5 +364,25 @@ mod tests {
         s.reset();
         s.reset();
         assert_eq!(s.state(), &SessionState::Idle);
+    }
+
+    /// T5：计时切换热键的动作映射——Idle→start / Running→pause / Paused→resume 三态循环。
+    #[test]
+    fn toggle_action_maps_three_states() {
+        assert_eq!(SessionState::Idle.toggle_action(), TimerAction::Start);
+        assert_eq!(
+            SessionState::Running {
+                start: Duration::ZERO
+            }
+            .toggle_action(),
+            TimerAction::Pause
+        );
+        assert_eq!(
+            SessionState::Paused {
+                elapsed: Duration::ZERO
+            }
+            .toggle_action(),
+            TimerAction::Resume
+        );
     }
 }

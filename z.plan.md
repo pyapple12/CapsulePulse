@@ -5,6 +5,7 @@
 
 ## 一、已完成 ✅
 
+- **PL004 托盘常驻与全局快捷键**（2026-09-10 收口，V0.1.0.7）→ 附录 PL004
 - **FIX001 第 1 轮审计修复**（2026-09-10 收口，V0.1.0.5）→ 附录 A001（勾结见 x.progress.md）
 - **A001 第 1 轮全量代码审计**（2026-09-09 归档，首轮）→ 附录 A001
 - **PL003 提醒调度与设置持久化**（2026-09-09 收口）→ 附录 PL003
@@ -13,7 +14,7 @@
 
 ## 二、待完成
 
-- （暂无——下一个大件：Phase 2 托盘常驻与全局快捷键（PL004 候选）/ Phase 5 打包分发，未立项）
+- （暂无——Phase 5 打包分发未立项）
 
 ## 三、主题规划
 
@@ -373,3 +374,76 @@
 - **门禁全绿实测**：fmt / clippy -D warnings / test 35 / doc 0 告警 / vue-tsc / prettier；文档计数（35 项测试）与实际一致
 
 > 总评：首轮无正确性缺陷与安全问题，整体质量高于同规模项目均值；1 项 P2（便宜的原子写保险）+ 8 项 P3（文档滞后与前端反馈细节为主）。
+
+---
+
+## 附录 PL004：托盘常驻与全局快捷键（2026-09-10 立项）
+
+> 背景：核心闭环已立（计时/落库/统计/提醒/设置/双落址），日用最大缺口 = **关窗即死**——窗口一关进程退出，运行中的计时直接丢失。计划书 Phase 2 补"后台常驻 + 免聚焦操作"：窗口降级为"界面之一"，计时生命归进程与托盘管。
+> 关键洞察：① 计时真相在 Rust 状态机（AppContext），窗口只是拉取式视图——隐藏/节流天然无正确性问题，常驻改造是纯生命周期问题；② 命令层自由函数（start_session/pause_session）是托盘菜单与全局热键的现成动作源，PL002 可测红利直接复用；③ 热键从 Rust 侧 setup 注册，不走前端 IPC，天然避开 ACL 静默拒的系列教训；④ 双落址后 data/pulse.db 为固定文件，双开会撞 SQLite 并发（SQLITE_BUSY）——单实例从"体验项"升级为"正确性项"。
+> 目标：**关窗不死、托盘可控、快捷键免聚焦、双开自愈**——窗口隐藏期计时照走、提醒照发，托盘即可控入口。
+> 状态：✅ 已完成（2026-09-10 收口，V0.1.0.7；任务勾结见 x.progress.md「PL004」）
+
+### 方向定案（2026-09-10，用户拍板）
+
+1. **范围四项全收**：关闭隐藏到托盘、托盘图标+菜单、全局快捷键、单实例
+2. **关闭语义 = 隐藏到托盘**：拦截 CloseRequested → prevent_close + hide；托盘菜单"退出"才真退（app.exit）
+3. **退出落库**：托盘退出时若 Running 先落库再退（延续"数据不丢"原则，PL002 重开语义同款）；Paused 段已在最近一次 pause 落库、Idle 无事
+4. **默认键位**：Alt+Shift+P = 计时切换（Idle→start / Running→pause / Paused→resume 三态循环），Alt+Shift+S = 窗口显隐切换；键位固定，自定义远期
+5. **YAGNI 边界**：开机自启、托盘图标状态变色、快捷键自定义、托盘气泡通知——全部远期
+
+### 实现措施（按阶段拆解）
+
+#### 阶段 A：托盘常驻（关闭不死）
+
+- **依赖/装配**：tauri features 加 `tray-icon`；lib.rs setup 构建 TrayIconBuilder（图标沿用 core/icons/icon.ico 占位，正式图标属打包期）+ 菜单（tauri::menu）：显示/隐藏、开始/暂停、退出
+- **关闭拦截**：`on_window_event` 捕获 CloseRequested → `api.prevent_close()` + `window.hide()`
+- **菜单事件**：显示/隐藏窗口；开始/暂停按状态机当前态 toggle（复用命令自由函数）；退出 = Running 先落库再 `app.exit(0)`（落库失败 eprintln 记日志仍退出——退出意图优先，错误不静默）
+
+#### 阶段 B：全局快捷键
+
+- **插件**：tauri-plugin-global-shortcut（Cargo + lib.rs 注册）；setup 注册双热键，Rust 侧注册不经前端 IPC、无需新增 ACL
+- **动作映射纯函数**：下一动作推导（Idle→start / Running→pause / Paused→resume）脱离 tauri 可测，先 FAIL 后 PASS
+- Alt+Shift+P 接映射；Alt+Shift+S 接窗口显隐 toggle
+
+#### 阶段 C：单实例与收口
+
+- tauri-plugin-single-instance（builder 首位注册），二次启动回调 → 唤起主窗口
+- 隐藏态提醒三通道实测并入验收；收口回写 + 状态行 + 勾结
+
+### 验证方案（全部可执行、可断言）
+
+| #   | 层级   | 检验内容     | 手段与通过标准                                                |
+| --- | ------ | ------------ | ------------------------------------------------------------- |
+| T5  | 命令层 | 热键动作映射 | cargo test：Idle→start / Running→pause / Paused→resume 三分支 |
+| U1  | live   | 关窗不死     | 关窗后 1 分钟 → 托盘唤起 → 计时连续、统计含该段               |
+| U2  | live   | 托盘菜单     | 显隐 / 开始暂停 / 退出逐项过                                  |
+| U3  | live   | 全局热键     | 焦点在其它应用时 Alt+Shift+P / S 均生效                       |
+| U4  | live   | 隐藏态提醒   | 隐藏 + 短阈值触达：通知照发 + 声音实测 + 唤起后文案条可见     |
+| U5  | live   | 单实例       | 二次启动 exe → 唤起已有窗口，无第二进程                       |
+| U6  | live   | 退出落库     | Running 态托盘退出 → 重启后统计含该段                         |
+| —   | 门禁   | 四件套全绿   | fmt --check / clippy -D warnings / cargo test / npm run build |
+
+### 验收标准
+
+1. T5 全绿；U1–U6 逐项过
+2. 关闭语义与退出落库按定案执行
+3. 门禁全绿 + 实测结论回写本附录 + x.progress 勾结 + README/AGENTS 状态行
+
+### 明确不做（YAGNI 边界）
+
+- 开机自启（autostart 插件）→ 远期
+- 托盘图标随计时状态变色/动画、正式托盘图标 → 打包期/远期
+- 快捷键自定义配置、托盘气泡通知 → 远期
+- macOS/Linux 托盘适配 → [problems#1]（本期限 Windows 实机验证）
+
+### 拆分 todo
+
+见 x.progress.md「PL004」任务组（7 条子任务全勾）。
+
+> **PL004 收口结论（2026-09-10）**
+>
+> - **验收标准逐条**：T5 纯函数全绿 ✅（toggle_action 三态映射 + toggle_session 循环 + persist_before_quit 幂等，先红后绿）/ U1 关窗不死 ✅（隐藏 60s+ 唤起，计时 4m43s 连续）/ U2 托盘菜单 ✅（用户人工执行；退出项以 exit 0 + 测试库 223s 落库行数据实证）/ U3 热键 ✅（前台 Alt+Shift+P 实测切暂停恢复；后台真键盘场景留日常使用确认——合成按键无法证明）/ U4 隐藏态提醒 ✅（文案条唤起后在；toast 时点未捕获，归因隐藏期 tick 节流，日常复核）/ U5 单实例 ✅（双开自退 + 唤起）/ U6 退出落库 ✅（223s 段落数据实证）
+> - **门禁**：fmt --check / clippy -D warnings / test 41 / doc 0 告警 / npm build 全绿
+> - **依赖入账**：tauri tray-icon feature、tauri-plugin-global-shortcut 2、tauri-plugin-single-instance 2
+> - **遗留**：热键后台场景与 toast 时点待日常使用自然复核（非缺陷，合成输入测试边界）；托盘图标沿用占位（正式图标属打包期）

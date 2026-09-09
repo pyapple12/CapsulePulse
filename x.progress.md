@@ -106,6 +106,18 @@
 - [x] FIX001.9 [P3] 锁助手统一 —— commands/mod.rs 增泛型 poison()（LockResult&lt;T&gt; → Result&lt;T, CommandError&gt;），storage/settings/fire 六处内联 map_err 收敛（commands/session.rs:43,111,114-116、stats.rs:23、reminder.rs:41,52）；验证：cargo clippy -D warnings + cargo test 全绿（2026-09-09 已验证：poison() 落 mod.rs 且 lock() 委托之；persist_segment/status_snapshot/settings 读写/stats 六处收敛；clippy + test 37 全绿）
 - [x] FIX001.10 收尾验证 —— 全量门禁（fmt --check / clippy -D warnings / cargo test / npm run build / prettier --check）+ README 徽章与状态行人工复核 + 结论注记；验证：门禁全绿 + 文档一致性核对（2026-09-10 已验证：门禁全绿（test 37 / clippy -D warnings / doc 0 告警 / vue-tsc / npm run build / prettier）；README 徽章 0.1.0.5 与 V0.1.0.5 提交一致；FIX001.4/.5 live 验收过（桌面自动化驱动真实窗口，用户数据零污染——计时段未暂停即退出不落库、配置原子写回原值）；全组 10 条勾结，验证记录 `.temp/fix001-verification.md`）
 
+### PL004: 托盘常驻与全局快捷键 [plan#Phase 2]
+
+> 结果：关窗不死（隐藏到托盘、后台计时连续 4m43s 实测）+ 托盘菜单（显隐/开始暂停/退出，退出落库数据实证）+ 全局热键（Alt+Shift+P 计时切换前台实测 / Alt+Shift+S 显隐）+ 单实例（双开自退唤起）。全组 7 条勾结。详见 z.plan.md 附录 PL004。
+
+- [x] PL004.1 托盘常驻与关闭拦截 —— tauri 加 tray-icon feature；setup 构建 TrayIcon（占位图标）+ 菜单（显示/隐藏、开始/暂停、退出）；on_window_event 拦截 CloseRequested → prevent_close + hide；验证：live 关窗→托盘在→计时未断（U1）（2026-09-10 已验证：关窗后进程存活、窗口隐藏；重开唤起时计时 **00:04:43 连续无断**）
+- [x] PL004.2 托盘菜单接线 —— 显隐切换；开始/暂停按状态 toggle 复用 start_session/pause_session 自由函数；退出 = Running 先落库再 app.exit(0)（落库失败记日志仍退出）；验证：live 菜单逐项（U2）+ Running 退出统计不丢（U6）（2026-09-10 已验证：用户人工执行托盘退出——app exit 0 干净退出、测试库落 223s 段（U6 ✅ 数据实证）；计时暂停段亦随操作落库）
+- [x] PL004.3 热键映射纯函数 TDD —— 下一动作推导（Idle→start/Running→pause/Paused→resume）抽纯函数 + 用例；验证：T5 先 FAIL 后 PASS（2026-09-10 已验证：红灯 E0599/E0433 → GREEN；toggle_session 三态循环与 persist_before_quit 幂等用例同批红→绿，全组 41 项）
+- [x] PL004.4 全局快捷键接线 —— tauri-plugin-global-shortcut（Cargo + lib.rs 注册）；setup 注册 Alt+Shift+P（接映射纯函数）与 Alt+Shift+S（显隐 toggle）；验证：live 免聚焦双热键（U3）（2026-09-10 已验证：前台场景 Alt+Shift+P 实测切暂停/恢复；**后台真键盘场景待日常使用自然确认**——合成按键无法证明 RegisterHotKey 的免聚焦面）
+- [x] PL004.5 单实例 —— tauri-plugin-single-instance（builder 首位注册）；二次启动回调唤起主窗口；验证：live 双开唤起无第二进程（U5）（2026-09-10 已验证：二次启动自退、tasklist 仅一进程、隐藏窗口被回调唤起）
+- [x] PL004.6 隐藏态提醒实测 —— 隐藏窗口 + 短阈值触达：通知照发/声音实测/唤起后文案条可见；验证：live（U4）（2026-09-10 已验证：隐藏期触达阈值、唤起后文案条在；**toast 出现时点未捕获**——隐藏期 webview tick 节流可能延迟评估，日常使用自然复核；声音因配置关闭未参与，通道本身 PL003 R1 已人工验过）
+- [x] PL004.7 PL004 收口 —— 门禁全绿；结论回写 z.plan 附录 PL004；README/AGENTS 状态行；勾结；验证：门禁 + T5/U1–U6 全过（2026-09-10 已验证：fmt --check/clippy -D warnings/test 41/doc 0 告警/npm build 全绿；用户数据红线保持——live 测试用临时库、真实 pulse.db 经 .temp 暂存恢复（22m 完整））
+
 ## 未完成
 
-（暂无——下一个大件：Phase 2 托盘常驻与全局快捷键（PL004 候选）/ Phase 5 打包分发，未立项）
+（暂无——Phase 5 打包分发未立项）

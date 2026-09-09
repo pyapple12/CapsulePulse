@@ -9,7 +9,7 @@ use tauri::{AppHandle, State};
 
 use super::{lock, poison, wall_now_secs, AppContext, CommandError};
 use crate::reminder::ReminderConfig;
-use crate::session::{Clock, SessionState};
+use crate::session::{Clock, SessionState, TimerAction};
 use crate::storage::Storage;
 
 /// status 命令返回体：前端展示所需会话快照（serde 结构单一来源，TS 侧镜像）。
@@ -66,6 +66,25 @@ fn pause_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
 fn resume_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     lock(ctx)?.resume()?;
     clear_reminder_fire(ctx)?;
+    Ok(())
+}
+
+/// 计时切换（托盘菜单与全局热键共用）：按当前态执行 start/pause/resume，返回实际执行的动作。
+pub(crate) fn toggle_session<C: Clock>(ctx: &AppContext<C>) -> Result<TimerAction, CommandError> {
+    let action = lock(ctx)?.state().toggle_action();
+    match action {
+        TimerAction::Start => start_session(ctx)?,
+        TimerAction::Pause => pause_session(ctx)?,
+        TimerAction::Resume => resume_session(ctx)?,
+    }
+    Ok(action)
+}
+
+/// 退出收尾：Running 态先落库（数据不丢定案），Paused 段已在最近一次 pause 落库、Idle 无事。
+pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    if matches!(lock(ctx)?.state(), SessionState::Running { .. }) {
+        pause_session(ctx)?;
+    }
     Ok(())
 }
 
@@ -298,5 +317,37 @@ mod tests {
             panic!("污染 fire 锁");
         }));
         assert!(matches!(pause_session(&ctx), Err(CommandError::Poisoned)));
+    }
+
+    /// 托盘/热键共用的计时切换：Idle→start、Running→pause、Paused→resume 三态循环。
+    #[test]
+    fn toggle_session_cycles_three_states() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Start);
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+        clock.advance(secs(10));
+        assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Pause);
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Resume);
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+    }
+
+    /// 退出收尾：Running 态先落库（数据不丢）；Paused 段已在 pause 落库、二次收尾幂等；Idle 无事。
+    #[test]
+    fn persist_before_quit_persists_running_segment() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        // Idle：无事
+        persist_before_quit(&ctx).unwrap();
+        assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 0);
+        // Running：先落库再收尾
+        start_session(&ctx).unwrap();
+        clock.advance(secs(30));
+        persist_before_quit(&ctx).unwrap();
+        assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 30);
+        // 收尾后为 Paused，二次收尾幂等（不重复落库）
+        persist_before_quit(&ctx).unwrap();
+        assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 30);
     }
 }

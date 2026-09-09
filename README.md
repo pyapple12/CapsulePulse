@@ -1,6 +1,6 @@
 # CapsulePulse — 玻璃质感的工作计时看板
 
-[![Version](https://img.shields.io/badge/Version-0.1.0.6-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.0.7-blue.svg)](core/Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Phase](https://img.shields.io/badge/Phase-PL003_完成-brightgreen.svg)](z.plan.md)
 
@@ -14,7 +14,7 @@
 | 玻璃 UI  | macOS vibrancy / Windows Acrylic / Linux blur，透明无边框 |
 | 常驻后台 | 托盘常驻、全局快捷键唤起、关闭最小化到托盘                |
 
-> 当前状态：**PL001 + PL002 + PL003 已完成**（V0.1.0.5）——玻璃壳与最小计时闭环 + 存储与统计聚合 + 提醒调度与设置持久化：触达阈值 → 系统通知 + 提示音 + 文案条（5 分钟重发，降级互不依赖），⚙ 面板设置即时生效；37 项测试全绿。下一个大件（托盘常驻/打包分发）未立项。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
+> 当前状态：**PL001–PL004 已完成**（V0.1.0.7）——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻（关闭隐藏到托盘、托盘菜单、Alt+Shift+P/S 全局热键、单实例、退出落库）；41 项测试全绿。下一个大件：打包分发，未立项。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
 
 ## 技术栈
 

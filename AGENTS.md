@@ -2,7 +2,7 @@
 
 玻璃质感的工作计时看板：一个大的开始/暂停按钮记录工作时间，连续工作超阈值时声音 + 系统通知提醒休息，三端（Windows / macOS / Linux）通用。总体规划见 `CapsulePulse_plan.md`。
 
-**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）均已完结——38 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]。下一个大件：托盘常驻/打包分发（PL004 候选），未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
+**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）、PL004 托盘常驻与全局快捷键（V0.1.0.7：关闭隐藏到托盘 + 托盘菜单 + Alt+Shift+P/S 全局热键 + 单实例 + 退出落库）均已完结——41 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]。打包分发未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
 
 ## 技术栈
 
