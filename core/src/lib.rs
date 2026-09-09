@@ -1,6 +1,6 @@
 //! CapsulePulse 应用库：业务模块与 Tauri 应用装配。
 //! main.rs 只做薄入口（调 [`run`]）；模块逻辑收在本库——lib 形态下 pub 项即公开 API，
-//! 也是 `cargo test` 与后续命令层（commands.rs）的承载处。
+//! 也是 `cargo test` 与命令层（commands/ 目录，按职责分文件）的承载处。
 //! 层边界：业务纯逻辑（session.rs 等）平铺于本 src 下且禁 import tauri，
 //! 装配层只在本文件——纯逻辑可脱离窗口 cargo test 直测。
 //! 玻璃效果：Windows 实机走 Acrylic（PL001 阶段 B 已判定通过）；macOS/Linux 延后（y.problems.md #1）。

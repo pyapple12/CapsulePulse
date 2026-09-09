@@ -61,10 +61,19 @@ impl ReminderSettings {
         }
     }
 
-    /// 保存到 JSON 文件（保存前校验，写入即持久化）。
+    /// 保存到 JSON 文件（保存前校验；先写同目录临时文件再 rename 原子落盘——中途失败不损坏既有配置）。
     pub fn save(&self, path: &Path) -> Result<(), SettingsError> {
         self.validate()?;
-        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
+        let tmp = path.with_extension("tmp");
+        let result = std::fs::write(&tmp, serde_json::to_string_pretty(self)?)
+            .and_then(|()| std::fs::rename(&tmp, path));
+        if result.is_err() {
+            // 清理临时文件；清理失败仅残留 .tmp（下次保存覆盖），主错误照常上抛
+            if let Err(cleanup) = std::fs::remove_file(&tmp) {
+                eprintln!("设置临时文件清理失败：{cleanup}");
+            }
+        }
+        result?;
         Ok(())
     }
 }
@@ -142,6 +151,27 @@ mod tests {
             bad.save(&p),
             Err(SettingsError::InvalidThreshold(0))
         ));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// 原子落盘：save 后无残留 .tmp 且往返一致（中断安全由"临时文件 + rename"语义保证）。
+    #[test]
+    fn atomic_save_roundtrip_without_temp_leftover() {
+        let p = temp_path("atomic");
+        let s = ReminderSettings {
+            threshold_min: 42,
+            sound_enabled: true,
+            notify_enabled: false,
+        };
+        s.save(&p).unwrap();
+        assert_eq!(ReminderSettings::load(&p).unwrap(), s);
+        let leftovers: Vec<String> = std::fs::read_dir(p.parent().unwrap())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "残留临时文件：{leftovers:?}");
         let _ = std::fs::remove_file(&p);
     }
 

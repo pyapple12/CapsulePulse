@@ -6,24 +6,12 @@ import { listen } from "@tauri-apps/api/event";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import StatsCard from "./components/StatsCard.vue";
 import TimerCard from "./components/TimerCard.vue";
+// IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
+import type { ReminderSettings, SessionStats } from "./types";
 // 提示音经 vite 打包（哈希进 dist）——不用 public/ 目录（publicDir 默认在根，曾有 404 教训）
 import chimeUrl from "../assets/house_alarm-clock_loud.mp3";
 
 // 玻璃卡片 + 拖动区沿用 PL001 阶段 B 判定形态；计时在 TimerCard，统计聚合/提醒判定在 Rust
-
-/** stats 命令返回体（镜像 Rust 侧 SessionStats serde 结构，单一来源在 Rust） */
-interface SessionStats {
-  today_secs: number;
-  week_secs: number;
-  all_secs: number;
-}
-
-/** get/set_settings 命令返回体（镜像 Rust 侧 ReminderSettings serde 结构） */
-interface ReminderSettings {
-  threshold_min: number;
-  sound_enabled: boolean;
-  notify_enabled: boolean;
-}
 
 // 统计为低频数据：挂载 + 动作后（TimerCard changed 事件）+ 30s 兜底，不进 100ms tick
 const STATS_TICK_MS = 30_000;
@@ -34,6 +22,10 @@ const allSecs = ref(0);
 const settings = ref<ReminderSettings | null>(null);
 const panelVisible = ref(false);
 const reminderVisible = ref(false);
+// 触发阈值取自 reminder-due 事件 payload（Rust 侧评估时的真实设置），不做前端默认值兜底
+const reminderThreshold = ref(0);
+// 设置保存失败的可见反馈（面板内展示，成功或重开面板时清除）
+const saveError = ref("");
 const chimeRef = ref<HTMLAudioElement | null>(null);
 let statsTimer: number | undefined;
 let unlistenReminder: (() => void) | undefined;
@@ -69,14 +61,25 @@ function playChime(): void {
   });
 }
 
-/** 保存设置（Rust 侧校验 + 持久化 + 即时生效），成功后收起面板 */
+/** 保存设置（Rust 侧校验 + 持久化 + 即时生效）：成功收起面板；失败错误态传入面板可见反馈 */
 async function onSaveSettings(s: ReminderSettings): Promise<void> {
   try {
     await invoke("set_settings", { settings: s });
     settings.value = s;
+    saveError.value = "";
     panelVisible.value = false;
   } catch (err) {
+    // CommandError 经 IPC 序列化为文案字符串；面板内展示 + console 留痕
+    saveError.value = `设置保存失败：${String(err)}`;
     console.error("set_settings 调用失败", err);
+  }
+}
+
+/** ⚙ 开合面板；打开时清掉上一轮保存失败的错误提示 */
+function togglePanel(): void {
+  panelVisible.value = !panelVisible.value;
+  if (panelVisible.value) {
+    saveError.value = "";
   }
 }
 
@@ -90,8 +93,9 @@ onMounted(() => {
   void refreshStats();
   void refreshSettings();
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
-  // reminder-due：Rust 侧评估触发（payload = 阈值分钟数）；注册失败必须可见（ACL/事件教训）
-  listen("reminder-due", () => {
+  // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
+  listen<number>("reminder-due", (event) => {
+    reminderThreshold.value = event.payload;
     reminderVisible.value = true;
     playChime();
   })
@@ -113,16 +117,19 @@ onUnmounted(() => {
   <main class="glass-card" data-tauri-drag-region>
     <div class="topbar">
       <h1 class="title" data-tauri-drag-region>CapsulePulse</h1>
-      <button class="gear" type="button" title="设置" @click="panelVisible = !panelVisible">
-        ⚙
-      </button>
+      <button class="gear" type="button" title="设置" @click="togglePanel">⚙</button>
     </div>
     <p v-if="reminderVisible" class="reminder">
-      已连续工作 {{ settings?.threshold_min ?? 50 }} 分钟，休息一下吧
+      已连续工作 {{ reminderThreshold }} 分钟，休息一下吧
     </p>
     <StatsCard :today-secs="todaySecs" :week-secs="weekSecs" :all-secs="allSecs" />
     <TimerCard @changed="onTimerChanged" />
-    <SettingsPanel v-if="panelVisible && settings" :settings="settings" @save="onSaveSettings" />
+    <SettingsPanel
+      v-if="panelVisible && settings"
+      :settings="settings"
+      :error="saveError"
+      @save="onSaveSettings"
+    />
   </main>
   <audio ref="chimeRef" :src="chimeUrl" preload="auto"></audio>
 </template>

@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use super::{lock, wall_now_secs, AppContext, CommandError};
+use super::{lock, poison, wall_now_secs, AppContext, CommandError};
 use crate::reminder::ReminderConfig;
 use crate::session::{Clock, SessionState};
 use crate::storage::Storage;
@@ -38,38 +38,34 @@ fn persist_segment(storage: &Mutex<Storage>, segment: Duration) -> Result<(), Co
         return Ok(());
     }
     let started_at = wall_now_secs()? - segment.as_secs() as i64;
-    storage
-        .lock()
-        .map_err(|_| CommandError::Poisoned)?
-        .add_session(started_at, segment.as_secs() as i64)?;
+    poison(storage.lock())?.add_session(started_at, segment.as_secs() as i64)?;
     Ok(())
 }
 
-/// 清除提醒触发状态（暂停/开始/重开 = 新段；"暂停即重置"定案的接线点）。
-fn clear_reminder_fire<C: Clock>(ctx: &AppContext<C>) {
-    if let Ok(mut fire) = ctx.fire.lock() {
-        fire.clear();
-    }
+/// 清除提醒触发状态（暂停/开始/重开 = 新段；"暂停即重置"定案的接线点）；锁中毒严格报错。
+fn clear_reminder_fire<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    poison(ctx.fire.lock())?.clear();
+    Ok(())
 }
 
 /// 开始新会话：仅 Idle 合法；提醒触发状态清零（新段）。
 fn start_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     lock(ctx)?.start()?;
-    clear_reminder_fire(ctx);
+    clear_reminder_fire(ctx)?;
     Ok(())
 }
 
 /// 暂停：本段时长 > 0 则落库；提醒触发状态清零（暂停即重置，用户定案）。
 fn pause_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     let segment = lock(ctx)?.pause()?;
-    clear_reminder_fire(ctx);
+    clear_reminder_fire(ctx)?;
     persist_segment(&ctx.storage, segment)
 }
 
 /// 继续：仅 Paused 合法，累计被继承；提醒触发状态清零（新段起算）。
 fn resume_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     lock(ctx)?.resume()?;
-    clear_reminder_fire(ctx);
+    clear_reminder_fire(ctx)?;
     Ok(())
 }
 
@@ -108,13 +104,9 @@ fn status_snapshot<C: Clock>(
     };
     let segment = lock(ctx)?.segment_secs();
     let decision = {
-        let settings = ctx.settings.lock().map_err(|_| CommandError::Poisoned)?;
+        let settings = poison(ctx.settings.lock())?;
         let config = ReminderConfig::from_minutes(settings.threshold_min);
-        let should = ctx
-            .fire
-            .lock()
-            .map_err(|_| CommandError::Poisoned)?
-            .evaluate(segment, &config);
+        let should = poison(ctx.fire.lock())?.evaluate(segment, &config);
         ReminderDecision {
             fire: should,
             threshold_min: settings.threshold_min,
@@ -293,5 +285,18 @@ mod tests {
         let (_, d) = status_snapshot(&ctx).unwrap();
         assert!(d.fire);
         assert_eq!(d.threshold_min, 50);
+    }
+
+    /// 锁中毒严格报错：fire 锁被污染后动作命令传播 Poisoned，而非静默跳过清零（回归锚）。
+    #[test]
+    fn poisoned_fire_lock_is_strict_error() {
+        let ctx = ctx(FakeClock::new());
+        start_session(&ctx).unwrap();
+        // 持锁 panic 污染 fire 锁（catch_unwind 隔离，仅取中毒副作用）
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.fire.lock().unwrap();
+            panic!("污染 fire 锁");
+        }));
+        assert!(matches!(pause_session(&ctx), Err(CommandError::Poisoned)));
     }
 }

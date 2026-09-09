@@ -2,11 +2,8 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
-/** status 命令返回体（镜像 Rust 侧 SessionStatus serde 结构，单一来源在 Rust） */
-interface SessionStatus {
-  state: "idle" | "running" | "paused";
-  total_ms: number;
-}
+// IPC DTO 镜像类型统一在 types.ts（单一来源 = Rust serde 结构）
+import type { SessionStatus } from "../types";
 
 // 轮询周期 100ms：十分秒位（HH:MM:SS.d）每 0.1s 跳动需要 ≤100ms 拉取；
 // 10 次/s 本地 IPC 开销可忽略。（演进：1s→250ms 修秒进位迟到，2026-09-08 用户定案改十分秒位后→100ms）

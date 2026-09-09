@@ -1,8 +1,8 @@
 # CapsulePulse — 玻璃质感的工作计时看板
 
-[![Version](https://img.shields.io/badge/Version-0.1.0.1-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.0.5-blue.svg)](core/Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
-[![Phase](https://img.shields.io/badge/Phase-PL001_完成-brightgreen.svg)](z.plan.md)
+[![Phase](https://img.shields.io/badge/Phase-PL003_完成-brightgreen.svg)](z.plan.md)
 
 极简的工作计时看板：一个大的开始/暂停按钮记录工作时间，连续工作超阈值时声音 + 系统通知提醒休息。三端（Windows / macOS / Linux）通用。
 
@@ -14,7 +14,7 @@
 | 玻璃 UI  | macOS vibrancy / Windows Acrylic / Linux blur，透明无边框 |
 | 常驻后台 | 托盘常驻、全局快捷键唤起、关闭最小化到托盘                |
 
-> 当前状态：**PL001 + PL002 + PL003 已完成**（V0.1.0.2）——玻璃壳与最小计时闭环 + 存储与统计聚合 + 提醒调度与设置持久化：触达阈值 → 系统通知 + 提示音 + 文案条（5 分钟重发，降级互不依赖），⚙ 面板设置即时生效；35 项测试全绿。下一个大件（托盘常驻/打包分发）未立项。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
+> 当前状态：**PL001 + PL002 + PL003 已完成**（V0.1.0.5）——玻璃壳与最小计时闭环 + 存储与统计聚合 + 提醒调度与设置持久化：触达阈值 → 系统通知 + 提示音 + 文案条（5 分钟重发，降级互不依赖），⚙ 面板设置即时生效；37 项测试全绿。下一个大件（托盘常驻/打包分发）未立项。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
 
 ## 技术栈
 
@@ -32,18 +32,18 @@
 - **学习 Rust**：全部业务逻辑放 Rust 侧（状态机、统计、持久化、提醒调度），前端只做展示——Rust 占比高、可单测
 - 系列定位：CapsuleRetro（包装游戏）→ CapsulePlan（落定计划）→ **CapsulePulse（记录时间）**——系列中第一个以 Rust 为主的项目
 
-## 快速开始（规划，代码落地后生效）
+## 快速开始
 
 ### 环境要求
 
-- Rust toolchain + Tauri CLI + Node.js（26+）
+- Rust toolchain + Node.js（26+）；Tauri CLI 经 npm devDep `@tauri-apps/cli` 随 `npm install` 就位
 - Windows 10/11（当前开发与验证实机；macOS/Linux 适配延后至 Windows 版成熟后 [problems#1]）
 
 ### 构建与测试
 
 ```bash
 cargo test        # Rust 层全量测试（状态机/存储/提醒，不依赖 UI）
-cargo tauri dev   # 开发运行（透明玻璃窗口 + 前端热更）
+npm run tauri dev # 开发运行（透明玻璃窗口；前端产物内嵌自包含，改前端后先 npm run build）
 npm run build     # 前端构建校验（含 vue-tsc）
 ```
 
@@ -51,7 +51,7 @@ npm run build     # 前端构建校验（含 vue-tsc）
 
 计时状态机（Idle/Running/Paused）、SQLite 统计聚合、提醒调度全部在 Rust 侧实现并可用 `cargo test` 直测；Vue 前端只做展示与命令转发——业务逻辑零含量。
 
-## 项目结构（规划态）
+## 项目结构
 
 ```
 CapsulePulse/
@@ -59,15 +59,19 @@ CapsulePulse/
 │   └── src/
 │       ├── lib.rs        # 应用装配：玻璃挂载 + 模块注册
 │       ├── main.rs       # 薄入口
-│       ├── session.rs    # 计时状态机（纯 Rust 可单测；将来 commands/storage/reminder 平铺于此）
-│       └── …             # commands.rs 命令层 / storage.rs SQLite / reminder.rs 提醒（随阶段落地）
-├── ui/                   # Vue 前端（TimerCard / StatsCard）
+│       ├── session.rs    # 计时状态机（纯 Rust 可单测）
+│       ├── storage.rs    # SQLite Repository（今日/本周/累计聚合）
+│       ├── period.rs     # 统计周期边界纯函数（本地零点/周一零点）
+│       ├── reminder.rs   # 提醒评估器（阈值触发 + 5 分钟重发）
+│       ├── settings.rs   # 提醒设置持久化（JSON 原子写）
+│       └── commands/     # Tauri 命令层（mod / session / stats / reminder 按职责分文件）
+├── ui/                   # Vue 前端（App + TimerCard / StatsCard / SettingsPanel，types.ts 镜像 DTO）
 ├── configs/              # 程序读的固定参数与用户参数（预建占位）
 ├── assets/               # 提示音、图标
 ├── AGENTS.md             # 项目规范（AI 协作必读）
 ├── CapsulePulse_plan.md  # 总体规划（Phase 0-5）
-├── z.plan.md             # 方案与审计归档（初始骨架）
-├── x.progress.md         # 任务清单（初始骨架）
+├── z.plan.md             # 方案与审计归档
+├── x.progress.md         # 任务清单
 ├── y.problems.md / w.study.md
 └── .agents/skills/       # 项目自建 skill（audit-project / audit-report / progress-task）
 ```
@@ -76,7 +80,7 @@ CapsulePulse/
 
 - `CapsulePulse_plan.md`：总体规划与 Phase 划分、时间预估、风险对策
 - `AGENTS.md`：工程原则、代码规范、提交规范（AI 协作必读）
-- `z.plan.md`：专题方案与审计归档（初始骨架）
-- `x.progress.md`：任务清单与进度（初始骨架）
-- `y.problems.md`：问题与远期改进备忘录（初始骨架）
-- `w.study.md`：项目分析报告（初始骨架）
+- `z.plan.md`：专题方案与审计归档
+- `x.progress.md`：任务清单与进度
+- `y.problems.md`：问题与远期改进备忘录
+- `w.study.md`：项目分析报告

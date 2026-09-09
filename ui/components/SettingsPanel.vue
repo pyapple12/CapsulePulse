@@ -1,14 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-/** 提醒设置（镜像 Rust 侧 ReminderSettings serde 结构，单一来源在 Rust） */
-interface ReminderSettings {
-  threshold_min: number;
-  sound_enabled: boolean;
-  notify_enabled: boolean;
-}
+// IPC DTO 镜像类型统一在 types.ts（单一来源 = Rust serde 结构）
+import type { ReminderSettings } from "../types";
 
-const props = defineProps<{ settings: ReminderSettings }>();
+const props = defineProps<{ settings: ReminderSettings; error?: string }>();
 const emit = defineEmits<{ save: [s: ReminderSettings] }>();
 
 // 面板打开时快照一份本地草稿，保存时才上抛（未保存修改不污染父态）
@@ -34,6 +30,7 @@ function onSave(): void {
       <input v-model="draft.notify_enabled" type="checkbox" />
     </label>
     <button class="save" type="button" @click="onSave">保存</button>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
   </section>
 </template>
 
@@ -80,5 +77,18 @@ function onSave(): void {
 
 .save:hover {
   background: rgba(0, 122, 255, 0.9);
+}
+
+/* 保存失败提示：双主题可读的错误红 */
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  .error {
+    color: #ff8a80;
+  }
 }
 </style>

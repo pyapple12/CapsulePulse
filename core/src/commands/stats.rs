@@ -4,7 +4,7 @@ use chrono::Local;
 use serde::Serialize;
 use tauri::State;
 
-use super::{AppContext, CommandError};
+use super::{poison, AppContext, CommandError};
 use crate::session::Clock;
 
 /// stats 命令返回体：三值统计（秒；serde 结构单一来源，TS 侧镜像）。
@@ -20,7 +20,7 @@ pub struct SessionStats {
 
 /// 统计快照：三值聚合（统计按当前真实本地时间定界）。
 fn stats_snapshot<C: Clock>(ctx: &AppContext<C>) -> Result<SessionStats, CommandError> {
-    let storage = ctx.storage.lock().map_err(|_| CommandError::Poisoned)?;
+    let storage = poison(ctx.storage.lock())?;
     let now = Local::now();
     Ok(SessionStats {
         today_secs: storage.today_total(&now)?,

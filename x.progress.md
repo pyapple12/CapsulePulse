@@ -33,4 +33,19 @@
 
 ## 未完成
 
-（暂无——下一个大件：Phase 2 托盘常驻与全局快捷键（PL004 候选）/ Phase 5 打包分发，未立项）
+### FIX001: 第1轮审计修复 [audit#A001]
+
+> 范围：A001 首轮全量审计产出——1 项 P2（配置原子写）+ 8 项 P3（错误策略合规 / 文档同步 / 前端反馈与类型收敛 / 后端微清理）；8 项观察项均维持观察并定案 z.plan.md 第四节（永久 3 + 条件 5），不入本组。方案见 z.plan.md 附录 A001。
+
+- [x] FIX001.1 [P2] settings 原子写 —— settings.rs:67 save 改"同目录临时文件写入 + std::fs::rename"原子落盘（失败清理临时文件）；验证：新增用例（保存后文件完整可 load 往返）+ cargo test 全绿（2026-09-09 已验证：save 改"同目录 config.tmp 写入 + rename 替换"，失败路径清理 .tmp 且主错误照常上抛；新增 atomic_save_roundtrip_without_temp_leftover 用例——往返一致 + 目录无 .tmp 残留；中断安全由 rename 的 OS 原子语义保证，不做故障注入断言）
+- [x] FIX001.2 [P3] clear_reminder_fire 锁中毒归位 —— commands/session.rs:49-53 由 if let Ok 静默吞改为严格报错（经 FIX001.9 poison 助手或就地 map_err，容错白名单不新增）；验证：cargo clippy -D warnings + cargo test 全绿（2026-09-09 已验证：TDD 红→绿——poisoned_fire_lock_is_strict_error 先 FAIL（旧实现静默吞返回 Ok）后 PASS（Err(Poisoned)）；取严格报错路线，start/pause/resume 三调用点 `?` 传播，白名单未新增）
+- [x] FIX001.3 [P3] README 同步实态 —— 徽章 Version 0.1.0.4、Phase=PL003 完成、状态行版本（README.md:3,5,17）；快速开始改 `npm run tauri dev` 并删"前端热更"失实描述（README.md:44-48）；结构树 commands/ 目录 + period/settings/SettingsPanel（README.md:58-73）；验证：人工核对徽章与 Cargo.toml/提交历史一致（2026-09-09 已验证：五处编辑——徽章 Version 0.1.0.5 / Phase PL003 完成 / 状态行（V0.1.0.5）+ 测试数 35→37 如实 / 快速开始 `npm run tauri dev` + 删"前端热更" / 结构树 commands/ 目录 + period/settings/types.ts + 去"规划态/初始骨架"标注；**徽章定 0.1.0.5 偏离任务文本的 0.1.0.4**——本次修复提交为 fix 类型 R+1，徽章随提交自洽；前三段与 Cargo.toml 0.1.0 一致已核对）
+- [ ] FIX001.4 [P3] reminder-due payload 直读 —— App.vue:94 listen 回调读 payload（阈值分钟数）直显文案条，删 App.vue:121 的 `?? 50` 前端兜底；验证：vue-tsc 绿 + live 改阈值后文案条数字与设置一致（2026-09-09：代码完成——listen&lt;number&gt; 读 event.payload 直显 reminderThreshold，`?? 50` 兜底已删；vue-tsc + npm build 绿；live 数字一致性待用户验收）
+- [ ] FIX001.5 [P3] 设置保存失败可见反馈 —— SettingsPanel 增加 error 提示行，App.vue:73-81 onSaveSettings catch 置 error 态传入面板展示；验证：vue-tsc 绿 + live 输入 0/清空保存可见报错不静默（2026-09-09：代码完成——saveError 态 + 面板 error 提示行（role=alert、双主题错误红），成功/重开面板时清除；vue-tsc + npm build 绿；live 报错可见性待用户验收）
+- [x] FIX001.6 [P3] TS 镜像类型收敛 —— 新建 ui/types.ts 集中 SessionStats/ReminderSettings/SessionStatus 三接口，App.vue/TimerCard.vue/SettingsPanel.vue 改 import；验证：vue-tsc + npm run build 绿（2026-09-09 已验证：types.ts 集中三接口并注明"Rust serde 为契约单一来源"；三组件删本地声明改 import type；vue-tsc + npm run build 绿）
+- [x] FIX001.7 [P3] lib.rs 模块注释同步 —— lib.rs:3 "后续命令层（commands.rs）"改为 commands/ 目录实态；验证：cargo doc --no-deps 0 告警（2026-09-09 已验证：注释改为"命令层（commands/ 目录，按职责分文件）"；cargo doc 0 告警）
+- [x] FIX001.8 [P3] send_notification 返回值清理 —— commands/reminder.rs:27 返回值 bool 改 `()`（失败信息已在 eprintln 日志）；验证：cargo clippy -D warnings 绿（2026-09-09 已验证：改 if let Err + eprintln 记日志（与容错白名单"错误落日志"一致），无返回值；clippy -D warnings 绿）
+- [x] FIX001.9 [P3] 锁助手统一 —— commands/mod.rs 增泛型 poison()（LockResult&lt;T&gt; → Result&lt;T, CommandError&gt;），storage/settings/fire 六处内联 map_err 收敛（commands/session.rs:43,111,114-116、stats.rs:23、reminder.rs:41,52）；验证：cargo clippy -D warnings + cargo test 全绿（2026-09-09 已验证：poison() 落 mod.rs 且 lock() 委托之；persist_segment/status_snapshot/settings 读写/stats 六处收敛；clippy + test 37 全绿）
+- [ ] FIX001.10 收尾验证 —— 全量门禁（fmt --check / clippy -D warnings / cargo test / npm run build / prettier --check）+ README 徽章与状态行人工复核 + 结论注记；验证：门禁全绿 + 文档一致性核对（2026-09-09：门禁已全绿（test 37 / clippy / doc 0 告警 / vue-tsc / npm build / prettier），验证记录 `.temp/fix001-verification.md`；待 FIX001.4/.5 live 验收后随勾结收口）
+
+（下一个大件：Phase 2 托盘常驻与全局快捷键（PL004 候选）/ Phase 5 打包分发，未立项——排在 FIX001 之后）

@@ -10,7 +10,7 @@ pub mod session;
 pub mod stats;
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LockResult, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -69,9 +69,14 @@ impl Serialize for CommandError {
     }
 }
 
+/// 锁结果统一收敛：Mutex 中毒（此前持锁线程 panic）严格报错（Poisoned），不静默续行。
+fn poison<T>(lock: LockResult<T>) -> Result<T, CommandError> {
+    lock.map_err(|_| CommandError::Poisoned)
+}
+
 /// 取会话锁：中毒严格报错（Poisoned），不 unwrap 不吞错。
 fn lock<C: Clock>(ctx: &AppContext<C>) -> Result<MutexGuard<'_, WorkSession<C>>, CommandError> {
-    ctx.session.lock().map_err(|_| CommandError::Poisoned)
+    poison(ctx.session.lock())
 }
 
 /// 当前 Unix 秒（落库时间戳来源；时钟异常严格报错）。
