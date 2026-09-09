@@ -14,6 +14,8 @@ const emit = defineEmits<{ changed: [] }>();
 
 const state = ref<"idle" | "running" | "paused">("idle");
 const totalMs = ref(0);
+// 在岗态（PL005）：未上班时计时按钮置灰禁用——后端门禁之外的前端面
+const onDuty = ref(false);
 let timer: number | undefined;
 
 /** 拉取会话快照（tick 定案：前端 setInterval 拉取，Rust 不推送） */
@@ -22,6 +24,7 @@ async function refresh(): Promise<void> {
     const snapshot = await invoke<SessionStatus>("session_status");
     state.value = snapshot.state;
     totalMs.value = snapshot.total_ms;
+    onDuty.value = snapshot.on_duty;
   } catch (err) {
     console.error("session_status 调用失败", err);
   }
@@ -68,6 +71,7 @@ onUnmounted(() => {
         v-if="state === 'idle'"
         class="btn primary"
         type="button"
+        :disabled="!onDuty"
         @click="act('session_start')"
       >
         开始
@@ -81,8 +85,17 @@ onUnmounted(() => {
         暂停
       </button>
       <template v-else>
-        <button class="btn primary" type="button" @click="act('session_resume')">继续</button>
-        <button class="btn" type="button" @click="act('session_restart')">重开</button>
+        <button
+          class="btn primary"
+          type="button"
+          :disabled="!onDuty"
+          @click="act('session_resume')"
+        >
+          继续
+        </button>
+        <button class="btn" type="button" :disabled="!onDuty" @click="act('session_restart')">
+          重开
+        </button>
       </template>
     </div>
   </section>
@@ -136,5 +149,18 @@ onUnmounted(() => {
 
 .btn.primary:hover {
   background: rgba(0, 122, 255, 0.9);
+}
+
+/* 未上班置灰（PL005）：不可点击且视觉降级，双主题下保持可辨识 */
+.btn:disabled {
+  background: rgba(128, 128, 128, 0.15);
+  border-color: rgba(128, 128, 128, 0.25);
+  color: inherit;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.primary:disabled {
+  background: rgba(0, 122, 255, 0.3);
 }
 </style>

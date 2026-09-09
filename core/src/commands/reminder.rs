@@ -80,6 +80,7 @@ mod tests {
             threshold_min: 30,
             sound_enabled: false,
             notify_enabled: true,
+            workday_auto_out_hours: 9,
         };
         set_settings_inner(&ctx, &s).unwrap();
         assert_eq!(get_settings_inner(&ctx).unwrap(), s);
@@ -91,6 +92,7 @@ mod tests {
             threshold_min: 0,
             sound_enabled: true,
             notify_enabled: true,
+            workday_auto_out_hours: 8,
         };
         assert!(matches!(
             set_settings_inner(&ctx, &bad),

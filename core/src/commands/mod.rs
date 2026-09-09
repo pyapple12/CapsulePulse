@@ -8,6 +8,7 @@
 pub mod reminder;
 pub mod session;
 pub mod stats;
+pub mod workday;
 
 use std::path::PathBuf;
 use std::sync::{LockResult, Mutex, MutexGuard};
@@ -20,11 +21,15 @@ use crate::reminder::ReminderFire;
 use crate::session::{Clock, RealClock, WorkSession};
 use crate::settings::ReminderSettings;
 use crate::storage::Storage;
+use crate::workday::WorkdayState;
 
-/// 应用级共享上下文：会话状态机 + 存储 + 提醒设置与触发状态。
+/// 应用级共享上下文：工作日状态 + 会话状态机 + 存储 + 提醒设置与触发状态。
 /// lib.rs 经 `.manage()` 注册，各命令经 State 访问。泛型默认 [`RealClock`]；测试注入假钟。
-/// rusqlite Connection 非 Sync，故 Storage 亦入 Mutex；锁序恒 session → storage/settings/fire 单向。
+/// rusqlite Connection 非 Sync，故 Storage 亦入 Mutex；
+/// 锁序恒 workday → session → storage/settings/fire 单向（禁反向嵌套，防死锁）。
 pub struct AppContext<C: Clock = RealClock> {
+    /// 工作日状态机（Off/OnDuty，PL005）。
+    pub workday: Mutex<WorkdayState>,
     /// 会话状态机。
     pub session: Mutex<WorkSession<C>>,
     /// 会话存储（运行时文件库，测试内存库）。
@@ -43,6 +48,9 @@ pub enum CommandError {
     /// 状态机拒绝（非法状态操作），文案沿用 session.rs。
     #[error(transparent)]
     Session(#[from] crate::session::SessionError),
+    /// 工作日状态机拒绝（重复上班/未上班下班），文案沿用 workday.rs。
+    #[error(transparent)]
+    Workday(#[from] crate::workday::WorkdayError),
     /// 存储层错误（落库/聚合失败）。
     #[error(transparent)]
     Storage(#[from] crate::storage::StorageError),
@@ -99,6 +107,7 @@ pub(crate) mod test_support {
 
     use super::*;
     use crate::settings::ReminderSettings;
+    use crate::workday::WorkdayState;
 
     /// 手拨假钟：clone 与 AppContext 共享同一时间轴。
     #[derive(Clone)]
@@ -127,12 +136,18 @@ pub(crate) mod test_support {
     /// 内存库 + 假钟的测试上下文。
     pub fn ctx(clock: FakeClock) -> AppContext<FakeClock> {
         AppContext {
+            workday: Mutex::new(WorkdayState::Off),
             session: Mutex::new(WorkSession::new(clock)),
             storage: Mutex::new(Storage::open_in_memory().unwrap()),
             settings: Mutex::new(ReminderSettings::default()),
             fire: Mutex::new(ReminderFire::default()),
             settings_path: temp_settings_path("ctx"),
         }
+    }
+
+    /// 测试前置：以上班时刻 1_000 打卡（计时门禁通过的前提；既有用例的时间锚不变）。
+    pub fn begin_duty<C: Clock>(ctx: &AppContext<C>) {
+        super::workday::clock_in_inner(ctx, 1_000).unwrap();
     }
 
     /// 秒数简写。

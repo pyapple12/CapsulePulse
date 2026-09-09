@@ -19,6 +19,10 @@ pub struct ReminderSettings {
     /// 系统通知开关。
     #[serde(default = "default_true")]
     pub notify_enabled: bool,
+    /// 自动下班时长（小时，1–72）：在岗满 N 小时未手动下班则按"上班 + N"回填下班
+    /// （PL005.4；serde default 使旧 config.json 无此字段时自动补 8，首启即开箱可用）。
+    #[serde(default = "default_auto_out_hours")]
+    pub workday_auto_out_hours: u32,
 }
 
 fn default_threshold() -> u32 {
@@ -29,21 +33,31 @@ fn default_true() -> bool {
     true
 }
 
+fn default_auto_out_hours() -> u32 {
+    8
+}
+
 impl Default for ReminderSettings {
     fn default() -> Self {
         Self {
             threshold_min: default_threshold(),
             sound_enabled: default_true(),
             notify_enabled: default_true(),
+            workday_auto_out_hours: default_auto_out_hours(),
         }
     }
 }
 
 impl ReminderSettings {
-    /// 校验：阈值须在 1–240 分钟内。
+    /// 校验：提醒阈值 1–240 分钟；自动下班 1–72 小时。
     pub fn validate(&self) -> Result<(), SettingsError> {
         if !(1..=240).contains(&self.threshold_min) {
             return Err(SettingsError::InvalidThreshold(self.threshold_min));
+        }
+        if !(1..=72).contains(&self.workday_auto_out_hours) {
+            return Err(SettingsError::InvalidAutoOutHours(
+                self.workday_auto_out_hours,
+            ));
         }
         Ok(())
     }
@@ -90,6 +104,9 @@ pub enum SettingsError {
     /// 提醒阈值越界（合法范围 1–240 分钟）。
     #[error("提醒阈值非法：{0} 分钟（应为 1–240）")]
     InvalidThreshold(u32),
+    /// 自动下班小时数越界（合法范围 1–72 小时）。
+    #[error("自动下班小时数非法：{0}（应为 1–72）")]
+    InvalidAutoOutHours(u32),
 }
 
 #[cfg(test)]
@@ -115,6 +132,55 @@ mod tests {
         assert_eq!(s, ReminderSettings::default());
         assert_eq!(s.threshold_min, 50);
         assert!(s.sound_enabled && s.notify_enabled);
+        assert_eq!(s.workday_auto_out_hours, 8);
+    }
+
+    /// PL005.4 旧配置兼容：config.json 缺 workday_auto_out_hours 字段 → serde default 补 8。
+    #[test]
+    fn missing_auto_hours_field_defaults_to_eight() {
+        let p = temp_path("legacy");
+        std::fs::write(
+            &p,
+            r#"{"threshold_min":30,"sound_enabled":true,"notify_enabled":false}"#,
+        )
+        .unwrap();
+        let s = ReminderSettings::load(&p).unwrap();
+        assert_eq!(s.threshold_min, 30, "既有字段照常读入");
+        assert_eq!(s.workday_auto_out_hours, 8);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// 自动下班小时数越界（0 / 73）保存与载入均拒绝（合法 1–72）。
+    #[test]
+    fn auto_hours_out_of_range_rejected() {
+        let p = temp_path("auto-range");
+        let bad = ReminderSettings {
+            threshold_min: 50,
+            sound_enabled: true,
+            notify_enabled: true,
+            workday_auto_out_hours: 0,
+        };
+        assert!(matches!(
+            bad.save(&p),
+            Err(SettingsError::InvalidAutoOutHours(0))
+        ));
+        let bad = ReminderSettings {
+            threshold_min: 50,
+            sound_enabled: true,
+            notify_enabled: true,
+            workday_auto_out_hours: 73,
+        };
+        assert!(matches!(
+            bad.save(&p),
+            Err(SettingsError::InvalidAutoOutHours(73))
+        ));
+        std::fs::write(
+            &p,
+            r#"{"threshold_min":50,"sound_enabled":true,"notify_enabled":true,"workday_auto_out_hours":0}"#,
+        )
+        .unwrap();
+        assert!(ReminderSettings::load(&p).is_err());
+        let _ = std::fs::remove_file(&p);
     }
 
     /// save → load 往返一致；非法阈值保存被拒。
@@ -125,6 +191,7 @@ mod tests {
             threshold_min: 30,
             sound_enabled: false,
             notify_enabled: true,
+            workday_auto_out_hours: 9,
         };
         s.save(&p).unwrap();
         assert_eq!(ReminderSettings::load(&p).unwrap(), s);
@@ -133,6 +200,7 @@ mod tests {
             threshold_min: 0,
             sound_enabled: true,
             notify_enabled: true,
+            workday_auto_out_hours: 8,
         };
         assert!(matches!(
             bad.save(&p),
@@ -141,7 +209,8 @@ mod tests {
         let _ = std::fs::remove_file(&p);
     }
 
-    /// 原子落盘：save 后无残留 .tmp 且往返一致（中断安全由"临时文件 + rename"语义保证）。
+    /// 原子落盘：save 后自身无残留 .tmp 且往返一致（中断安全由"临时文件 + rename"语义保证）。
+    /// 只断言本用例自己的 tmp——测试并行共享同一临时目录，扫描全目录会撞见邻用例的瞬时 tmp。
     #[test]
     fn atomic_save_roundtrip_without_temp_leftover() {
         let p = temp_path("atomic");
@@ -149,16 +218,12 @@ mod tests {
             threshold_min: 42,
             sound_enabled: true,
             notify_enabled: false,
+            workday_auto_out_hours: 6,
         };
         s.save(&p).unwrap();
         assert_eq!(ReminderSettings::load(&p).unwrap(), s);
-        let leftovers: Vec<String> = std::fs::read_dir(p.parent().unwrap())
-            .unwrap()
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.ends_with(".tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "残留临时文件：{leftovers:?}");
+        let leftover = p.with_extension("tmp");
+        assert!(!leftover.exists(), "残留临时文件：{}", leftover.display());
         let _ = std::fs::remove_file(&p);
     }
 

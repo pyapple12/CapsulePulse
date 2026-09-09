@@ -118,6 +118,17 @@
 - [x] PL004.6 隐藏态提醒实测 —— 隐藏窗口 + 短阈值触达：通知照发/声音实测/唤起后文案条可见；验证：live（U4）（2026-09-10 已验证：隐藏期触达阈值、唤起后文案条在；**toast 出现时点未捕获**——隐藏期 webview tick 节流可能延迟评估，日常使用自然复核；声音因配置关闭未参与，通道本身 PL003 R1 已人工验过）
 - [x] PL004.7 PL004 收口 —— 门禁全绿；结论回写 z.plan 附录 PL004；README/AGENTS 状态行；勾结；验证：门禁 + T5/U1–U6 全过（2026-09-10 已验证：fmt --check/clippy -D warnings/test 41/doc 0 告警/npm build 全绿；用户数据红线保持——live 测试用临时库、真实 pulse.db 经 .temp 暂存恢复（22m 完整））
 
+- [x] PL005.1 数据层两表 —— storage.rs init() 追加 workdays(id/clock_in_at/clock_out_at 可空=在岗中) 与 events(id/at/kind) 两表（CREATE TABLE IF NOT EXISTS 幂等追加）；新增方法：workday_open(clock_in_at)→id、workday_close(id, clock_out_at)、workday_latest()→Option<(id, in, out)>（启动恢复用）、insert_event(at, kind)、events_between(start, end)；验证：内存库往返/latest 语义/events_between 边界用例（2026-09-10 已验证：红灯 E0599 → 6 用例绿；half-open [start,end) 定界、未知 kind UnknownEventKind 严格报错、关行缺行 WorkdayMissing、文件库三表往返；真实旧库首启幂等补表实测）
+- [x] PL005.2 workday.rs 状态机 —— WorkdayState（Off / OnDuty{clock_in_at, id}）+ clock_in/clock_out 转移（重复上班、未上班下班 → WorkdayError 严格报错）；EventKind 枚举（clock_in/clock_out/auto_clock_out/segment_start/segment_end）+ as_str/parse 供存储序列化；from_latest 启动恢复判定；auto_out_due 回填时刻纯函数；验证：W2 用例先 FAIL 后 PASS（非法转移报错 + 正常流转）（2026-09-10 已验证：红灯 E0433 → 绿；OnDuty 增携带库行 id 属实现细则扩展——下班关行的行句柄随态流转免二次查询）
+- [x] PL005.3 事件归约纯函数 —— reduce_day(events, day_start, day_end, now) → DaySummary{在岗起止、duty/work/rest 秒、blocks: Vec<{start, end, Work|Rest}>}；规则：duty 窗口 = clock_in → clock_out（未下班 = min(now, day_end)），孤儿 clock_out/segment_end（前日班跨入）自 day_start 起算，区块全部裁剪到 [day_start, day_end)，零长窗口丢弃；验证：W1 先 FAIL 后 PASS（2026-09-10 已验证：11 用例绿——连续无休息/空隙休息块/多段交替/未下班闭 now/跨零点按日切分两日总账不重不漏/自动下班回填裁剪/空日/零长班/无计时段全休息/一日多班）
+- [x] PL005.4 settings 扩展 —— ReminderSettings 加 workday_auto_out_hours: u32（serde default = 8，旧 config.json 无字段自动补默认），validate 范围 1–72（InvalidAutoOutHours）；SettingsPanel 加"自动下班（小时）"number 行，types.ts 同步字段；验证：旧配置兼容用例（无字段读入 → 8）+ vue-tsc（2026-09-10 已验证：missing-field/越界 0 与 73/roundtrip 三用例绿 + 前端 build 绿）
+- [x] PL005.5 命令接线 —— 新增 commands/workday.rs：clock_in（Workday 转移 + workday_open + clock_in 事件；会话复位 Idle=新一天从零）/clock_out（Running 先 pause_session 落库 + segment_end 事件，再 workday_close + clock_out 事件，最后会话复位；auto 时 at 取上班 + N 小时回填；库写入先行、状态转移殿后，中途失败可重试）/day_detail（events_between + reduce_day → DTO，跨夜在岗自 clock_in 取事件）；AppContext 加 workday 成员（锁序 workday → session → storage/settings/fire 单向），lib.rs 启动时经 workday_latest 恢复在岗；自动下班 try_auto_clock_out 挂 session_status 评估口（now ≥ 上班 + N → 回填时刻 clock_out 并发 workday-auto-out 事件）；段事件留痕收口于 start/resume（segment_start）与 pause（segment_end）；未上班 start/restart 严格拒绝（前后端双保险后端面）；验证：W4 用例 + live（2026-09-10 已验证：7 命令用例 + 3 门禁/留痕用例绿；测试事故自愈 1 起——测试内持 storage 锁再调 event_kinds 自锁死锁，改作用域后绿）
+- [x] PL005.6 打卡 UI —— App.vue 计时器上方加上班 pill（OnDuty 期间内凹按压态样式）+ ConfirmModal.vue 玻璃确认框（上班"开始一天工作吗"/下班"结束一天工作吗"）；未上班时 TimerCard 按钮 disabled 置灰（Rust 侧 start 亦严格拒绝，前后端双保险）；监听 workday-auto-out 事件 → 文案条"已于 XX:XX 自动下班"；验证：live 按压态/确认框/置灰联动/自动下班文案（2026-09-10 已验证：U1–U3 + U5 文案条全过，见 .temp/pl005-verification.md）
+- [x] PL005.7 统计视图 —— App.vue 双标签切换（计时｜统计，双方 v-show 保持计时组件存活不重启 tick——TimerCard 的 100ms tick 是提醒/自动下班评估口）；新增 StatsView.vue：前后日箭头 + day_detail 拉取 + 时间图谱条（blocks 按宽度占比，工作亮蓝/休息暗灰，纯 CSS）+ 在岗/工作/休息三值行 + 段明细列表（起止 HH:MM + 时长 + 类型）；types.ts 增 DaySummary/DayBlock DTO；验证：live 图谱与三值 + 前后日翻看（2026-09-10 已验证：U4 全过——图谱/三值/明细/箭头禁用联动）
+- [x] PL005.8 PL005 收口 —— 边界实测（重启恢复在岗/自动下班回填/跨夜悬置）+ 门禁全绿（fmt --check/clippy -D warnings/test/npm build/prettier）+ 结论回写 z.plan 附录 PL005 + README/AGENTS 状态行 + 勾结；验证：W1–W4/U 全过 + 门禁（2026-09-10 已验证：77 测试全绿 + 门禁 0 告警；live U1–U6 + 老库迁移过；跨夜悬置经 W1 注入时间用例覆盖（23:00→次日 07:00 两日切分总账不重不漏），真实等待不做；真实用户数据备份/恢复完好，详见 .temp/pl005-verification.md）
+
 ## 未完成
 
-（暂无——Phase 5 打包分发未立项）
+- （暂无）
+
+（后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）

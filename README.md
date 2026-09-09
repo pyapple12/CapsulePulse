@@ -1,20 +1,21 @@
 # CapsulePulse — 玻璃质感的工作计时看板
 
-[![Version](https://img.shields.io/badge/Version-0.1.0.7-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.0.8-blue.svg)](core/Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
-[![Phase](https://img.shields.io/badge/Phase-PL003_完成-brightgreen.svg)](z.plan.md)
+[![Phase](https://img.shields.io/badge/Phase-PL005_完成-brightgreen.svg)](z.plan.md)
 
-极简的工作计时看板：一个大的开始/暂停按钮记录工作时间，连续工作超阈值时声音 + 系统通知提醒休息。三端（Windows / macOS / Linux）通用。
+极简的工作计时看板：上班/下班打卡开启一天，班内计时 = 工作、空隙 = 休息，下班出在岗/工作/休息三值与时间图谱；连续工作超阈值时声音 + 系统通知提醒休息。三端（Windows / macOS / Linux）通用。
 
-| 卖点     | 说明                                                      |
-| -------- | --------------------------------------------------------- |
-| 极简计时 | 一个大按钮，开始/暂停即全部交互                           |
-| 时长统计 | 今日/本周/累计纯时长聚合，v1 不做标签/项目                |
-| 休息提醒 | 连续工作达阈值（默认 50 分钟，可配置）→ 声音 + 系统通知   |
-| 玻璃 UI  | macOS vibrancy / Windows Acrylic / Linux blur，透明无边框 |
-| 常驻后台 | 托盘常驻、全局快捷键唤起、关闭最小化到托盘                |
+| 卖点     | 说明                                                                     |
+| -------- | ------------------------------------------------------------------------ |
+| 打卡出勤 | 上班/下班打卡（双向确认框），未上班禁用计时，重启恢复在岗                |
+| 班内计时 | 一个大按钮，计时 = 工作、空隙 = 休息；自动下班（默认 8h 可调，回填记账） |
+| 时长统计 | 今日/本周/累计自然日口径 + 统计视图按打卡区间呈现三值与时间图谱          |
+| 休息提醒 | 连续工作达阈值（默认 50 分钟，可配置）→ 声音 + 系统通知                  |
+| 玻璃 UI  | macOS vibrancy / Windows Acrylic / Linux blur，透明无边框                |
+| 常驻后台 | 托盘常驻、全局快捷键唤起、关闭最小化到托盘                               |
 
-> 当前状态：**PL001–PL004 已完成**（V0.1.0.7）——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻（关闭隐藏到托盘、托盘菜单、Alt+Shift+P/S 全局热键、单实例、退出落库）；41 项测试全绿。下一个大件：打包分发，未立项。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
+> 当前状态：**PL001–PL005 已完成**（V0.1.0.8）——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻 + 工作日/打卡模型与统计视图（workdays/events 两表、事件归约、自动下班回填、时间图谱）；77 项测试全绿。下一个大件：打包分发，未立项。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
 
 ## 技术栈
 
@@ -60,17 +61,18 @@ CapsulePulse/
 │       ├── lib.rs        # 应用装配：玻璃挂载 + 模块注册
 │       ├── main.rs       # 薄入口
 │       ├── session.rs    # 计时状态机（纯 Rust 可单测）
-│       ├── storage.rs    # SQLite Repository（今日/本周/累计聚合）
+│       ├── workday.rs    # 工作日状态机 + 事件归约（打卡/图谱纯逻辑，可单测）
+│       ├── storage.rs    # SQLite Repository（sessions/workdays/events 三表聚合）
 │       ├── period.rs     # 统计周期边界纯函数（本地零点/周一零点）
 │       ├── reminder.rs   # 提醒评估器（阈值触发 + 5 分钟重发）
 │       ├── settings.rs   # 提醒设置持久化（JSON 原子写）
-│       └── commands/     # Tauri 命令层（mod / session / stats / reminder 按职责分文件）
-├── ui/                   # Vue 前端（App + TimerCard / StatsCard / SettingsPanel，types.ts 镜像 DTO）
+│       └── commands/     # Tauri 命令层（mod / session / stats / reminder / workday 按职责分文件）
+├── ui/                   # Vue 前端（App + TimerCard / StatsCard / StatsView / ConfirmModal / SettingsPanel，types.ts 镜像 DTO）
 ├── configs/              # 用户参数 config.json（运行时写入，gitignore）+ 固定参数占位
 ├── data/                 # 运行时数据 pulse.db（gitignore，运行时自建）
 ├── assets/               # 提示音、图标
 ├── AGENTS.md             # 项目规范（AI 协作必读）
-├── CapsulePulse_plan.md  # 总体规划（Phase 0-5）
+├── CapsulePulse_plan.md  # 总体规划（Phase 0-6）
 ├── z.plan.md             # 方案与审计归档
 ├── x.progress.md         # 任务清单
 ├── y.problems.md / w.study.md

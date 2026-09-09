@@ -22,6 +22,16 @@ function onSave(): void {
       <input v-model.number="draft.threshold_min" type="number" min="1" max="240" step="1" />
     </label>
     <label class="row">
+      <span>自动下班（小时）</span>
+      <input
+        v-model.number="draft.workday_auto_out_hours"
+        type="number"
+        min="1"
+        max="72"
+        step="1"
+      />
+    </label>
+    <label class="row">
       <span>提示音</span>
       <input v-model="draft.sound_enabled" type="checkbox" />
     </label>

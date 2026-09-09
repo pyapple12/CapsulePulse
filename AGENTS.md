@@ -1,8 +1,8 @@
 # CapsulePulse — Agent Guide
 
-玻璃质感的工作计时看板：一个大的开始/暂停按钮记录工作时间，连续工作超阈值时声音 + 系统通知提醒休息，三端（Windows / macOS / Linux）通用。总体规划见 `CapsulePulse_plan.md`。
+玻璃质感的工作计时看板：上班/下班打卡开启一天，班内计时 = 工作、空隙 = 休息，下班出在岗/工作/休息三值与时间图谱；连续工作超阈值时声音 + 系统通知提醒休息，三端（Windows / macOS / Linux）通用。总体规划见 `CapsulePulse_plan.md`。
 
-**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）、PL004 托盘常驻与全局快捷键（V0.1.0.7：关闭隐藏到托盘 + 托盘菜单 + Alt+Shift+P/S 全局热键 + 单实例 + 退出落库）均已完结——41 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]。打包分发未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
+**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）、PL004 托盘常驻与全局快捷键（V0.1.0.7：关闭隐藏到托盘 + 托盘菜单 + Alt+Shift+P/S 全局热键 + 单实例 + 退出落库）、PL005 工作日/打卡模型与统计视图（V0.1.0.8：workdays/events 两表 + 打卡双向确认框 + 未上班禁用计时 + 重启恢复在岗 + 自动下班回填记账 + 统计视图双标签/时间图谱/三值）均已完结——77 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]，自动下班文案条启动竞态窗口 [problems#4]。打包分发未立项（下一个大件）。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
 
 ## 技术栈
 
@@ -32,6 +32,7 @@ npm run build          # 前端构建校验（含 vue-tsc；产物 dist/ 内嵌�
 - **业务逻辑全在 Rust 侧**（项目学习目标，也是架构基线）：计时状态机、统计聚合、持久化、提醒调度全部放 core/src，前端只做展示与命令转发——禁止把业务逻辑写进 Vue 组件
 - **计时状态机纯 Rust 可单测**（计划书 §2.1）：`Idle / Running { start } / Paused { elapsed }` 三态 + start/pause/resume/total() 四操作，无外部依赖；时间源可注入，跨零点/跨周边界用注入时间测试，禁止 sleep 真实等待
 - **会话落库时机 = 暂停时**（计划书 §2.2 定案）：崩溃最多丢当前段；单表 sessions(started_at, seconds)，v1 只做今日/本周/累计 SUM 聚合
+- **工作日/打卡双口径**（PL005 定案）：统计行"今日/本周/累计"走 sessions 自然日口径不动；工作日三值（在岗/工作/休息）与时间图谱走 workdays/events 打卡区间口径，两口径并存不混算；自动下班按"上班 + N"回填记账（发现可迟到、账目准时）；段起止事件收口于 start/resume/pause（按下时间点留痕）；锁序恒 workday → session → storage/settings/fire 单向禁反向嵌套
 - **提醒调度**（计划书 §2.3）：阈值可配置（默认 50 分钟，设置界面修改、持久化）；tauri_plugin_notification 系统通知 + 前端 `<audio>` 提示音；通知与声音降级互不依赖
 - **玻璃效果三端**（计划书 §2.4）：macOS `apply_vibrancy(HudWindow)` / Windows `apply_acrylic`（当前实机验证平台）/ Linux `apply_blur` + 半透明妥协；编译期 `#[cfg(target_os)]` 分支互不影响；前端玻璃卡片用 CSS `backdrop-filter` 叠加系统级模糊；macOS/Linux 适配延后至 Windows 版成熟后 [problems#1]
 - **常驻形态**：托盘/菜单栏常驻、关闭最小化到托盘、全局快捷键唤起、后台持续计时
@@ -49,22 +50,32 @@ core/             # Tauri 2 后端（原框架默认名 src-tauri，整体改名
     lib.rs        # 应用装配：玻璃挂载 + 模块注册
     main.rs       # 薄入口（调 capsule_pulse::run()）
     session.rs    # 计时状态机（纯逻辑，可单测；业务纯逻辑平铺于此，禁 import tauri）
-    commands/     # Tauri 命令层（PL001 阶段 D；按职责分文件：mod 上下文与共享 / session 会话 / stats 统计 / reminder 副作用与设置）
-    storage.rs    # SQLite Repository（PL002）
+    workday.rs    # 工作日状态机 + 事件归约 reduce_day（PL005；打卡/图谱纯逻辑，注入时间可单测）
+    commands/     # Tauri 命令层（PL001 阶段 D；按职责分文件：mod 上下文与共享 / session 会话 / stats 统计 / reminder 副作用与设置 / workday 打卡与单日明细）
+    storage.rs    # SQLite Repository（PL002；PL005 起 sessions + workdays + events 三表）
     period.rs     # 统计周期边界纯函数（PL002）
     reminder.rs   # 提醒评估器（PL003）
-    settings.rs   # 提醒设置持久化（PL003）
+    settings.rs   # 提醒设置持久化（PL003；PL005 增自动下班小时数字段）
 ui/               # Vue 前端（展示层）
   App.vue
   components/
-    TimerCard.vue # 大计时器 + 开始/暂停按钮
+    TimerCard.vue # 大计时器 + 开始/暂停按钮（未上班置灰）
     StatsCard.vue # 今日/本周统计
+    StatsView.vue # 统计视图：时间图谱 + 三值 + 段明细 + 前后日翻看（PL005）
+    ConfirmModal.vue # 玻璃确认框（打卡双向确认，PL005）
 configs/          # 程序读的固定参数与用户参数（预建占位，首个实体文件出现于设置持久化落地时）
 assets/           # 提示音、图标
 .agents/skills/   # 项目自建 skill（audit-project / audit-report / progress-task）
 .temp/            # 临时脚本与文件（gitignore）；探针、验证记录放这里
 y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增；任务清单以 [problems#N] 引用）
 ```
+
+## 任务清单纪律（x.progress.md，2026-09-10 定案）
+
+- **条目做法必须写到文件/函数级**：`—— 做法` 部分要指明改哪个文件、哪个函数/模块、新增什么结构/命令/表、怎么改（细到可照做）；禁止一句话概括后只留验证方式（2026-09-10 PL005 初版条目因做法缩略被退回重写，此为先例）
+- **验证方式必须可执行、可断言**：写明用例名/命令/live 步骤；TDD 任务先写红灯用例再实现
+- **已完成组全量保留、只增不删**；两个区内部从上到下 = 从旧到新，新组追加在区末尾（详见 x.progress.md 头部规则）
+- 立项方案（z.plan 附录）的实现措施与任务条目同标准：一律拆到文件/函数级
 
 ## 自动格式化与静态检查（硬性工作流，替代 LSP）
 

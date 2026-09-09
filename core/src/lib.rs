@@ -11,6 +11,7 @@ pub mod reminder;
 pub mod session;
 pub mod settings;
 pub mod storage;
+pub mod workday;
 
 mod paths;
 
@@ -28,6 +29,7 @@ use crate::reminder::ReminderFire;
 use crate::session::WorkSession;
 use crate::settings::ReminderSettings;
 use crate::storage::Storage;
+use crate::workday::WorkdayState;
 
 /// 显示主窗口并聚焦（还原最小化；失败逐项记日志，不中断流程）。
 fn show_main_window(app: &AppHandle) {
@@ -162,6 +164,17 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    // 工作日恢复（PL005）：上次 clock_out 为空 = 在岗中，重启即回到在岗态
+    let workday = match storage.workday_latest() {
+        Ok(latest) => WorkdayState::from_latest(latest),
+        Err(err) => {
+            eprintln!("工作日状态恢复失败：{err}");
+            std::process::exit(1);
+        }
+    };
+    if workday.is_on_duty() {
+        eprintln!("已恢复在岗状态（上次下班打卡缺失）");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 二次启动：唤起已有主窗口（单实例，防双开写同一 data/pulse.db）
@@ -170,6 +183,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppContext {
+            workday: Mutex::new(workday),
             session: Mutex::new(WorkSession::default()),
             storage: Mutex::new(storage),
             settings: Mutex::new(settings),
@@ -184,7 +198,10 @@ pub fn run() {
             commands::session::session_status,
             commands::stats::session_stats,
             commands::reminder::get_settings,
-            commands::reminder::set_settings
+            commands::reminder::set_settings,
+            commands::workday::clock_in,
+            commands::workday::clock_out,
+            commands::workday::day_detail
         ])
         .on_window_event(|window, event| {
             // 关闭语义 = 隐藏到托盘（PL004 定案）；退出走托盘菜单
