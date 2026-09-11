@@ -111,6 +111,14 @@ function onTimerChanged(): void {
   reminderVisible.value = false;
 }
 
+/** 切到统计页：单日明细即时重拉（动作后的快照可能已是旧账，如开始计时当秒的工作块） */
+function onTabClick(tab: "timer" | "stats"): void {
+  activeTab.value = tab;
+  if (tab === "stats") {
+    statsRefreshKey.value++;
+  }
+}
+
 /** 打卡 pill 点击 → 弹对应方向确认框（双向确认，不直接执行） */
 function onPillClick(): void {
   confirmMode.value = onDuty.value ? "out" : "in";
@@ -193,11 +201,14 @@ onUnmounted(() => {
       已连续工作 {{ reminderThreshold }} 分钟，休息一下吧
     </p>
     <p v-if="autoOutVisible" class="reminder auto-out">已于 {{ hhmm(autoOutAt) }} 自动下班</p>
-    <div class="tabs">
+    <div class="tabs" role="tablist">
+      <span class="tabs-thumb" :class="{ right: activeTab === 'stats' }" aria-hidden="true"></span>
       <button
         class="tab"
         :class="{ active: activeTab === 'timer' }"
         type="button"
+        role="tab"
+        :aria-selected="activeTab === 'timer'"
         @click="activeTab = 'timer'"
       >
         计时
@@ -206,7 +217,9 @@ onUnmounted(() => {
         class="tab"
         :class="{ active: activeTab === 'stats' }"
         type="button"
-        @click="activeTab = 'stats'"
+        role="tab"
+        :aria-selected="activeTab === 'stats'"
+        @click="onTabClick('stats')"
       >
         统计
       </button>
@@ -220,12 +233,13 @@ onUnmounted(() => {
       <TimerCard @changed="onTimerChanged" />
     </div>
     <StatsView v-show="activeTab === 'stats'" :refresh-key="statsRefreshKey" />
-    <SettingsPanel
-      v-if="panelVisible && settings"
-      :settings="settings"
-      :error="saveError"
-      @save="onSaveSettings"
-    />
+    <Transition name="sheet">
+      <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
+        <section class="floating-sheet" role="dialog" aria-label="设置">
+          <SettingsPanel :settings="settings" :error="saveError" @save="onSaveSettings" />
+        </section>
+      </div>
+    </Transition>
   </main>
   <ConfirmModal
     :open="confirmMode != null"
@@ -237,8 +251,99 @@ onUnmounted(() => {
   <audio ref="chimeRef" :src="chimeUrl" preload="auto"></audio>
 </template>
 
+<style>
+/* —— PL006 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份 —— */
+:root {
+  --accent: #0071e3;
+  --ink: #1d1d1f;
+  --ink-2: color-mix(in srgb, #1d1d1f 55%, transparent);
+  --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-blur: blur(28px) saturate(1.6);
+  --glass-highlight:
+    inset 0 1px rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.16);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --r-card: 20px;
+  --r-ctrl: 13px;
+  --r-pill: 999px;
+  --r-sheet: 24px;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #0a84ff;
+    --ink: #f5f5f7;
+    --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
+    --glass-bg: rgba(30, 30, 30, 0.45);
+    --glass-highlight:
+      inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  }
+}
+
+/* —— 浮层共用形态：确认框与设置面板同规格（居中玻璃片 + 压暗遮罩）—— */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(6px);
+}
+
+.floating-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 240px;
+  padding: 20px;
+  border-radius: var(--r-sheet);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-highlight), var(--shadow-float);
+  color: var(--ink);
+  user-select: none;
+}
+
+.sheet-enter-active,
+.sheet-leave-active {
+  transition: opacity 0.15s ease;
+}
+
+.sheet-enter-active .floating-sheet {
+  transition: transform 0.15s var(--ease-spring);
+}
+
+.sheet-enter-from,
+.sheet-leave-to {
+  opacity: 0;
+}
+
+.sheet-enter-from .floating-sheet {
+  transform: scale(0.92);
+}
+
+@media (prefers-color-scheme: dark) {
+  .overlay {
+    background: rgba(0, 0, 0, 0.35);
+  }
+}
+
+/* 动效退避：系统开启"减弱动态效果"时全部退化为直切 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+</style>
+
 <style scoped>
-/* 玻璃卡片：四周留 12px 露出 Acrylic 底（G1 透明可见），卡片本体半透明 + backdrop-filter 叠加模糊（G2） */
+/* 玻璃卡片：四周留 12px 露出 Acrylic 底；本体 = 唯一玻璃配方（令牌）+ 高光内描边 */
 .glass-card {
   display: flex;
   flex-direction: column;
@@ -247,11 +352,13 @@ onUnmounted(() => {
   gap: 16px;
   height: calc(100vh - 24px);
   margin: 12px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.35);
-  backdrop-filter: blur(24px);
+  border-radius: var(--r-card);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-highlight);
   user-select: none;
-  color: #1f2328;
+  color: var(--ink);
+  font-family: var(--font-stack);
 }
 
 .topbar {
@@ -263,10 +370,11 @@ onUnmounted(() => {
 }
 
 .title {
-  font-size: 22px;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: 0.3px;
   margin: 0;
-  opacity: 0.75;
+  opacity: 0.8;
   cursor: default;
 }
 
@@ -276,51 +384,88 @@ onUnmounted(() => {
   color: inherit;
   font-size: 16px;
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.55;
 }
 
 .gear:hover {
-  opacity: 1;
+  opacity: 0.9;
 }
 
-/* 提醒文案条：达阈值后的卡片内提示（通知/声音之外的第三通道） */
+/* 提醒/自动下班胶囊条：tint 着色（warn 琥珀 / good 绿），插入时滑入 */
 .reminder {
   margin: 0;
-  padding: 6px 14px;
-  border-radius: 8px;
-  background: rgba(255, 193, 7, 0.25);
+  padding: 6px 16px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 159, 10, 0.22);
   font-size: 13px;
+  animation: banner-in 0.18s ease;
 }
 
-/* 自动下班文案条（PL005）：与提醒同位错色，避免语义混淆 */
 .reminder.auto-out {
-  background: rgba(76, 175, 80, 0.25);
+  background: rgba(48, 209, 88, 0.22);
 }
 
-/* 双标签切换：胶囊式分段控件，选中态高亮 */
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* iOS 式分段控件：玻璃胶囊轨道 + 白色滑块随 activeTab 位移 */
 .tabs {
-  display: flex;
-  gap: 4px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 200px;
   padding: 3px;
-  border-radius: 10px;
-  background: rgba(128, 128, 128, 0.12);
+  border-radius: var(--r-pill);
+  background: rgba(120, 120, 128, 0.16);
+}
+
+.tabs-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  height: calc(100% - 6px);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  transition: transform 0.22s var(--ease-spring);
+}
+
+.tabs-thumb.right {
+  transform: translateX(100%);
 }
 
 .tab {
-  padding: 4px 22px;
+  position: relative;
+  z-index: 1;
+  padding: 5px 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-pill);
   background: transparent;
-  color: inherit;
+  color: var(--ink-2);
   font-size: 13px;
   cursor: pointer;
-  opacity: 0.65;
+  transition: color 0.2s ease;
 }
 
 .tab.active {
-  background: rgba(255, 255, 255, 0.55);
-  opacity: 1;
+  color: var(--ink);
   font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tabs-thumb {
+    background: rgba(255, 255, 255, 0.22);
+  }
 }
 
 /* 计时页容器：打卡 pill + 计时卡片 */
@@ -332,42 +477,35 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 打卡 pill：未上班为描边可按态；在岗中内凹按压态（视觉常驻"已按下"） */
+/* 打卡 pill：未上班 = accent 描边可按态；在岗中 = accent 着色玻璃 + 内凹高光（视觉常驻"已按下"） */
 .pill {
-  padding: 7px 34px;
-  border: 1px solid rgba(0, 122, 255, 0.75);
-  border-radius: 999px;
+  padding: 8px 36px;
+  border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  border-radius: var(--r-pill);
   background: transparent;
-  color: rgba(0, 122, 255, 0.95);
+  color: var(--accent);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 2px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .pill:hover {
-  background: rgba(0, 122, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.pill:active {
+  transform: scale(0.96);
 }
 
 .pill.active {
-  border-style: inset;
-  background: rgba(0, 122, 255, 0.75);
-  color: #fff;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  backdrop-filter: var(--glass-blur);
+  color: var(--ink);
   box-shadow:
-    inset 0 2px 4px rgba(0, 0, 0, 0.35),
-    inset 0 -1px 2px rgba(255, 255, 255, 0.2);
-}
-
-/* 深浅色跟随系统（G3）：双主题下文字与卡片底均保持可读 */
-@media (prefers-color-scheme: dark) {
-  .glass-card {
-    background: rgba(30, 30, 30, 0.35);
-    color: #e8e8e8;
-  }
-
-  .tab.active {
-    background: rgba(255, 255, 255, 0.18);
-  }
+    var(--glass-highlight),
+    inset 0 2px 6px rgba(0, 0, 0, 0.18);
 }
 </style>

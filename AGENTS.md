@@ -2,7 +2,7 @@
 
 玻璃质感的工作计时看板：上班/下班打卡开启一天，班内计时 = 工作、空隙 = 休息，下班出在岗/工作/休息三值与时间图谱；连续工作超阈值时声音 + 系统通知提醒休息，三端（Windows / macOS / Linux）通用。总体规划见 `CapsulePulse_plan.md`。
 
-**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）、PL004 托盘常驻与全局快捷键（V0.1.0.7：关闭隐藏到托盘 + 托盘菜单 + Alt+Shift+P/S 全局热键 + 单实例 + 退出落库）、PL005 工作日/打卡模型与统计视图（V0.1.0.8：workdays/events 两表 + 打卡双向确认框 + 未上班禁用计时 + 重启恢复在岗 + 自动下班回填记账 + 统计视图双标签/时间图谱/三值）均已完结——77 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]，自动下班文案条启动竞态窗口 [problems#4]。打包分发未立项（下一个大件）。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
+**当前状态**：PL001–PL003（玻璃计时闭环 / 存储统计 / 提醒设置，V0.1.0.1–3）、首轮审计及其修复（A001/FIX001，V0.1.0.5）、运行时数据落址热更新（V0.1.0.6：config.json→configs/、pulse.db→data/，dev=项目根、release=exe 同级，杜绝机器用户目录）、PL004 托盘常驻与全局快捷键（V0.1.0.7：关闭隐藏到托盘 + 托盘菜单 + Alt+Shift+P/S 全局热键 + 单实例 + 退出落库）、PL005 工作日/打卡模型与统计视图（V0.1.0.8：workdays/events 两表 + 打卡双向确认框 + 未上班禁用计时 + 重启恢复在岗 + 自动下班回填记账 + 统计视图双标签/时间图谱/三值）均已完结——77 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]，自动下班文案条启动竞态窗口 [problems#4]。PL006 苹果玻璃 UI 重设计·Liquid Glass（V0.1.0.9：全局设计令牌 + 唯一玻璃配方 blur28+saturate1.6+高光内描边 + 三档同心圆角 + 分段滑块 + 56px 主数字 + 浮层化弹层 + 胶囊条图谱；纯前端零 Rust 改动零新依赖）均已完结——77 项测试全绿；macOS/Linux 延后 [problems#1]，通知署名随打包解决 [problems#2]，自动下班文案条启动竞态窗口 [problems#4]。打包分发未立项。方案见 `z.plan.md` 附录，任务档案见 `x.progress.md`。`.agents/skills/` 存放项目自建 skill（audit-project / audit-report / progress-task）。遗留与远期项登记 `y.problems.md`。
 
 ## 技术栈
 

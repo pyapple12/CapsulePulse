@@ -45,15 +45,12 @@ function onSave(): void {
 </template>
 
 <style scoped>
+/* 设置内容（PL006.5 浮层化）：自身去边框去底色，玻璃外壳由 App.vue 的 .floating-sheet 承担 */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
   width: 100%;
-  padding: 12px;
-  border: 1px solid rgba(128, 128, 128, 0.3);
-  border-radius: 12px;
-  background: rgba(128, 128, 128, 0.1);
   box-sizing: border-box;
 }
 
@@ -66,27 +63,35 @@ function onSave(): void {
 
 .row input[type="number"] {
   width: 72px;
-  padding: 4px 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 8px;
   background: transparent;
   color: inherit;
+  font-family: var(--font-stack);
 }
 
 .save {
   align-self: center;
-  padding: 6px 24px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 8px;
-  background: rgba(0, 122, 255, 0.75);
-  border-color: transparent;
+  padding: 7px 28px;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--accent);
   color: #fff;
+  font-family: var(--font-stack);
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 
 .save:hover {
-  background: rgba(0, 122, 255, 0.9);
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+.save:active {
+  transform: scale(0.96);
 }
 
 /* 保存失败提示：双主题可读的错误红 */

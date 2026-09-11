@@ -5,7 +5,6 @@ import { onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DaySummary } from "../types";
-
 const props = defineProps<{ refreshKey: number }>();
 
 const offset = ref(0);
@@ -52,6 +51,11 @@ function blockWidth(start: number, end: number): string {
   return `${((end - start) / (to - from)) * 100}%`;
 }
 
+/** 进行中块判定：在岗未收班时的最后一个块（明细时长列显"至今"） */
+function isOngoing(i: number): boolean {
+  return day.value != null && day.value.duty_ended_at == null && i === day.value.blocks.length - 1;
+}
+
 onMounted(refresh);
 watch(() => props.refreshKey, refresh);
 watch(offset, refresh);
@@ -81,17 +85,24 @@ watch(offset, refresh);
         <span>{{ hhmm(day.duty_started_at ?? 0) }}</span>
         <span>{{ day.duty_ended_at == null ? "在岗中" : hhmm(day.duty_ended_at) }}</span>
       </div>
-      <p class="triple">
-        <span>在岗 {{ fmt(day.duty_secs) }}</span>
-        <span class="sep">｜</span>
-        <span>工作 {{ fmt(day.work_secs) }}</span>
-        <span class="sep">｜</span>
-        <span>休息 {{ fmt(day.rest_secs) }}</span>
-      </p>
+      <div class="triple">
+        <div class="triple-item">
+          <span class="t-label">在岗</span>
+          <span class="t-value">{{ fmt(day.duty_secs) }}</span>
+        </div>
+        <div class="triple-item">
+          <span class="t-label">工作</span>
+          <span class="t-value">{{ fmt(day.work_secs) }}</span>
+        </div>
+        <div class="triple-item">
+          <span class="t-label">休息</span>
+          <span class="t-value">{{ fmt(day.rest_secs) }}</span>
+        </div>
+      </div>
       <ul class="detail">
         <li v-for="(b, i) in day.blocks" :key="`r${i}`" class="detail-row">
           <span class="range">{{ hhmm(b.start) }} – {{ hhmm(b.end) }}</span>
-          <span class="dur">{{ fmt(b.end - b.start) }}</span>
+          <span class="dur">{{ isOngoing(i) ? "至今" : fmt(b.end - b.start) }}</span>
           <span class="kind" :class="b.kind">{{ b.kind === "work" ? "工作" : "休息" }}</span>
         </li>
       </ul>
@@ -118,12 +129,17 @@ watch(offset, refresh);
 .arrow {
   width: 28px;
   padding: 2px 0;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 8px;
-  background: rgba(128, 128, 128, 0.12);
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: var(--r-pill);
+  background: rgba(128, 128, 128, 0.1);
   color: inherit;
   font-size: 14px;
   cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.arrow:hover {
+  background: rgba(128, 128, 128, 0.2);
 }
 
 .arrow:disabled {
@@ -132,56 +148,71 @@ watch(offset, refresh);
 }
 
 .day-label {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
-/* 时间图谱：横向带，工作亮色 / 休息暗色（纯 CSS，不引图表库） */
+/* 时间图谱：连续圆角胶囊条，工作 accent 实底 / 休息 ink 低明度；块间 2px 呼吸缝（纯 CSS，不引图表库） */
 .chart {
   display: flex;
+  gap: 2px;
   width: 100%;
-  height: 18px;
-  border-radius: 6px;
+  height: 14px;
+  border-radius: var(--r-pill);
   overflow: hidden;
 }
 
 .seg {
   height: 100%;
+  transition: width 0.3s ease;
 }
 
 .seg.work {
-  background: rgba(0, 122, 255, 0.8);
+  background: var(--accent);
 }
 
 .seg.rest {
-  background: rgba(128, 128, 128, 0.3);
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .chart-axis {
   display: flex;
   justify-content: space-between;
   width: 100%;
+  color: var(--ink-2);
   font-size: 11px;
-  opacity: 0.6;
 }
 
+/* 三值：两行对仗（标签 Caption 层 + 数值 Title 层），替代一行"｜"挤排 */
 .triple {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  justify-content: space-evenly;
+  width: 100%;
   margin: 0;
-  font-size: 13px;
-  opacity: 0.85;
 }
 
-.sep {
-  opacity: 0.4;
+.triple-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
-/* 段明细：起止 HH:MM + 时长 + 类型；列表过长内部滚动 */
+.t-label {
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.t-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 段明细：起止 HH:MM + 时长 + 类型；去常驻底色，hover 微亮；列表过长内部滚动 */
 .detail {
   width: 100%;
-  max-height: 120px;
+  max-height: 118px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -192,14 +223,14 @@ watch(offset, refresh);
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(128, 128, 128, 0.08);
+  padding: 4px 10px;
+  border-radius: 8px;
   font-size: 12px;
+  transition: background 0.15s ease;
 }
 
-.detail-row + .detail-row {
-  margin-top: 4px;
+.detail-row:hover {
+  background: rgba(128, 128, 128, 0.12);
 }
 
 .range {
@@ -208,20 +239,20 @@ watch(offset, refresh);
 }
 
 .dur {
-  opacity: 0.7;
+  color: var(--ink-2);
 }
 
 .kind.work {
-  color: rgba(0, 122, 255, 0.9);
+  color: var(--accent);
 }
 
 .kind.rest {
-  opacity: 0.6;
+  color: var(--ink-2);
 }
 
 .empty {
   margin: 24px 0;
+  color: var(--ink-2);
   font-size: 13px;
-  opacity: 0.55;
 }
 </style>

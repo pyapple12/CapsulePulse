@@ -110,12 +110,14 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 大计时器：等宽数字（tabular-nums 防跳动） */
+/* 大计时器：展示级字族（SF/Segoe UI Variable）+ 等宽数字（tabular-nums 防跳动），内容层无框无底 */
 .digits {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-stack);
   font-variant-numeric: tabular-nums;
-  font-size: 44px;
-  letter-spacing: 2px;
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  line-height: 1.1;
   cursor: default;
 }
 
@@ -124,43 +126,50 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-/* 大圆角按钮：半透明底适配玻璃卡片双主题 */
+/* 胶囊按钮：主按钮 accent 实底（唯一实底控件），次按钮玻璃底；按压 scale 反馈 */
 .btn {
-  min-width: 104px;
+  min-width: 112px;
   padding: 12px 0;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 12px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: var(--r-pill);
   background: rgba(128, 128, 128, 0.12);
   color: inherit;
+  font-family: var(--font-stack);
   font-size: 16px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 
 .btn:hover {
-  background: rgba(128, 128, 128, 0.24);
+  background: rgba(128, 128, 128, 0.22);
+}
+
+.btn:active {
+  transform: scale(0.96);
 }
 
 .btn.primary {
-  background: rgba(0, 122, 255, 0.75);
   border-color: transparent;
+  background: var(--accent);
   color: #fff;
 }
 
 .btn.primary:hover {
-  background: rgba(0, 122, 255, 0.9);
+  background: color-mix(in srgb, var(--accent) 88%, #000);
 }
 
 /* 未上班置灰（PL005）：不可点击且视觉降级，双主题下保持可辨识 */
 .btn:disabled {
-  background: rgba(128, 128, 128, 0.15);
-  border-color: rgba(128, 128, 128, 0.25);
+  background: rgba(128, 128, 128, 0.14);
+  border-color: rgba(128, 128, 128, 0.22);
   color: inherit;
   opacity: 0.45;
   cursor: not-allowed;
 }
 
 .btn.primary:disabled {
-  background: rgba(0, 122, 255, 0.3);
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 </style>

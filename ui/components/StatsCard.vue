@@ -25,16 +25,17 @@ function fmt(total: number): string {
 </template>
 
 <style scoped>
+/* 统计行（内容层）：纯文字无盒，ink-2 层级弱于主数字 */
 .stats {
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--ink-2);
   font-size: 13px;
-  opacity: 0.85;
   margin: 0;
 }
 
 .sep {
-  opacity: 0.4;
+  opacity: 0.5;
 }
 </style>
