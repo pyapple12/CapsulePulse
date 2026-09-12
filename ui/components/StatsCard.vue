@@ -1,26 +1,21 @@
 <script setup lang="ts">
 /** 统计行组件（纯展示：三值秒数由父组件拉取传入，业务聚合在 Rust 侧） */
+import { fmtDuration } from "../format";
+
 defineProps<{
   todaySecs: number;
   weekSecs: number;
   allSecs: number;
 }>();
-
-/** 秒数 → 简洁时长（Xh Ym；不足 1 小时只显分钟） */
-function fmt(total: number): string {
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
 </script>
 
 <template>
   <p class="stats">
-    <span>今日 {{ fmt(todaySecs) }}</span>
+    <span>今日 {{ fmtDuration(todaySecs) }}</span>
     <span class="sep">｜</span>
-    <span>本周 {{ fmt(weekSecs) }}</span>
+    <span>本周 {{ fmtDuration(weekSecs) }}</span>
     <span class="sep">｜</span>
-    <span>累计 {{ fmt(allSecs) }}</span>
+    <span>累计 {{ fmtDuration(allSecs) }}</span>
   </p>
 </template>
 

@@ -27,6 +27,8 @@ use crate::workday::WorkdayState;
 /// lib.rs 经 `.manage()` 注册，各命令经 State 访问。泛型默认 [`RealClock`]；测试注入假钟。
 /// rusqlite Connection 非 Sync，故 Storage 亦入 Mutex；
 /// 锁序恒 workday → session → storage/settings/fire 单向（禁反向嵌套，防死锁）。
+/// 线程现状（FIX002.8）：写命令同步（主线程串行），三个读命令已 async 化——
+/// 全面 async 化后本锁序纪律即实际承压面，新增命令必须遵守。
 pub struct AppContext<C: Clock = RealClock> {
     /// 工作日状态机（Off/OnDuty，PL005）。
     pub workday: Mutex<WorkdayState>,
@@ -63,6 +65,9 @@ pub enum CommandError {
     /// 系统时钟早于 Unix 纪元（时间戳不可用）。
     #[error("系统时钟异常（早于 Unix 纪元）")]
     Clock,
+    /// 单日明细的日期偏移越界（合法范围 ±366 日）。
+    #[error("日期偏移非法：{0}（应为 -366–366）")]
+    InvalidOffset(i64),
     /// 事件发送失败（提醒通道不可用）。
     #[error("事件发送失败：{0}")]
     Event(String),

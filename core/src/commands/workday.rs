@@ -5,16 +5,13 @@
 use chrono::{Local, TimeZone};
 use tauri::State;
 
-use super::session::pause_session;
 use super::{lock, poison, wall_now_secs, AppContext, CommandError};
 use crate::period;
-use crate::session::{Clock, SessionState};
-use crate::workday::{
-    auto_out_due, reduce_day, DaySummary, DutySpan, EventKind, WorkdayError, WorkdayState,
-};
+use crate::session::Clock;
+use crate::workday::{auto_out_due, reduce_day, DaySummary, EventKind, WorkdayError, WorkdayState};
 
-/// 上班打卡：开行 + clock_in 事件入馆，再转移状态；会话复位 Idle（上班 = 新一天计时从零，
-/// 此前累计均已落库，无数据丢失）。
+/// 上班打卡：开行 + clock_in 事件入馆（单事务，FIX002.9），再转移状态；会话复位 Idle
+/// （上班 = 新一天计时从零，此前累计均已落库，无数据丢失）。
 /// # 错误
 /// 已在岗返回 [`WorkdayError::AlreadyOnDuty`]；锁中毒/存储失败照常上抛。
 pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i64, CommandError> {
@@ -27,25 +24,13 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i
         let mut session = lock(ctx)?;
         session.reset();
     }
-    let id = {
-        let storage = poison(ctx.storage.lock())?;
-        let id = storage.workday_open(at)?;
-        storage.insert_event(at, EventKind::ClockIn)?;
-        id
-    };
+    let id = poison(ctx.storage.lock())?.workday_open_with_event(at, EventKind::ClockIn)?;
     workday.clock_in(at, id)?;
     Ok(id)
 }
 
-/// 班内有运行段则暂停落库（pause_session 含 segment_end 留痕与零段跳过）；Paused/Idle 无事。
-fn close_running_segment<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
-    if matches!(lock(ctx)?.state(), SessionState::Running { .. }) {
-        pause_session(ctx)?;
-    }
-    Ok(())
-}
-
-/// 下班打卡：关行 + 下班事件入馆（at 为记账时刻——手动 = 当前、自动 = 上班 + N 回填），
+/// 下班打卡：班内运行段先收段落库（FIX002.4：自动下班路径段末随下班记回填时刻），
+/// 关行 + 下班事件单事务入馆（at 为记账时刻——手动 = 当前、自动 = 上班 + N 回填），
 /// 再转移状态；会话复位 Idle（累计已全部落库）。
 /// # 错误
 /// 未上班返回 [`WorkdayError::NotOnDuty`]；锁中毒/存储失败照常上抛。
@@ -53,23 +38,21 @@ pub(super) fn clock_out_inner<C: Clock>(
     ctx: &AppContext<C>,
     at: i64,
     kind: EventKind,
-) -> Result<DutySpan, CommandError> {
+) -> Result<(), CommandError> {
     let mut workday = poison(ctx.workday.lock())?;
-    let WorkdayState::OnDuty { clock_in_at, id } = *workday else {
+    let WorkdayState::OnDuty { clock_in_at: _, id } = *workday else {
         return Err(CommandError::Workday(WorkdayError::NotOnDuty));
     };
-    close_running_segment(ctx)?;
-    {
-        let storage = poison(ctx.storage.lock())?;
-        storage.workday_close(id, at)?;
-        storage.insert_event(at, kind)?;
-    }
+    // 自动下班：段末事件随下班一并记回填时刻（与纯归约契约测试口径一致）
+    let pause_at = matches!(kind, EventKind::AutoClockOut).then_some(at);
+    super::session::close_running_segment(ctx, pause_at)?;
+    poison(ctx.storage.lock())?.workday_close_with_event(id, at, kind)?;
     workday.clock_out()?;
     {
         let mut session = lock(ctx)?;
         session.reset();
     }
-    Ok(DutySpan { clock_in_at, id })
+    Ok(())
 }
 
 /// 本地日边界（offset 为日偏移：0 = 今日、-1 = 昨日）：返回 (零点, 次日零点)。
@@ -123,7 +106,6 @@ pub(super) fn try_auto_clock_out<C: Clock>(
         None => Ok(None),
     }
 }
-
 /// 计时门禁：未上班严格拒绝（前后端双保险的后端面；托盘/热键/UI 共用）。
 pub(super) fn require_on_duty<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     let workday = poison(ctx.workday.lock())?;
@@ -147,13 +129,25 @@ pub fn clock_out(handle: State<'_, AppContext>) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// 单日明细（offset 缺省 0 = 今日；前后日翻看传 ±N）。
+/// 单日明细（offset 缺省 0 = 今日；前后日翻看传 ±N，越界严格报错）。
+/// async：events 全表扫 + 归约移出主线程（FIX002.8）。
 #[tauri::command]
-pub fn day_detail(
+pub async fn day_detail(
     handle: State<'_, AppContext>,
     offset: Option<i64>,
 ) -> Result<DaySummary, CommandError> {
-    day_detail_inner(&handle, offset.unwrap_or(0), wall_now_secs()?)
+    day_detail_inner(&handle, checked_offset(offset)?, wall_now_secs()?)
+}
+
+/// 入参校验（FIX002.5）：offset 限定 ±366——极端值会使 chrono 日历加法 panic，
+/// 前端正常只传 0/±1，此处拦的是 devtools/误用面。
+fn checked_offset(offset: Option<i64>) -> Result<i64, CommandError> {
+    let offset = offset.unwrap_or(0);
+    if (-366..=366).contains(&offset) {
+        Ok(offset)
+    } else {
+        Err(CommandError::InvalidOffset(offset))
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +252,44 @@ mod tests {
         assert!(matches!(
             clock_out_inner(&ctx, 2_000, EventKind::ClockOut),
             Err(CommandError::Workday(WorkdayError::NotOnDuty))
+        ));
+    }
+
+    /// FIX002.4：自动下班路径段末事件随下班记回填时刻（与纯归约契约测试口径一致）。
+    #[test]
+    fn auto_pause_marks_segment_end_at_backfill() {
+        let ctx = ctx(FakeClock::new());
+        let in_at = wall_now_secs().unwrap() - 9 * 3_600;
+        clock_in_inner(&ctx, in_at).unwrap();
+        super::super::session::start_session(&ctx).unwrap();
+        let out_at = in_at + 8 * 3_600;
+        assert!(try_auto_clock_out(&ctx).unwrap().is_some());
+        let rows = ctx
+            .storage
+            .lock()
+            .unwrap()
+            .events_between(0, i64::MAX)
+            .unwrap();
+        assert!(
+            rows.contains(&(out_at, EventKind::SegmentEnd)),
+            "段末事件记回填时刻而非发现时刻：{rows:?}"
+        );
+        assert!(rows.contains(&(out_at, EventKind::AutoClockOut)));
+    }
+
+    /// FIX002.5：offset 越界严格报错（拦 chrono 日历加法 panic 面），合法值放行。
+    #[test]
+    fn checked_offset_bounds() {
+        assert_eq!(checked_offset(None).unwrap(), 0);
+        assert_eq!(checked_offset(Some(-366)).unwrap(), -366);
+        assert_eq!(checked_offset(Some(366)).unwrap(), 366);
+        assert!(matches!(
+            checked_offset(Some(-367)),
+            Err(CommandError::InvalidOffset(-367))
+        ));
+        assert!(matches!(
+            checked_offset(Some(1_000_000)),
+            Err(CommandError::InvalidOffset(1_000_000))
         ));
     }
 

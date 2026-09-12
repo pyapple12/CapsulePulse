@@ -51,21 +51,33 @@ pub(crate) fn default_db_path() -> io::Result<PathBuf> {
     ensure_under("data", "pulse.db")
 }
 
+/// 诊断日志路径：data/pulse.log（与库同目录，目录不存在则自建；FIX002.7）。
+pub(crate) fn default_log_path() -> io::Result<PathBuf> {
+    ensure_under("data", "pulse.log")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// dev 根 = 项目根：含 core/（Cargo 工程目录），cargo clean 波及不到。
+    /// 运行时根解析（双档）：debug 断言项目根（含 core/ 地标）；release 档
+    /// runtime_root 走 exe 分支（target/release/deps 下无 core/），仅断解析成功且非空
+    /// ——同一用例按编译档分派，修复 A002-P3-17 的 --release 必失败问题。
     #[test]
-    fn dev_runtime_root_is_project_root() {
+    fn runtime_root_resolves_per_build_profile() {
         let root = runtime_root().unwrap();
-        assert!(
-            root.join("core").is_dir(),
-            "dev 运行时根应为项目根（实际 {root:?}）"
-        );
+        if cfg!(debug_assertions) {
+            assert!(
+                root.join("core").is_dir(),
+                "dev 运行时根应为项目根（实际 {root:?}）"
+            );
+        } else {
+            assert!(!root.as_os_str().is_empty(), "release 根不应为空");
+        }
     }
 
-    /// 配置落 configs/config.json、数据库落 data/pulse.db——均在运行时根下，不在用户主目录。
+    /// 配置落 configs/config.json、数据库落 data/pulse.db、日志落 data/pulse.log
+    /// ——均在运行时根下，不在用户主目录。
     #[test]
     fn default_paths_use_configs_and_data() {
         let config = default_config_path().unwrap();
@@ -75,5 +87,9 @@ mod tests {
         let db = default_db_path().unwrap();
         assert_eq!(db.file_name().unwrap(), "pulse.db");
         assert_eq!(db.parent().unwrap().file_name().unwrap(), "data");
+
+        let log = default_log_path().unwrap();
+        assert_eq!(log.file_name().unwrap(), "pulse.log");
+        assert_eq!(log.parent().unwrap().file_name().unwrap(), "data");
     }
 }

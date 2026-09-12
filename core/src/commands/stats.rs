@@ -29,9 +29,9 @@ fn stats_snapshot<C: Clock>(ctx: &AppContext<C>) -> Result<SessionStats, Command
     })
 }
 
-/// 查询今日/本周/累计统计。
+/// 查询今日/本周/累计统计（async：聚合查询移出主线程，FIX002.8）。
 #[tauri::command]
-pub fn session_stats(handle: State<'_, AppContext>) -> Result<SessionStats, CommandError> {
+pub async fn session_stats(handle: State<'_, AppContext>) -> Result<SessionStats, CommandError> {
     stats_snapshot(&handle)
 }
 

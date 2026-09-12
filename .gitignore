@@ -42,6 +42,7 @@ configs/config.json
 *.db
 *.db.bak
 *.db.corrupt
+data/pulse.log
 
 ## IDE 和编辑器
 .vscode/

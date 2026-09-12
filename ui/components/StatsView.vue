@@ -4,33 +4,25 @@
 import { onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
+// 展示格式化共享助手（FIX002.13 收敛）
+import { fmtDuration, hhmm } from "../format";
 import type { DaySummary } from "../types";
 const props = defineProps<{ refreshKey: number }>();
 
 const offset = ref(0);
 const day = ref<DaySummary | null>(null);
+// 拉取失败可见化（FIX002.4）：区分"空日"与"加载失败"，避免错误伪装成无打卡
+const loadError = ref("");
 
-/** 拉取单日明细（offset 为日偏移：0 今日 / -1 昨日） */
+/** 拉取单日明细（offset 为日偏移：0 今日 / -1 昨日）；失败保留旧数据并标错误 */
 async function refresh(): Promise<void> {
   try {
     day.value = await invoke<DaySummary>("day_detail", { offset: offset.value });
+    loadError.value = "";
   } catch (err) {
+    loadError.value = String(err);
     console.error("day_detail 调用失败", err);
   }
-}
-
-/** Unix 秒 → 本地 HH:MM（图谱与明细的时刻显示） */
-function hhmm(secs: number): string {
-  const d = new Date(secs * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** 秒数 → 简洁时长（Xh Ym；不足 1 小时只显分钟） */
-function fmt(total: number): string {
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 /** 日期标签：今日 / 昨日 / M月D日 */
@@ -71,6 +63,8 @@ watch(offset, refresh);
       </button>
     </div>
 
+    <p v-if="loadError" class="load-error" role="alert">统计加载失败：{{ loadError }}</p>
+
     <template v-if="day && day.blocks.length > 0">
       <div class="chart">
         <div
@@ -88,21 +82,21 @@ watch(offset, refresh);
       <div class="triple">
         <div class="triple-item">
           <span class="t-label">在岗</span>
-          <span class="t-value">{{ fmt(day.duty_secs) }}</span>
+          <span class="t-value">{{ fmtDuration(day.duty_secs) }}</span>
         </div>
         <div class="triple-item">
           <span class="t-label">工作</span>
-          <span class="t-value">{{ fmt(day.work_secs) }}</span>
+          <span class="t-value">{{ fmtDuration(day.work_secs) }}</span>
         </div>
         <div class="triple-item">
           <span class="t-label">休息</span>
-          <span class="t-value">{{ fmt(day.rest_secs) }}</span>
+          <span class="t-value">{{ fmtDuration(day.rest_secs) }}</span>
         </div>
       </div>
       <ul class="detail">
         <li v-for="(b, i) in day.blocks" :key="`r${i}`" class="detail-row">
           <span class="range">{{ hhmm(b.start) }} – {{ hhmm(b.end) }}</span>
-          <span class="dur">{{ isOngoing(i) ? "至今" : fmt(b.end - b.start) }}</span>
+          <span class="dur">{{ isOngoing(i) ? "至今" : fmtDuration(b.end - b.start) }}</span>
           <span class="kind" :class="b.kind">{{ b.kind === "work" ? "工作" : "休息" }}</span>
         </li>
       </ul>
@@ -254,5 +248,14 @@ watch(offset, refresh);
   margin: 24px 0;
   color: var(--ink-2);
   font-size: 13px;
+}
+
+/* 加载失败提示（FIX002.4）：区分空日与失败，双主题可读的错误红 */
+.load-error {
+  margin: 0;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: rgba(179, 38, 30, 0.28);
+  font-size: 12px;
 }
 </style>

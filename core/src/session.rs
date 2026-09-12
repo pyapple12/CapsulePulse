@@ -175,6 +175,26 @@ impl<C: Clock> WorkSession<C> {
         self.accumulated = Duration::ZERO;
     }
 
+    /// 撤销最近一次 pause（命令层落库/留痕失败回滚专用）：恢复 Running{start} 并把
+    /// pause 时并入累计的本段从 `accumulated` 扣回——数据未落库，计时语义回到暂停前连续态。
+    /// # 契约
+    /// 仅可在 pause() 成功后、其他状态变更前调用一次；`paused_from` 须为该次 pause 前的
+    /// Running 快照（start 原点）。非 Running 快照为契约外输入，静默保持原状（防御）。
+    pub fn undo_pause(&mut self, paused_from: SessionState, segment: Duration) {
+        let SessionState::Running { start } = paused_from else {
+            return;
+        };
+        // pause 刚把 segment 并入 accumulated，扣回即回到 pause 前；单调时钟契约下不发生下溢
+        self.accumulated -= segment;
+        self.state = SessionState::Running { start };
+    }
+
+    /// 恢复状态快照（命令层留痕失败回滚专用）：仅回写状态字段、不动累计——
+    /// resume 失败回 Paused 语义正确（resume 本就不改累计）。
+    pub fn restore_state(&mut self, state: SessionState) {
+        self.state = state;
+    }
+
     /// 当前段时长：Running = 本段实时；Paused/Idle 为零（"暂停即重置"提醒语义的取数源）。
     pub fn segment_secs(&self) -> Duration {
         match self.state {
@@ -384,5 +404,46 @@ mod tests {
             .toggle_action(),
             TimerAction::Resume
         );
+    }
+
+    /// FIX002.1：undo_pause 恢复 Running 并扣回本段——回滚后计时连续无双计。
+    #[test]
+    fn undo_pause_restores_running_without_double_count() {
+        let clock = FakeClock::new();
+        let mut s = WorkSession::new(clock.clone());
+        s.start().unwrap();
+        clock.advance(secs(100));
+        let segment = s.pause().unwrap();
+        assert_eq!(s.state(), &SessionState::Paused { elapsed: secs(100) });
+        s.undo_pause(
+            SessionState::Running {
+                start: Duration::ZERO,
+            },
+            segment,
+        );
+        assert_eq!(
+            s.state(),
+            &SessionState::Running {
+                start: Duration::ZERO
+            }
+        );
+        clock.advance(secs(50));
+        assert_eq!(s.total(), secs(150), "回滚后连续计时：100 + 50 无双计");
+        assert_eq!(s.pause().unwrap(), secs(150));
+    }
+
+    /// FIX002.1：restore_state 仅回写状态、不动累计——resume 失败回 Paused 语义完整。
+    #[test]
+    fn restore_state_recovers_paused_without_touching_accumulated() {
+        let clock = FakeClock::new();
+        let mut s = WorkSession::new(clock.clone());
+        s.start().unwrap();
+        clock.advance(secs(100));
+        s.pause().unwrap();
+        let snapshot = *s.state();
+        s.resume().unwrap();
+        s.restore_state(snapshot);
+        assert_eq!(s.state(), &SessionState::Paused { elapsed: secs(100) });
+        assert_eq!(s.total(), secs(100));
     }
 }

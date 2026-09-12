@@ -202,6 +202,74 @@ impl Storage {
         )?;
         Ok(())
     }
+
+    /// 开工作日 + clock_in 事件（单事务，FIX002.9）：任一笔失败整体回滚，
+    /// 消除"两笔独立写入间崩溃留孤儿态"的窗口。返回新行 id。
+    pub fn workday_open_with_event(
+        &self,
+        at: i64,
+        kind: crate::workday::EventKind,
+    ) -> Result<i64, StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO workdays (clock_in_at, clock_out_at) VALUES (?1, NULL)",
+            [at],
+        )?;
+        let id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO events (at, kind) VALUES (?1, ?2)",
+            rusqlite::params![at, kind.as_str()],
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// 关工作日 + 下班事件（单事务，FIX002.9）：行不存在时 WorkdayMissing 并回滚事件笔，
+    /// 不留孤儿 clock_out。
+    pub fn workday_close_with_event(
+        &self,
+        id: i64,
+        at: i64,
+        kind: crate::workday::EventKind,
+    ) -> Result<(), StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let affected = tx.execute(
+            "UPDATE workdays SET clock_out_at = ?1 WHERE id = ?2",
+            [at, id],
+        )?;
+        if affected == 0 {
+            return Err(StorageError::WorkdayMissing(id)); // drop(tx) 自动回滚
+        }
+        tx.execute(
+            "INSERT INTO events (at, kind) VALUES (?1, ?2)",
+            rusqlite::params![at, kind.as_str()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// 会话行 + 段末事件（单事务，FIX002.9）：零秒段跳过会话行（零噪音行定案）但事件照记。
+    pub fn record_session_with_event(
+        &self,
+        started_at: i64,
+        seconds: i64,
+        at: i64,
+        kind: crate::workday::EventKind,
+    ) -> Result<(), StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        if seconds > 0 {
+            tx.execute(
+                "INSERT INTO sessions (started_at, seconds) VALUES (?1, ?2)",
+                [started_at, seconds],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO events (at, kind) VALUES (?1, ?2)",
+            rusqlite::params![at, kind.as_str()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -344,6 +412,45 @@ mod tests {
             Err(StorageError::UnknownEventKind(k)) => assert_eq!(k, "nonsense"),
             other => panic!("期望 UnknownEventKind，实际 {other:?}"),
         }
+    }
+
+    /// FIX002.9：关行+事件单事务——行缺失时事件笔回滚，不留孤儿 clock_out。
+    #[test]
+    fn workday_close_with_event_rolls_back_on_missing_row() {
+        let s = Storage::open_in_memory().unwrap();
+        s.insert_event(1_000, EventKind::ClockIn).unwrap();
+        match s.workday_close_with_event(99, 2_000, EventKind::ClockOut) {
+            Err(StorageError::WorkdayMissing(99)) => {}
+            other => panic!("期望 WorkdayMissing，实际 {other:?}"),
+        }
+        let rows = s.events_between(0, 9_000).unwrap();
+        assert_eq!(rows.len(), 1, "事件笔回滚：无孤儿 clock_out");
+        assert_eq!(rows[0].0, 1_000);
+    }
+
+    /// FIX002.9：事务往返——开班+事件、关班+事件、落段+段末三对单事务写入与直查一致。
+    #[test]
+    fn transactional_write_pairs_roundtrip() {
+        let s = Storage::open_in_memory().unwrap();
+        let id = s
+            .workday_open_with_event(1_000, EventKind::ClockIn)
+            .unwrap();
+        s.workday_close_with_event(id, 2_000, EventKind::AutoClockOut)
+            .unwrap();
+        s.record_session_with_event(1_000, 60, 1_060, EventKind::SegmentEnd)
+            .unwrap();
+
+        assert_eq!(s.workday_latest().unwrap(), Some((1, 1_000, Some(2_000))));
+        let rows = s.events_between(0, 9_000).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1_000, EventKind::ClockIn),
+                (1_060, EventKind::SegmentEnd),
+                (2_000, EventKind::AutoClockOut),
+            ]
+        );
+        assert_eq!(s.all_total().unwrap(), 60);
     }
 
     /// 文件库往返：临时目录建库→三表写入→重开→数据仍在（schema 幂等 + 目录自建语义）。

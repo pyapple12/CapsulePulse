@@ -17,8 +17,8 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
         <h2 class="sheet-title">{{ title }}</h2>
         <p class="sheet-message">{{ message }}</p>
         <div class="sheet-actions">
-          <button class="btn" type="button" @click="emit('cancel')">取消</button>
-          <button class="btn primary" type="button" @click="emit('confirm')">确认</button>
+          <button class="btn-ghost" type="button" @click="emit('cancel')">取消</button>
+          <button class="btn-primary" type="button" @click="emit('confirm')">确认</button>
         </div>
       </section>
     </div>
@@ -45,36 +45,10 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
   gap: 10px;
 }
 
-.sheet-actions .btn {
+/* 按钮配方（实底/玻璃/按压）在 App.vue 全局 .btn-primary/.btn-ghost，此处只留布局 */
+.sheet-actions button {
   flex: 1;
   padding: 8px 0;
-  border: 1px solid rgba(128, 128, 128, 0.35);
-  border-radius: var(--r-pill);
-  background: rgba(128, 128, 128, 0.12);
-  color: inherit;
-  font-family: var(--font-stack);
   font-size: 13px;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    transform 0.15s ease;
-}
-
-.sheet-actions .btn:hover {
-  background: rgba(128, 128, 128, 0.22);
-}
-
-.sheet-actions .btn:active {
-  transform: scale(0.96);
-}
-
-.btn.primary {
-  border-color: transparent;
-  background: var(--accent);
-  color: #fff;
-}
-
-.btn.primary:hover {
-  background: color-mix(in srgb, var(--accent) 88%, #000);
 }
 </style>

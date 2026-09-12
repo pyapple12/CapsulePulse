@@ -10,6 +10,8 @@ import StatsView from "./components/StatsView.vue";
 import TimerCard from "./components/TimerCard.vue";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
 import type { ReminderSettings, SessionStats, SessionStatus } from "./types";
+// 展示格式化共享助手（FIX002.13 收敛）
+import { hhmm } from "./format";
 // 提示音经 vite 打包（哈希进 dist）——不用 public/ 目录（publicDir 默认在根，曾有 404 教训）
 import chimeUrl from "../assets/house_alarm-clock_loud.mp3";
 
@@ -28,6 +30,8 @@ const reminderVisible = ref(false);
 const reminderThreshold = ref(0);
 // 设置保存失败的可见反馈（面板内展示，成功或重开面板时清除）
 const saveError = ref("");
+// 动作/打卡失败的可见反馈（FIX002.3：命令失败不再只进 console）；动作成功即清除
+const actionError = ref("");
 const chimeRef = ref<HTMLAudioElement | null>(null);
 // PL005：在岗态 + 打卡确认框 + 双标签视图
 const onDuty = ref(false);
@@ -96,19 +100,24 @@ async function onSaveSettings(s: ReminderSettings): Promise<void> {
   }
 }
 
-/** ⚙ 开合面板；打开时清掉上一轮保存失败的错误提示 */
+/** ⚙ 开合面板；打开时清掉上一轮保存失败的错误提示；settings 未就绪时可见反馈不静默（FIX002.3） */
 function togglePanel(): void {
+  if (settings.value == null) {
+    actionError.value = "设置加载失败，请重启应用重试";
+    return;
+  }
   panelVisible.value = !panelVisible.value;
   if (panelVisible.value) {
     saveError.value = "";
   }
 }
 
-/** TimerCard 动作后：统计即刷；动作即处理提醒（暂停/重开 = 新段），文案条随之隐藏 */
+/** TimerCard 动作后：统计即刷；动作即处理提醒（暂停/重开 = 新段），文案条与错误条随之隐藏 */
 function onTimerChanged(): void {
   void refreshStats();
   statsRefreshKey.value++;
   reminderVisible.value = false;
+  actionError.value = "";
 }
 
 /** 切到统计页：单日明细即时重拉（动作后的快照可能已是旧账，如开始计时当秒的工作块） */
@@ -129,28 +138,27 @@ function onConfirmCancel(): void {
   confirmMode.value = null;
 }
 
-/** 确认框确认：执行打卡 → 刷新在岗态与统计 */
+/** 确认框确认：执行打卡 → 刷新在岗态与统计；失败经错误条可见（FIX002.3） */
 async function onConfirmOk(): Promise<void> {
   const mode = confirmMode.value;
   confirmMode.value = null;
   if (mode == null) {
     return;
   }
+  actionError.value = "";
   try {
     await invoke(mode === "in" ? "clock_in" : "clock_out");
   } catch (err) {
+    actionError.value = `打卡失败：${String(err)}`;
     console.error("打卡命令调用失败", err);
+  }
+  // 下班成功即清提醒条（FIX002.2：提醒触发后直接下班不再滞留）
+  if (mode === "out" && !actionError.value) {
+    reminderVisible.value = false;
   }
   await refreshDuty();
   void refreshStats();
   statsRefreshKey.value++;
-}
-
-/** Unix 秒 → 本地 HH:MM（自动下班文案条） */
-function hhmm(secs: number): string {
-  const d = new Date(secs * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 onMounted(() => {
@@ -201,6 +209,7 @@ onUnmounted(() => {
       已连续工作 {{ reminderThreshold }} 分钟，休息一下吧
     </p>
     <p v-if="autoOutVisible" class="reminder auto-out">已于 {{ hhmm(autoOutAt) }} 自动下班</p>
+    <p v-if="actionError" class="reminder action-error" role="alert">{{ actionError }}</p>
     <div class="tabs" role="tablist">
       <span class="tabs-thumb" :class="{ right: activeTab === 'stats' }" aria-hidden="true"></span>
       <button
@@ -230,7 +239,7 @@ onUnmounted(() => {
       <button class="pill" :class="{ active: onDuty }" type="button" @click="onPillClick">
         {{ onDuty ? "下班" : "上班" }}
       </button>
-      <TimerCard @changed="onTimerChanged" />
+      <TimerCard @changed="onTimerChanged" @error="actionError = $event" />
     </div>
     <StatsView v-show="activeTab === 'stats'" :refresh-key="statsRefreshKey" />
     <Transition name="sheet">
@@ -304,7 +313,64 @@ onUnmounted(() => {
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-highlight), var(--shadow-float);
   color: var(--ink);
+  /* 确认框是 .glass-card 的兄弟节点，须显式继承展示级字族（FIX002：字体脱管修复） */
+  font-family: var(--font-stack);
   user-select: none;
+}
+
+/* —— 全局按钮配方（FIX002 令牌化收尾）：accent 实底主按钮 / 玻璃底次按钮，跨组件单一来源 —— */
+.btn-primary {
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-stack);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+.btn-primary:active {
+  transform: scale(0.96);
+}
+
+.btn-ghost {
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: var(--r-pill);
+  background: rgba(128, 128, 128, 0.12);
+  color: inherit;
+  font-family: var(--font-stack);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background: rgba(128, 128, 128, 0.22);
+}
+
+.btn-ghost:active {
+  transform: scale(0.96);
+}
+
+/* 置灰（未上班）：不可点击且视觉降级，双主题可辨识 */
+.btn-primary:disabled,
+.btn-ghost:disabled {
+  background: rgba(128, 128, 128, 0.14);
+  border-color: rgba(128, 128, 128, 0.22);
+  color: inherit;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary:disabled {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .sheet-enter-active,
@@ -403,6 +469,11 @@ onUnmounted(() => {
 
 .reminder.auto-out {
   background: rgba(48, 209, 88, 0.22);
+}
+
+/* 动作/打卡失败文案条（FIX002.3）：红 tint，命令失败对用户可见 */
+.reminder.action-error {
+  background: rgba(179, 38, 30, 0.28);
 }
 
 @keyframes banner-in {

@@ -607,3 +607,86 @@
 ### 拆分 todo
 
 见 x.progress.md「PL006」任务组。
+
+---
+
+## 附录 A002：全量代码审计报告（第2轮，2026-09-12）
+
+> 状态：✅ 已修复（2026-09-12 收口，V0.1.0.10；FIX002 十五条勾结见 x.progress.md，反向验证与 live 记录见 .temp/fix002-verification.md）
+> 范围：core/ 全部 .rs（13 文件）+ Cargo.toml + tauri.conf.json + capabilities/default.json + ui/ 全部前端（10 文件）+ 根配置（package.json / vite.config.ts / tsconfig.json / index.html）+ 静态资源引用；不审计 node_modules / dist / target / .temp / .agents / 第三方依赖与生成代码。
+> 方式：三路并行逐行通读（Rust 纯逻辑组 / Tauri 集成组 / 前端组 explore 子任务）+ 主会话回归复核 + 门禁实测（cargo test 77 / fmt --check / clippy -D warnings / vue-tsc / prettier 全绿）。
+
+### 零、上轮修复复核清单（A001 → FIX001，V0.1.0.5）
+
+| 上轮条目                       | 现状                                                   | 证据                   |
+| ------------------------------ | ------------------------------------------------------ | ---------------------- |
+| P2-1 设置原子写                | ✅ 仍在且完整（rename 失败清理闭环，残留 .tmp 可自愈） | settings.rs:81-92      |
+| P3-1 fire 锁严格报错           | ✅ 仍在（回归锚测试在位）                              | session.rs:52、417-428 |
+| P3-2 README 五处同步           | ✅ 仍在（随各期持续更新至 V0.1.0.9）                   | README.md:3,5,18,47,69 |
+| P3-3 payload 直读零兜底        | ✅ 仍在（`?? 50` 全仓零命中）                          | App.vue:163            |
+| P3-4 设置错误提示行            | ✅ 仍在（saveError 链路本轮 live 复测过）              | SettingsPanel.vue:43   |
+| P3-5 types.ts 单一来源         | ✅ 仍在（4 组件引用，无本地 DTO 声明）                 | ui/types.ts            |
+| P3-6 lib.rs 注释同步           | ✅ 仍在                                                | lib.rs:3               |
+| P3-7 send_notification 返回 () | ✅ 仍在                                                | reminder.rs:27         |
+| P3-8 poison 泛型助手           | ✅ 仍在（19 处调用收敛）                               | commands/mod.rs:81     |
+
+结论：9/9 在位，零回退、零漏改。既有观察项（A001-O1 DST / O2 无索引 / O8 跨零点段归属 / O4 探针留存）维持原状。
+
+### 一、P0-P3 修复清单（按严重度）
+
+无 P0/P1；P2 一项、P3 十八项，性质均为新增（A001 九项无一复现）。
+
+| #     | 文件:行号                                                                | 类型 | 描述                                                                                                                                                                                                                                                                                                                                             | 建议                                                                                                        | 性质 | 影响面          |
+| ----- | ------------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- | ---- | --------------- |
+| P2-1  | commands/session.rs:75-80（同根：65-71、85-90）                          | 1/2  | `pause_session` 次序 = 状态转移→清锁→落库→留痕：`persist_segment` 失败（db 被外部锁/磁盘故障）时状态已 Paused、段时长仅存内存，永不再落库——resume 后只落新段、clock_out 的 reset 丢弃累计，该段永久丢失且不可重试（重试 pause = NotRunning）。与 workday.rs:2"库写先行、状态殿后"定案相反；start/resume 的 mark_segment 失败留孤儿事件为同根变体 | 落库/留痕失败回滚状态机（pause 恢复 Running{start}、start 失败回 Idle、resume 失败回 Paused）；三函数同批修 | 新增 | 会话落库链      |
+| P3-1  | App.vue:141 + TimerCard.vue:39                                           | 2    | 打卡/计时命令失败仅 console.error，确认框已先行关闭——用户视角"点了没反应"（并发打卡撞 AlreadyOnDuty、存储故障均可达）                                                                                                                                                                                                                            | 仿 saveError 增轻量错误胶囊条通道                                                                           | 新增 | Vue 前端        |
+| P3-2  | App.vue:111                                                              | 1    | 提醒条仅随 TimerCard 动作清除：提醒触发后直接走 pill 下班（不经 TimerCard），提醒条滞留屏幕并可与自动下班绿条堆叠（确定性复现）                                                                                                                                                                                                                  | onConfirmOk 同步清 reminderVisible                                                                          | 新增 | Vue 前端        |
+| P3-3  | commands/workday.rs:41-46 + session.rs:75-80                             | 1    | 自动下班链路 SegmentEnd 事件记发现时刻（wall_now），与 PL005 收口定案"段末随下班记回填时刻"及契约测试 workday.rs:563-580 口径脱节（reduce_day 容错吸收、三值无差错，events 留孤儿段末）                                                                                                                                                          | pause_session 增可选记账时刻参数，自动路径传 out_at；或修订定案+测试并注释留痕                              | 新增 | events 数据口径 |
+| P3-4  | StatsView.vue:14-20                                                      | 2/13 | day_detail 失败仅 console：首拉失败误显"本日无打卡记录"（错误伪装成空数据）；翻日失败标签与内容错位                                                                                                                                                                                                                                              | 增 error 态区分空日与失败                                                                                   | 新增 | Vue 前端        |
+| P3-5  | commands/workday.rs:81                                                   | 2    | `offset: Option<i64>` 无范围校验，极端值（\|offset\|≳9.5e7 天）`Duration::days` 加法 panic；当前前端只传 0/±1，devtools/误用可达（panic 后果需 live 验证）                                                                                                                                                                                       | 夹取 ±366 后走 CommandError 严格报错                                                                        | 新增 | day_detail 命令 |
+| P3-6  | App.vue:237 + 57-63                                                      | 2    | `v-if="panelVisible && settings"`：get_settings 首拉失败时 settings 恒 null，⚙ 点击后浮层永不渲染且零反馈                                                                                                                                                                                                                                        | settings 为 null 时点击显错误条或 ⚙ 置灰                                                                    | 新增 | Vue 前端        |
+| P3-7  | lib.rs:85                                                                | 13   | 托盘"退出落库失败仍退出"为未登记白名单的容错（白名单仅三项）；叠加 eprintln 在 release 不可见，该数据丢失事件实际零记录                                                                                                                                                                                                                          | 白名单登记第四项三要素（见 P3-8 诊断）                                                                      | 新增 | 错误策略合规    |
+| P3-8  | lib.rs 全组 eprintln                                                     | 10   | 诊断全走 eprintln：dev 可见、release 形同虚设（无控制台无日志文件）——含启动失败、退出落库失败等关键记录；未来打包加 `windows_subsystem` 防黑窗则彻底不可见                                                                                                                                                                                       | 轻量文件日志（零依赖 append），至少覆盖启动失败与退出落库失败                                               | 新增 | Tauri 后端      |
+| P3-9  | lib.rs:193-205 全部 11 命令                                              | 8/9  | 命令全部同步 = 在主线程执行（Tauri 2 官方语义）：SQLite 写入/SUM 聚合/day_detail 全表扫均跑 UI 事件循环；现数据量无症状，五锁防的"并发"实际不存在（workday.rs:121 TOCTOU 注释当前不可达）                                                                                                                                                        | 读命令（session_stats/day_detail/session_status）改 async 移出主线程；锁序纪律升为承压面前补文档            | 新增 | 线程架构        |
+| P3-10 | storage.rs:82-88,123-129,134-143,161-171                                 | 2    | 三处"两笔独立写入"非事务（开班+事件/关班+事件/落段+段末）：两笔间进程崩溃产生永久错值不自愈（如关班无事件→历史日在岗永久虚增）。触发窗口微秒级，需验证（故障注入）                                                                                                                                                                               | storage 增事务方法（unchecked_transaction），上游三处一并                                                   | 新增 | 存储层          |
+| P3-11 | SettingsPanel.vue:74-91 + ConfirmModal.vue:71-79 + TimerCard.vue:130-151 | 4    | PL006 令牌化漏网：主按钮三件套（accent 实底/hover/active）逐字复制三处，灰玻璃次按钮两处 + StatsView .arrow 第三变体                                                                                                                                                                                                                             | App.vue 全局层抽 .btn-primary/.btn-ghost                                                                    | 新增 | Vue 前端        |
+| P3-12 | ConfirmModal.vue:16-18 + style.css:5                                     | 4/6  | 确认框是 .glass-card 兄弟节点，字体未继承 --font-stack 回落 system-ui，与设置浮层不一致、内部标题/按钮混排                                                                                                                                                                                                                                       | .floating-sheet 全局规则补 font-family 一行                                                                 | 新增 | Vue 前端        |
+| P3-13 | App.vue:150 + StatsView.vue:23 + StatsCard.vue:30                        | 4    | 格式化助手重复：hhmm×2（pad×3）、fmt×2 逐字复制                                                                                                                                                                                                                                                                                                  | 收敛 ui/format.ts（pad/hhmm/fmt）                                                                           | 新增 | 跨组件          |
+| P3-14 | session.rs:104-109 ↔ workday.rs:52-56                                    | 4    | persist_before_quit 与 close_running_segment 函数体逐字相同（quit 语义变更需双处同步）                                                                                                                                                                                                                                                           | 合一（pub(crate) 复用）                                                                                     | 新增 | 命令层          |
+| P3-15 | workday.rs:52-73 + reminder.rs:49-51                                     | 5    | 死代码：clock_out_inner 返回 DutySpan 全部调用点丢弃；ReminderFire::last_fired() 生产零调用（仅测试）                                                                                                                                                                                                                                            | 返回改 ()；last_fired 加 #[cfg(test)]                                                                       | 新增 | 命令层/纯逻辑   |
+| P3-16 | settings.rs:14-25,66-76                                                  | 13   | 白名单只登记"文件缺失回退默认"；既有文件缺字段时 serde default 静默补默认（threshold/sound/notify 三字段无登记）属第二类未登记容错，仅手改配置可达                                                                                                                                                                                               | 白名单补登记"字段缺失回退默认"，或去 default 严格报错                                                       | 新增 | 配置体系        |
+| P3-17 | paths.rs:59-66                                                           | 10   | dev 恢复测试断言 core/ 目录存在，`cargo test --release` 时 runtime_root 走 exe 分支必失败（需验证，静态推演成立）                                                                                                                                                                                                                                | 按 cfg!(debug_assertions) 分支断言                                                                          | 新增 | 可测试性        |
+| P3-18 | README.md:18 + AGENTS.md:5                                               | 6    | 状态行"77 项测试全绿"：全仓实际 78（lib 77 + tests/storage_probe.rs 1，探针随 cargo test 执行），口径未注明（需验证：实跑汇总）                                                                                                                                                                                                                  | 改 78 或注明口径                                                                                            | 新增 | 文档            |
+
+### 二、参考级观察项（记录不修；含回落理由）
+
+**既有豁免维持（A001 定案）**：O1 DST 边界（period.rs:14-16）——本轮新增两处同根位置并入该豁免：commands/workday.rs:83（day_bounds 固定 86400 切日）、StatsView.vue:37-42（dayLabel 固定 86400000ms），触发条件同为"跨平台/DST 时区分发前补注入用例"；O2 events 无索引（写入量级不变，出现性能证据前维持）；O8 跨零点段归属起点日 + as_secs 秒级截断；O4 storage_probe 探针留存。
+
+**新增观察项**：
+
+| 位置                         | 内容                                                                                                                                               | 回落理由                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| workday.rs:212               | 冗余 clock_out 致 duty 窗口双计                                                                                                                    | 应用内不可达（状态机 + workday 锁原子化），仅外部改库可达；无可达触发路径，需验证 |
+| settings.rs:82               | 原子写无 fsync，断电窗口 rename 后可能旧内容                                                                                                       | A001-P2-1 定案范围即 tmp+rename；纯断电理论缺口                                   |
+| commands/workday.rs:26-29    | clock_in 的 session.reset() 先于库写，字面与"库写先行"不符                                                                                         | Off 态 session 恒 Idle，reset 幂等无害，注释已声明语义                            |
+| lib.rs:89、36-68             | 未知菜单 id 静默忽略；窗口缺失分支静默 return                                                                                                      | 闭环构造 + setup 硬校验，不可达防御分支                                           |
+| capabilities/default.json:5  | notification:default 前端零消费、core:default 偏宽                                                                                                 | A001"主动预防"定案保留；打包期随 CSP 一并收窄                                     |
+| tauri.conf.json              | 未配 CSP；窗口 label 依赖默认值 "main"（代码三处隐式引用）                                                                                         | 本地内嵌资产无远程内容；打包期定                                                  |
+| reminder.rs:32 ↔ App.vue:201 | 提醒文案两处独立维护；payload = 阈值而非实测连续分钟（误差 ≤ 100ms）                                                                               | 双端语义耦合，漂移低频                                                            |
+| session.rs:194-207           | session_status 包装层（emit/自动下班接线）无直测                                                                                                   | tauri::test 未启用；包装层薄且状态自愈                                            |
+| StatsView.vue:60-61          | 快速翻日多请求乱序覆盖（需验证）                                                                                                                   | 本地 IPC 毫秒回程 + 手速限制，概率极低                                            |
+| StatsView.vue:67             | offset 无下界可无限前翻、老日期无年份                                                                                                              | 数据量小无害，交互语义非缺陷                                                      |
+| commands/mod.rs test_support | 测试内 unwrap；FakeClock/secs 两处重复                                                                                                             | 测试代码豁免错误策略；运行时零影响，可收敛 test_support                           |
+| 其余                         | vite envPrefix 前瞻键、backdrop-filter 最坏 4 层并存、:key 索引键、v-model.number 空串（Rust 校验兜底）、命令命名三风格并存（改名连带全量 invoke） | 均有豁免依据                                                                      |
+
+豁免清单必填声明：如上，无遗漏。
+
+### 三、亮点
+
+- A001 九项修复零回退，FIX001 修复质量经两轮交叉验证
+- 锁序纪律零违反：三路独立逐函数核对，workday → session → storage/settings/fire 单向无一处反向；生产代码零 unwrap/expect
+- PL005/PL006 新增代码质量高：reduce_day 18 用例锚定、跨午夜 live 与 db 逐项吻合；令牌化后 TS 零 any、零空 catch、无 v-html
+- 契约三方一致：generate_handler 11 命令、serde 四结构与 types.ts 逐字段对齐、事件名两端一致
+- 命令核心逻辑全部可无窗口直测（test_support 模式），测试零真实等待零真实数据
+
+> 总评：两轮对比代码基线显著变厚（打卡模型 + UI 重设计）但无 P0/P1；唯一 P2 是 PL005 接线时副作用次序偏离了自己定案的"库写先行"原则（数据丢失链，失败注入下确定）；P3 以前端反馈缺口（4 项）与合规口径（白名单 2 项）为主，无正确性错值。

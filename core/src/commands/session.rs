@@ -2,7 +2,6 @@
 //! 快照与提醒决策在此产出（纯逻辑可测），提醒副作用（emit/通知）交提醒子模块执行。
 //! PL005：计时门禁（未上班严格拒绝）+ 段起止事件留痕（按下时间点，图谱数据源）。
 
-use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -12,7 +11,6 @@ use super::workday::require_on_duty;
 use super::{lock, poison, wall_now_secs, AppContext, CommandError};
 use crate::reminder::ReminderConfig;
 use crate::session::{Clock, SessionState, TimerAction};
-use crate::storage::Storage;
 use crate::workday::EventKind;
 
 /// status 命令返回体：前端展示所需会话快照（serde 结构单一来源，TS 侧镜像）。
@@ -37,13 +35,22 @@ pub struct ReminderDecision {
     pub(super) notify_enabled: bool,
 }
 
-/// 落一个工作段：零秒段跳过（不写噪音行）；started_at = wall_now − 段秒。
-fn persist_segment(storage: &Mutex<Storage>, segment: Duration) -> Result<(), CommandError> {
-    if segment.is_zero() {
-        return Ok(());
-    }
-    let started_at = wall_now_secs()? - segment.as_secs() as i64;
-    poison(storage.lock())?.add_session(started_at, segment.as_secs() as i64)?;
+/// 落一个工作段并记段末事件（单事务，FIX002.9）：零秒段跳过会话行但事件照记；
+/// 会话行 started_at 与事件时刻取同一 wall 基准，at 为 None = 记账当下（自动下班传回填时刻）。
+fn persist_session_with_end<C: Clock>(
+    ctx: &AppContext<C>,
+    segment: Duration,
+    at: Option<i64>,
+) -> Result<(), CommandError> {
+    let now = wall_now_secs()?;
+    let at = at.unwrap_or(now);
+    let started_at = now - segment.as_secs() as i64;
+    poison(ctx.storage.lock())?.record_session_with_event(
+        started_at,
+        segment.as_secs() as i64,
+        at,
+        EventKind::SegmentEnd,
+    )?;
     Ok(())
 }
 
@@ -61,30 +68,66 @@ fn mark_segment<C: Clock>(ctx: &AppContext<C>, kind: EventKind) -> Result<(), Co
 }
 
 /// 开始新会话：仅 Idle 且在岗合法（未上班严格拒绝，前后端双保险的后端面）；
-/// 提醒触发状态清零（新段），段起点留痕。
+/// 提醒触发状态清零（新段），段起点留痕；留痕失败回滚回 Idle（FIX002.1）。
 pub(super) fn start_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     require_on_duty(ctx)?;
     lock(ctx)?.start()?;
-    mark_segment(ctx, EventKind::SegmentStart)?;
-    clear_reminder_fire(ctx)?;
+    let outcome =
+        mark_segment(ctx, EventKind::SegmentStart).and_then(|()| clear_reminder_fire(ctx));
+    if let Err(err) = outcome {
+        lock(ctx)?.reset(); // 回滚：留痕失败回到 start 前态（Idle，累计恒零），计时未开始
+        return Err(err);
+    }
     Ok(())
 }
 
-/// 暂停：本段时长 > 0 则落库；提醒触发状态清零（暂停即重置）；段终点留痕。
-/// （下班自动收段复用本函数，故 segment_end 事件在唯一收口处发出。）
-pub(super) fn pause_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+/// 暂停（at = None 记账当下；自动下班收段传 Some(回填时刻)——FIX002.4 口径）。
+/// 本段时长 > 0 则落库；提醒触发状态清零（暂停即重置）；段终点留痕。
+/// 落库/留痕失败回滚状态回 Running{原起点} 并扣回本段——数据未落库，计时继续（FIX002.1）。
+pub(super) fn pause_session_at<C: Clock>(
+    ctx: &AppContext<C>,
+    at: Option<i64>,
+) -> Result<(), CommandError> {
+    // 状态先绑定再 match：match 暂存值（scrutinee）里的锁临时会活到 match 结束，
+    // 非_running 分支内再取同一把锁即自锁死锁（FIX002 实测教训）
+    let snapshot = *lock(ctx)?.state();
+    let start = match snapshot {
+        SessionState::Running { start } => start,
+        // 非 Running：转发 pause() 的权威错误（NotRunning）
+        _ => {
+            lock(ctx)?.pause()?;
+            return Ok(());
+        }
+    };
     let segment = lock(ctx)?.pause()?;
-    clear_reminder_fire(ctx)?;
-    persist_segment(&ctx.storage, segment)?;
-    mark_segment(ctx, EventKind::SegmentEnd)
+    let outcome =
+        clear_reminder_fire(ctx).and_then(|()| persist_session_with_end(ctx, segment, at));
+    if let Err(err) = outcome {
+        // 回滚后数据未落库——落诊断日志（容错白名单 ⑥ 通道；FIX002.7）
+        crate::diag::log(&format!("暂停落库/留痕失败已回滚（计时继续）：{err}"));
+        lock(ctx)?.undo_pause(SessionState::Running { start }, segment);
+        return Err(err);
+    }
+    Ok(())
 }
 
-/// 继续：仅 Paused 合法，累计被继承；提醒触发状态清零（新段起算）；段起点留痕。
+/// 暂停（记账当下；托盘/热键/前端共用入口）。
+pub(super) fn pause_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    pause_session_at(ctx, None)
+}
+
+/// 继续：仅 Paused 合法，累计被继承；提醒触发状态清零（新段起算）；段起点留痕；
+/// 留痕失败回滚回 Paused（FIX002.1——resume 不动累计，快照即完整体）。
 /// （在岗不变量：Paused 只会出现在在岗期间——下班时会话已复位 Idle，故无需再过门禁。）
 fn resume_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    let snapshot = *lock(ctx)?.state();
     lock(ctx)?.resume()?;
-    mark_segment(ctx, EventKind::SegmentStart)?;
-    clear_reminder_fire(ctx)?;
+    let outcome =
+        mark_segment(ctx, EventKind::SegmentStart).and_then(|()| clear_reminder_fire(ctx));
+    if let Err(err) = outcome {
+        lock(ctx)?.restore_state(snapshot);
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -100,12 +143,21 @@ pub(crate) fn toggle_session<C: Clock>(ctx: &AppContext<C>) -> Result<TimerActio
     Ok(action)
 }
 
-/// 退出收尾：Running 态先落库（数据不丢定案），Paused 段已在最近一次 pause 落库、Idle 无事。
-pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+/// 班内有运行段则收段落库（FIX002.14：下班与退出收尾共用；at 语义见 pause_session_at）；
+/// Paused/Idle 无事。
+pub(crate) fn close_running_segment<C: Clock>(
+    ctx: &AppContext<C>,
+    at: Option<i64>,
+) -> Result<(), CommandError> {
     if matches!(lock(ctx)?.state(), SessionState::Running { .. }) {
-        pause_session(ctx)?;
+        pause_session_at(ctx, at)?;
     }
     Ok(())
+}
+
+/// 退出收尾：班内有运行段先收段落库（数据不丢定案），Paused 段已在最近一次 pause 落库、Idle 无事。
+pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    close_running_segment(ctx, None)
 }
 
 /// 重开（先落库再重开，用户定案）：仅 Running 有未落库本段——Paused 的段已在
@@ -114,10 +166,15 @@ pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), C
 fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     require_on_duty(ctx)?;
     let mut session = lock(ctx)?;
-    if matches!(session.state(), SessionState::Running { .. }) {
+    if let SessionState::Running { .. } = *session.state() {
         let segment = session.pause()?;
-        persist_segment(&ctx.storage, segment)?;
-        mark_segment(ctx, EventKind::SegmentEnd)?;
+        let now = wall_now_secs()?;
+        poison(ctx.storage.lock())?.record_session_with_event(
+            now - segment.as_secs() as i64,
+            segment.as_secs() as i64,
+            now,
+            EventKind::SegmentEnd,
+        )?;
     }
     session.reset();
     session.start()?;
@@ -190,8 +247,9 @@ pub fn session_restart(handle: State<'_, AppContext>) -> Result<(), CommandError
 }
 
 /// 查询会话快照（前端 100ms tick 拉取；顺路执行提醒评估与自动下班检查）。
+/// async：评估链移出主线程（FIX002.8，本命令是最高频调用口）。
 #[tauri::command]
-pub fn session_status(
+pub async fn session_status(
     handle: State<'_, AppContext>,
     app: AppHandle,
 ) -> Result<SessionStatus, CommandError> {
@@ -411,6 +469,53 @@ mod tests {
         let (_, d) = status_snapshot(&ctx).unwrap();
         assert!(d.fire);
         assert_eq!(d.threshold_min, 50);
+    }
+
+    /// FIX002.1：storage 锁污染（持久化失败）时 pause 回滚状态回 Running——数据未落库计时继续。
+    #[test]
+    fn pause_rolls_back_running_on_persist_failure() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx);
+        start_session(&ctx).unwrap();
+        clock.advance(secs(60));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.storage.lock().unwrap();
+            panic!("污染 storage 锁");
+        }));
+        assert!(matches!(pause_session(&ctx), Err(CommandError::Poisoned)));
+        let s = status_snapshot(&ctx).unwrap().0;
+        assert_eq!(s.state, "running", "落库失败回滚：计时继续而非停在 Paused");
+    }
+
+    /// FIX002.1：start 留痕失败回滚回 Idle——计时未开始。
+    #[test]
+    fn start_rolls_back_to_idle_on_mark_failure() {
+        let ctx = ctx(FakeClock::new());
+        begin_duty(&ctx);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.storage.lock().unwrap();
+            panic!("污染 storage 锁");
+        }));
+        assert!(matches!(start_session(&ctx), Err(CommandError::Poisoned)));
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "idle");
+    }
+
+    /// FIX002.1：resume 留痕失败回滚回 Paused——累计保持、仍在暂停态。
+    #[test]
+    fn resume_rolls_back_to_paused_on_mark_failure() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx);
+        start_session(&ctx).unwrap();
+        clock.advance(secs(30));
+        pause_session(&ctx).unwrap();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.storage.lock().unwrap();
+            panic!("污染 storage 锁");
+        }));
+        assert!(matches!(resume_session(&ctx), Err(CommandError::Poisoned)));
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
     }
 
     /// 锁中毒严格报错：fire 锁被污染后动作命令传播 Poisoned，而非静默跳过清零（回归锚）。

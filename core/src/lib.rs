@@ -13,6 +13,7 @@ pub mod settings;
 pub mod storage;
 pub mod workday;
 
+mod diag;
 mod paths;
 
 use std::sync::Mutex;
@@ -82,6 +83,8 @@ fn handle_action(app: &AppHandle, id: &str) {
         "quit" => {
             let ctx = app.state::<AppContext>();
             if let Err(err) = commands::session::persist_before_quit(&ctx) {
+                // 容错白名单 ④：退出前落库失败仍退出（退出意图优先）；失败落诊断日志
+                diag::log(&format!("退出前落库失败（仍退出）：{err}"));
                 eprintln!("退出前落库失败（仍退出）：{err}");
             }
             app.exit(0);
@@ -146,6 +149,7 @@ pub fn run() {
     let storage = match Storage::open_default() {
         Ok(storage) => storage,
         Err(err) => {
+            diag::log(&format!("存储初始化失败：{err}"));
             eprintln!("存储初始化失败：{err}");
             std::process::exit(1);
         }
@@ -153,6 +157,7 @@ pub fn run() {
     let settings_path = match paths::default_config_path() {
         Ok(path) => path,
         Err(err) => {
+            diag::log(&format!("设置路径解析失败：{err}"));
             eprintln!("设置路径解析失败：{err}");
             std::process::exit(1);
         }
@@ -160,6 +165,7 @@ pub fn run() {
     let settings = match ReminderSettings::load(&settings_path) {
         Ok(settings) => settings,
         Err(err) => {
+            diag::log(&format!("设置加载失败：{err}"));
             eprintln!("设置加载失败：{err}");
             std::process::exit(1);
         }
@@ -168,6 +174,7 @@ pub fn run() {
     let workday = match storage.workday_latest() {
         Ok(latest) => WorkdayState::from_latest(latest),
         Err(err) => {
+            diag::log(&format!("工作日状态恢复失败：{err}"));
             eprintln!("工作日状态恢复失败：{err}");
             std::process::exit(1);
         }

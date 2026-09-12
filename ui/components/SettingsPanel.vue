@@ -39,7 +39,7 @@ function onSave(): void {
       <span>系统通知</span>
       <input v-model="draft.notify_enabled" type="checkbox" />
     </label>
-    <button class="save" type="button" @click="onSave">保存</button>
+    <button class="save btn-primary" type="button" @click="onSave">保存</button>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
   </section>
 </template>
@@ -71,27 +71,11 @@ function onSave(): void {
   font-family: var(--font-stack);
 }
 
+/* 保存钮配方在 App.vue 全局 .btn-primary，此处只留布局 */
 .save {
   align-self: center;
   padding: 7px 28px;
-  border: none;
-  border-radius: var(--r-pill);
-  background: var(--accent);
-  color: #fff;
-  font-family: var(--font-stack);
   font-size: 13px;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    transform 0.15s ease;
-}
-
-.save:hover {
-  background: color-mix(in srgb, var(--accent) 88%, #000);
-}
-
-.save:active {
-  transform: scale(0.96);
 }
 
 /* 保存失败提示：双主题可读的错误红 */
