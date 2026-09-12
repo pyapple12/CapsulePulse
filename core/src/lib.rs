@@ -218,14 +218,24 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // PANIC 取证（y.problems#5①）：默认 hook 只把 panic 打到 stderr（GUI 进程无人看见），
+            // 持锁线程 panic 后只剩"锁中毒"连锁日志、真凶无痕——这里链式挂一个 diag 落 logger，
+            // 消息 + 位置 + 线程名进 data/pulse.log，复现即可定位根因
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                let thread = std::thread::current();
+                let name = thread.name().unwrap_or("<unnamed>");
+                crate::diag::log(&format!("PANIC（线程 {name}）：{info}"));
+                default_hook(info);
+            }));
             // 玻璃效果挂载：失败严格抛错（setup 错误会上抛阻断启动），不静默降级
             #[cfg(target_os = "windows")]
             {
                 let Some(window) = app.get_webview_window("main") else {
                     return Err("主窗口不存在（tauri.conf.json 声明与代码不符）".into());
                 };
-                // 半透明深灰色调：静态 tint，深浅色观感由前端 CSS 分层处理（PL001.5）
-                window_vibrancy::apply_acrylic(&window, Some((32, 32, 32, 125)))?;
+                // 浅暖紫色调（PL007.2 糖果玻璃基底）：静态 tint，深浅色观感由前端 CSS 分层处理
+                window_vibrancy::apply_acrylic(&window, Some((238, 233, 246, 130)))?;
             }
             build_tray(app)?;
             register_global_shortcuts(app)?;

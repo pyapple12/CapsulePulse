@@ -38,7 +38,7 @@ fn send_notification(app: &AppHandle, threshold_min: u32) {
 
 /// 设置读取。
 fn get_settings_inner<C: Clock>(ctx: &AppContext<C>) -> Result<ReminderSettings, CommandError> {
-    Ok(poison(ctx.settings.lock())?.clone())
+    Ok(poison("设置", ctx.settings.lock())?.clone())
 }
 
 /// 设置保存：校验 → 持久化 → 更新内存态（任一步失败不污染内存态）。
@@ -47,7 +47,7 @@ fn set_settings_inner<C: Clock>(
     settings: &ReminderSettings,
 ) -> Result<(), CommandError> {
     settings.save(&ctx.settings_path)?;
-    let mut current = poison(ctx.settings.lock())?;
+    let mut current = poison("设置", ctx.settings.lock())?;
     *current = settings.clone();
     Ok(())
 }

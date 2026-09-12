@@ -80,15 +80,15 @@ watch(offset, refresh);
         <span>{{ day.duty_ended_at == null ? "在岗中" : hhmm(day.duty_ended_at) }}</span>
       </div>
       <div class="triple">
-        <div class="triple-item">
+        <div class="triple-item glass-chip chip-duty">
           <span class="t-label">在岗</span>
-          <span class="t-value">{{ fmtDuration(day.duty_secs) }}</span>
+          <span class="t-value t-duty">{{ fmtDuration(day.duty_secs) }}</span>
         </div>
-        <div class="triple-item">
+        <div class="triple-item glass-chip chip-work">
           <span class="t-label">工作</span>
-          <span class="t-value">{{ fmtDuration(day.work_secs) }}</span>
+          <span class="t-value t-work">{{ fmtDuration(day.work_secs) }}</span>
         </div>
-        <div class="triple-item">
+        <div class="triple-item glass-chip chip-rest">
           <span class="t-label">休息</span>
           <span class="t-value">{{ fmtDuration(day.rest_secs) }}</span>
         </div>
@@ -146,13 +146,19 @@ watch(offset, refresh);
   font-weight: 600;
 }
 
-/* 时间图谱：连续圆角胶囊条，工作 accent 实底 / 休息 ink 低明度；块间 2px 呼吸缝（纯 CSS，不引图表库） */
+/* 时间图谱（PL007.4 蒙皮）：玻璃内凹轨道 + rim 光；工作 = 紫渐变实条 / 休息 = 薄荷半透明；
+   块间 2px 呼吸缝（纯 CSS，不引图表库），宽度口径不变 */
 .chart {
   display: flex;
   gap: 2px;
   width: 100%;
-  height: 14px;
+  height: 18px;
+  padding: 2px;
   border-radius: var(--r-pill);
+  background: rgba(120, 120, 128, 0.14);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.1),
+    var(--rim-light);
   overflow: hidden;
 }
 
@@ -162,11 +168,12 @@ watch(offset, refresh);
 }
 
 .seg.work {
-  background: var(--accent);
+  background: var(--grad-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .seg.rest {
-  background: color-mix(in srgb, currentColor 12%, transparent);
+  background: color-mix(in srgb, var(--mint-bright) 65%, transparent);
 }
 
 .chart-axis {
@@ -177,7 +184,8 @@ watch(offset, refresh);
   font-size: 11px;
 }
 
-/* 三值：两行对仗（标签 Caption 层 + 数值 Title 层），替代一行"｜"挤排 */
+/* 三值（PL007.5）：三枚 .glass-chip 胶囊（材质在全局类），此处只留尺寸与身份色：
+   在岗 = 紫描边 + 紫值 / 工作 = 薄荷描边 + 薄荷值 / 休息 = 中性描边（PL007 方向定案 1） */
 .triple {
   display: flex;
   justify-content: space-evenly;
@@ -190,6 +198,20 @@ watch(offset, refresh);
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+}
+
+.chip-duty {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.chip-work {
+  border: 1px solid color-mix(in srgb, var(--mint) 35%, transparent);
+}
+
+.chip-rest {
+  border: 1px solid rgba(128, 128, 128, 0.3);
 }
 
 .t-label {
@@ -201,6 +223,14 @@ watch(offset, refresh);
   font-size: 15px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.t-value.t-duty {
+  color: var(--accent);
+}
+
+.t-value.t-work {
+  color: var(--mint);
 }
 
 /* 段明细：起止 HH:MM + 时长 + 类型；去常驻底色，hover 微亮；列表过长内部滚动 */
@@ -241,7 +271,13 @@ watch(offset, refresh);
 }
 
 .kind.rest {
-  color: var(--ink-2);
+  color: var(--mint);
+}
+
+@media (prefers-color-scheme: dark) {
+  .chart {
+    background: rgba(0, 0, 0, 0.28);
+  }
 }
 
 .empty {

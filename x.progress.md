@@ -160,8 +160,46 @@
 - [x] FIX002.14 [P3] 测试计数口径 + 配置死键 —— 实跑 cargo test = 88 lib + 1 探针 = 89；README/AGENTS 状态行改"89 项测试全绿（含 1 项存储探针集成测试）"；tsconfig.json 删 `"jsx": "preserve"` 死键；验证：实跑对照 + npm run build（2026-09-12 已验证：89 = 实跑两行汇总，口径注记落位）
 - [x] FIX002.15 FIX002 收口 —— 门禁全绿（cargo fmt --check / clippy -D warnings / test / doc 0 告警 / npm build / vue-tsc / prettier）+ A002 P 级逐项反向验证 + 结论回写 z.plan 附录 A002 状态行 + x.progress 勾结；验证：门禁 + 反向验证清单（2026-09-12 已验证：88+1 全绿、七项门禁 0 告警、反向验证清单全过、live 冒烟全链正常、真实数据保留完好；详见 .temp/fix002-verification.md）
 
+### PL007: 糖果玻璃材质层 [z.plan#附录 PL007]
+
+> 范围：参考图（Liquid Glass UI Kit）材质与色彩层整体升级——轮廓光/带色投影/彩色渐变/虹彩卡/奶白基底五要素，紫+薄荷 pastel 色板，深浅色同步。布局/信息架构零改动；three.js 不引入。
+> 红线：保活不回归；数据口径零变化；布局结构与 PL006 收口态一致。
+
+- [x] PL007.1 令牌换血 + 材质工具类 —— App.vue `:root` 新增糖果令牌：`--grad-primary`（紫罗兰 165deg 渐变）、`--grad-mint`（薄荷 165deg）、`--iridescent`（粉#FBCFE8→紫#DDD6FE→青#A5F3FC pastel）、`--edge-glow`（彩色边缘泛光 0 0 0 1px + 0 2px 12px）、`--shadow-candy`（rgba(90,70,140,.20)）、rim-light（inset 0 1.5px 0 rgba(255,255,255,.9)）、奶白 `--glass-bg`；新增全局材质类 `.glass-panel/.glass-chip/.iridescent`；深色衍生版（深紫灰底 rgba(30,24,48,.55) + accent 降饱和 + 轮廓光加强）；验证：vue-tsc + live 双主题观感（2026-09-13 已验证：prettier/vue-tsc/build 绿；糖果令牌与三材质类在位、深色衍生齐备、废弃 --shadow-float 已随迁清理；C4 探针从 App.vue 源码正则取真实令牌计算而非手写 mock）
+- [x] PL007.2 Acrylic tint 调整 —— lib.rs `apply_acrylic((32,32,32,125))` → `(238,233,246,130)` 浅暖紫（本 PL 唯一 Rust 触点，一行常量）；验证：live 玻璃底观感（糖果风格基底）+ 双主题（2026-09-13 已验证：cargo fmt/clippy/check/doc 绿；dev 实例以新 tint 启动正常，观感终审待用户）
+- [x] PL007.3 主操作件蒙皮 —— 全局 `.btn-primary` 换紫渐变底（--grad-primary + rim 高光 inset + --shadow-candy 投影）、`.btn-ghost` 换薄荷渐变；App.vue pill 同步紫渐变+内凹高光；验证：live 按压/置灰联动 + 双主题（2026-09-13 已验证：build 绿；hover/active 改 filter 通道适配渐变底，置灰态光效一并退场；观感终审待用户）
+- [x] PL007.4 分段滑块 + 图谱条蒙皮 —— 分段滑块白色浮起 + 带色投影；图谱 `.chart` 改玻璃轨道（inset 轨道感 + rim 光）、`.seg.work` = --grad-primary、`.seg.rest` = 薄荷半透明；验证：live + 数据零变化对照（G4 手段复用）（2026-09-13 已验证：build 绿；图谱宽度计算零改动仅样式，work 紫渐变 + rest 薄荷 + 深色轨道加深在位；观感终审待用户）
+- [x] PL007.5 三值 chips + 数字渐变描字 —— 三值行改三枚 `.glass-chip`（在岗紫/工作薄荷/休息中性）；`.digits` 加渐变描字（background-clip:text + --grad-primary 变体）并保留 `.digits-solid` 纯色回退类；验证：live + 对比度实测（不达标即回退）（2026-09-13 已验证：C4 探针——数字描字浅端 5.22:1 / 深 10.74:1 达标，未启用回退类；chips 值色 5.43 / 5.21:1；身份色走值色 + 同色描边，chip 底保持中性以保对比度）
+- [x] PL007.6 弹层/文案条 iridescent 化 —— 确认框/设置浮层 `.iridescent` 底 + rim 光；提醒条琥珀保留；自动下班条 rgba(48,209,88,.22) → 薄荷渐变半透明（统一色板）；验证：live 双主题（2026-09-13 已验证：build 绿；两浮层挂 .iridescent（材质配方收敛全局类），琥珀/错误红原样未动，auto-out 薄荷渐变双主题在位；观感终审待用户）
+- [x] PL007.7 PL007 收口 —— 门禁全绿（七项）+ C1 双主题/C2 保活与全链/C3 数据对照/C4 对比度（正文 ≥4.5:1）全过 + 布局零改动自查（diff 无结构变更）+ 结论回写 z.plan 附录 PL007 + README/AGENTS 状态行 + 勾结；验证：门禁 + C1–C4（2026-09-13 已验证：七项门禁全绿（fmt/clippy/test 89/doc/build/vue-tsc/prettier）；C4 探针 16/16；布局零改动自查——模板 diff 仅 class 追加、零元素增删移动；live 启动冒烟正常；C1 深色全组件视觉核验通过（计时页/分段滑块/图谱/chips/双浮层）+ C3 live 对照通过（工作 5h10m 与 sessions 八段之和精确一致、三值自洽）+ C2 切页/浮层交互通过（未触打卡写操作）；浅色主题随 PL008/PL009 双主题环节顺带复核——用户定案：深色暂时过，后两轮 PL 不缺复核机会）
+- [x] PL007.8 锁中毒取证与文案（y.problems#5 第①②层）—— lib.rs setup 最前挂 `std::panic::set_hook`（take_hook 取默认 hook 链式回调，保留开发期 stderr 输出）：panic 消息 + 位置 + 线程名经 diag::log 落 data/pulse.log（"PANIC（线程 X）：panicked at ..."），首次 panic 不再无痕；commands/mod.rs `CommandError::Poisoned` 改携带锁名 `Poisoned(&'static str)`（display "{0}锁已中毒…"），poison() 助手增锁名参数，全部调用点按锁实名传入（会话/存储/工作日/设置/提醒）；FIX002.1 四个 catch_unwind 用例断言升级为带锁名变体；验证：cargo 门禁 + 用例（2026-09-13 已验证：fmt/clippy -D warnings/check/doc/test 89 全绿；锁名断言 4 处过 = 锁名贯通到错误文案；panic hook 本体行为待下次实机复现在 pulse.log 验证，y.problems#5 状态已回改）
+
 ## 未完成
 
-- （暂无）
+### PL008: 布局翻新 [z.plan#附录 PL008]
+
+> 范围：整窗信息架构重排——380×560 resizable 窗、底部 dock 导航（lucide-vue-next 新依赖）、计时页 8h 进度环主体、统计页四区卡片化 + 周视图（Rust 新命令 week_detail）。设计含量最重，**立项细化与执行全程启用 frontend-design skill**。
+> 红线：保活不回归；数据口径零变化；糖果材质令牌体系不推倒。
+
+- [ ] PL008.1 设计阶段（设计 skill 主场）—— 跑 frontend-design skill：线框脑暴两版（环主型/卡主型）→ 反模板审查 → 定稿线框（ASCII + 尺寸标注落 z.plan 附录 PL008"定稿线框"节）→ 令牌补齐；验证：线框经用户评审通过
+- [ ] PL008.2 窗口几何 —— tauri.conf.json 宽 360→380、高 480→560、`resizable: false→true`；App.vue 高度 calc 与间距改弹性适配（拉伸不破相、内容区 min/max 约束）；验证：live 拉伸至极限不溢出（L1）
+- [ ] PL008.3 底部 dock 导航 —— 新增依赖 lucide-vue-next（Timer/ChartColumn 等约 6 枚）；新组件 DockNav.vue（图标+文字、激活态糖果高光、底部固定）；App.vue 替换顶部分段、**v-show 保活接线原样迁移**；‹›箭头/⚙ 换 lucide 图标（ChevronLeft/ChevronRight/Settings）；验证：live dock 切页 + 统计页停留跨阈值提醒条仍触发（保活红线）
+- [ ] PL008.4 计时页进度环 —— 新组件 ProgressRing.vue（SVG 圆环：糖果玻璃轨道 + 紫渐变 stroke-dasharray 进度弧 + 数字居环中 40px 继承糖果描字）；进度 = day_detail.work_secs ÷ (get_settings.workday_auto_out_hours × 3600)（展示计算零 Rust）；未上班环虚线置灰；TimerCard 数字/按钮融入环主体区；验证：live 打卡前虚线/计时中增长/下班定格（L3）+ 数值与 day_detail 对照
+- [ ] PL008.5 统计页卡片化 —— 日导航/图谱/三值/明细四区各自 `.glass-panel` 浮起卡（带 rim 光与投影），纵向流式排列、明细卡内部滚动；验证：live 四区齐备 + 数据口径零变化（L5）
+- [ ] PL008.6 周视图（Rust 触点）—— commands/workday.rs 新增 `week_detail` 命令（锚=今日，回溯 7 日循环 day_bounds + events_between + reduce_day → Vec<{date, work_secs, duty_secs}> DTO，serde 单一来源）+ types.ts 镜像 WeekDay/WeekSummary；前端周卡：7 条横向条形（今日紫渐变高亮、其余玻璃底、条长=work_secs 占 7 日峰值）；验证：cargo test 周聚合用例（跨周边界：周日晚锚点 7 日切片正确、空日为零）+ live 7 条与逐日 day_detail 对照
+- [ ] PL008.7 深色主题同步 —— dock/进度环/周卡/四区卡逐一配暗夜衍生（深紫底 + 轮廓光加强 + accent 降饱和）；验证：live 双主题全组件过
+- [ ] PL008.8 PL008 收口 —— 门禁全绿 + L1–L5 全过 + 保活红线复核 + 结论回写 z.plan 附录 PL008（含定稿线框）+ README/AGENTS 状态行 + 勾结；验证：门禁 + L1–L5
+
+### PL009: 光与生命感 [z.plan#附录 PL009]
+
+> 范围：动效与点睛收尾——指针跟随高光、环境光呼吸、微交互、双主题全形态审计；three.js 降级为可选时间盒实验（真折射原型，不进主线）。
+> 红线：reduced-motion 全退避；无新增运行时依赖（three.js 仅实验分支）；数据口径零变化。
+
+- [ ] PL009.1 指针跟随高光 —— App.vue 全局 pointermove（rAF 节流）写 CSS 变量 `--mx/--my`；.glass-panel/.iridescent 叠加 radial-gradient 高光层（位置取变量）；验证：live 高光随指针 + reduced-motion 退静态
+- [ ] PL009.2 环境光呼吸 —— .iridescent/@keyframes 渐变位 8s 缓移（background-position/角度插值）；reduced-motion 退避；验证：live 观感 + 退避生效
+- [ ] PL009.3 微交互 —— 按压涟漪（伪元素 scale 扩散）、打卡成功 pill 扫光一次（linear-gradient 位移动画）、dock 切页光轨；验证：live 三处触发正常 + reduced-motion 直切
+- [ ] PL009.4 three.js 时间盒实验（可选）—— 独立分支原型页：折射玻璃卡（WebGL backdrop 采样/折射 shader），时间盒验证帧率（≥55fps）与透明窗口合成正确性；结论（效果/性能/去留建议）落 z.plan 附录 PL009"实验结论"节；验证：探针实测数据落档
+- [ ] PL009.5 全形态审计 —— 深浅双主题逐组件审计（对比度/层次/rim 光一致性/环与周卡），问题即改；验证：live 审计清单逐项过
+- [ ] PL009.6 PL009 收口 —— 门禁全绿 + M1–M3 全过（M4 出结论）+ 结论回写 z.plan 附录 PL009 + README/AGENTS 状态行 + 勾结；验证：门禁 + M1–M3
 
 （后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）

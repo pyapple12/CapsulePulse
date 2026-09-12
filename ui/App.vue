@@ -244,7 +244,7 @@ onUnmounted(() => {
     <StatsView v-show="activeTab === 'stats'" :refresh-key="statsRefreshKey" />
     <Transition name="sheet">
       <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
-        <section class="floating-sheet" role="dialog" aria-label="设置">
+        <section class="floating-sheet iridescent" role="dialog" aria-label="设置">
           <SettingsPanel :settings="settings" :error="saveError" @save="onSaveSettings" />
         </section>
       </div>
@@ -261,17 +261,27 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* —— PL006 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份 —— */
+/* —— PL007 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份。
+   糖果玻璃材质层：紫（主/工作）+ 薄荷（次/休息）pastel 色板，轮廓光/带色投影/虹彩渐变齐备 —— */
 :root {
-  --accent: #0071e3;
+  --accent: #7c3aed;
+  --mint: #0f766e;
+  --mint-bright: #34d399;
   --ink: #1d1d1f;
   --ink-2: color-mix(in srgb, #1d1d1f 55%, transparent);
   --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg: rgba(252, 250, 255, 0.66);
+  --chip-bg: rgba(255, 255, 255, 0.45);
   --glass-blur: blur(28px) saturate(1.6);
   --glass-highlight:
     inset 0 1px rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.16);
-  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.9);
+  --edge-glow: 0 0 0 1px rgba(255, 255, 255, 0.55), 0 2px 12px rgba(139, 92, 246, 0.25);
+  --shadow-candy: 0 10px 28px rgba(90, 70, 140, 0.2);
+  --grad-primary: linear-gradient(165deg, #8a5cff 0%, #7448f5 55%, #6a3ae8 100%);
+  --grad-digit: linear-gradient(165deg, #7c3aed 0%, #5b21b6 100%);
+  --grad-mint: linear-gradient(165deg, #34d399 0%, #10b981 100%);
+  --iridescent: linear-gradient(135deg, #fbcfe8 0%, #ddd6fe 45%, #a5f3fc 100%);
   --r-card: 20px;
   --r-ctrl: 13px;
   --r-pill: 999px;
@@ -281,13 +291,48 @@ onUnmounted(() => {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #0a84ff;
+    /* 暗夜霓虹衍生版：深紫灰底 + 降饱和 accent + 加强轮廓光（PL007 方向定案 5） */
+    --accent: #c0b0fd;
+    --mint: #5eead4;
+    --mint-bright: #2dd4bf;
     --ink: #f5f5f7;
     --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
-    --glass-bg: rgba(30, 30, 30, 0.45);
+    --glass-bg: rgba(24, 18, 40, 0.72);
+    --chip-bg: rgba(255, 255, 255, 0.1);
     --glass-highlight:
       inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
+    --edge-glow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 2px 16px rgba(167, 139, 250, 0.4);
+    --shadow-candy: 0 10px 28px rgba(0, 0, 0, 0.5);
+    --grad-primary: linear-gradient(165deg, #7a5cf0 0%, #5b3fd6 55%, #4c2fb8 100%);
+    --grad-digit: linear-gradient(165deg, #d8c7ff 0%, #a78bfa 100%);
+    --grad-mint: linear-gradient(165deg, #0c8a60 0%, #075e42 100%);
+    --iridescent: linear-gradient(
+      135deg,
+      rgba(52, 36, 86, 0.92) 0%,
+      rgba(38, 28, 64, 0.94) 45%,
+      rgba(22, 52, 66, 0.92) 100%
+    );
   }
+}
+
+/* —— 糖果材质工具类（PL007.1）：半径由消费方自定，材质配方收敛于此 ——
+   .glass-panel 玻璃面板（PL008 布局卡的底材）/ .glass-chip 胶囊小件 / .iridescent 虹彩浮层 */
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--rim-light), var(--glass-highlight), var(--shadow-candy);
+}
+
+.glass-chip {
+  background: var(--chip-bg);
+  box-shadow: var(--rim-light), var(--glass-highlight);
+}
+
+.iridescent {
+  background: var(--iridescent);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--rim-light), var(--edge-glow), var(--shadow-candy);
 }
 
 /* —— 浮层共用形态：确认框与设置面板同规格（居中玻璃片 + 压暗遮罩）—— */
@@ -309,68 +354,67 @@ onUnmounted(() => {
   width: 240px;
   padding: 20px;
   border-radius: var(--r-sheet);
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-highlight), var(--shadow-float);
+  /* 材质（虹彩底 + 轮廓光 + 彩色泛光 + 糖果投影）由全局 .iridescent 提供（PL007.6） */
   color: var(--ink);
   /* 确认框是 .glass-card 的兄弟节点，须显式继承展示级字族（FIX002：字体脱管修复） */
   font-family: var(--font-stack);
   user-select: none;
 }
 
-/* —— 全局按钮配方（FIX002 令牌化收尾）：accent 实底主按钮 / 玻璃底次按钮，跨组件单一来源 —— */
+/* —— 全局按钮配方（PL007.3 糖果蒙皮）：主 = 紫渐变 + 轮廓光 + 带色投影 / 次 = 薄荷渐变，跨组件单一来源 —— */
 .btn-primary {
   border: none;
   border-radius: var(--r-pill);
-  background: var(--accent);
+  background: var(--grad-primary);
+  box-shadow: var(--rim-light), var(--shadow-candy);
   color: #fff;
   font-family: var(--font-stack);
   cursor: pointer;
   transition:
-    background 0.15s ease,
+    filter 0.15s ease,
     transform 0.15s ease;
 }
 
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--accent) 88%, #000);
+  filter: brightness(1.08);
 }
 
 .btn-primary:active {
+  filter: brightness(0.95);
   transform: scale(0.96);
 }
 
 .btn-ghost {
-  border: 1px solid rgba(128, 128, 128, 0.35);
+  border: 1px solid color-mix(in srgb, var(--mint) 45%, transparent);
   border-radius: var(--r-pill);
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--grad-mint);
+  box-shadow: var(--rim-light);
   color: inherit;
   font-family: var(--font-stack);
   cursor: pointer;
   transition:
-    background 0.15s ease,
+    filter 0.15s ease,
     transform 0.15s ease;
 }
 
 .btn-ghost:hover {
-  background: rgba(128, 128, 128, 0.22);
+  filter: brightness(1.05) saturate(1.15);
 }
 
 .btn-ghost:active {
+  filter: brightness(0.95);
   transform: scale(0.96);
 }
 
-/* 置灰（未上班）：不可点击且视觉降级，双主题可辨识 */
+/* 置灰（未上班）：不可点击且视觉降级，双主题可辨识；糖果光效一并退场 */
 .btn-primary:disabled,
 .btn-ghost:disabled {
   background: rgba(128, 128, 128, 0.14);
   border-color: rgba(128, 128, 128, 0.22);
+  box-shadow: none;
   color: inherit;
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.btn-primary:disabled {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .sheet-enter-active,
@@ -421,7 +465,7 @@ onUnmounted(() => {
   border-radius: var(--r-card);
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-highlight);
+  box-shadow: var(--rim-light), var(--glass-highlight);
   user-select: none;
   color: var(--ink);
   font-family: var(--font-stack);
@@ -467,8 +511,9 @@ onUnmounted(() => {
   animation: banner-in 0.18s ease;
 }
 
+/* 自动下班条（PL007.6）：绿 → 薄荷渐变半透明（统一糖果色板）；提醒条琥珀保留原样 */
 .reminder.auto-out {
-  background: rgba(48, 209, 88, 0.22);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.35) 0%, rgba(110, 231, 183, 0.3) 100%);
 }
 
 /* 动作/打卡失败文案条（FIX002.3）：红 tint，命令失败对用户可见 */
@@ -488,7 +533,7 @@ onUnmounted(() => {
   }
 }
 
-/* iOS 式分段控件：玻璃胶囊轨道 + 白色滑块随 activeTab 位移 */
+/* iOS 式分段控件（PL007.4 蒙皮）：紫晕玻璃轨道 + 白色滑块浮起带色投影，随 activeTab 位移 */
 .tabs {
   position: relative;
   display: grid;
@@ -496,7 +541,7 @@ onUnmounted(() => {
   width: 200px;
   padding: 3px;
   border-radius: var(--r-pill);
-  background: rgba(120, 120, 128, 0.16);
+  background: rgba(139, 92, 246, 0.12);
 }
 
 .tabs-thumb {
@@ -506,8 +551,10 @@ onUnmounted(() => {
   width: calc(50% - 3px);
   height: calc(100% - 6px);
   border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.12),
+    0 3px 10px rgba(139, 92, 246, 0.3);
   transition: transform 0.22s var(--ease-spring);
 }
 
@@ -534,8 +581,19 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
+  .tabs {
+    background: rgba(139, 92, 246, 0.16);
+  }
+
   .tabs-thumb {
     background: rgba(255, 255, 255, 0.22);
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      0 3px 10px rgba(139, 92, 246, 0.35);
+  }
+
+  .reminder.auto-out {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(13, 148, 136, 0.3) 100%);
   }
 }
 
@@ -548,7 +606,7 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 打卡 pill：未上班 = accent 描边可按态；在岗中 = accent 着色玻璃 + 内凹高光（视觉常驻"已按下"） */
+/* 打卡 pill（PL007.3 糖果蒙皮）：未上班 = 紫 accent 描边可按态；在岗中 = 紫渐变实底 + 内凹高光（视觉常驻"已按下"） */
 .pill {
   padding: 8px 36px;
   border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
@@ -572,11 +630,11 @@ onUnmounted(() => {
 
 .pill.active {
   border-color: transparent;
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  backdrop-filter: var(--glass-blur);
-  color: var(--ink);
+  background: var(--grad-primary);
+  color: #fff;
   box-shadow:
-    var(--glass-highlight),
-    inset 0 2px 6px rgba(0, 0, 0, 0.18);
+    var(--rim-light),
+    inset 0 2px 6px rgba(0, 0, 0, 0.22),
+    var(--shadow-candy);
 }
 </style>

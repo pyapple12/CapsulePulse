@@ -20,7 +20,7 @@ pub struct SessionStats {
 
 /// 统计快照：三值聚合（统计按当前真实本地时间定界）。
 fn stats_snapshot<C: Clock>(ctx: &AppContext<C>) -> Result<SessionStats, CommandError> {
-    let storage = poison(ctx.storage.lock())?;
+    let storage = poison("存储", ctx.storage.lock())?;
     let now = Local::now();
     Ok(SessionStats {
         today_secs: storage.today_total(&now)?,

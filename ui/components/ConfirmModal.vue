@@ -13,7 +13,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
 <template>
   <Transition name="sheet">
     <div v-if="open" class="overlay" @click.self="emit('cancel')">
-      <section class="floating-sheet" role="alertdialog" :aria-label="title">
+      <section class="floating-sheet iridescent" role="alertdialog" :aria-label="title">
         <h2 class="sheet-title">{{ title }}</h2>
         <p class="sheet-message">{{ message }}</p>
         <div class="sheet-actions">

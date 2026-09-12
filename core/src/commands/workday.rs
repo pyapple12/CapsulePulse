@@ -16,7 +16,7 @@ use crate::workday::{auto_out_due, reduce_day, DaySummary, EventKind, WorkdayErr
 /// 已在岗返回 [`WorkdayError::AlreadyOnDuty`]；锁中毒/存储失败照常上抛。
 pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i64, CommandError> {
     // workday 锁全程持有：check-then-act 原子化（防并发双击开出两行）
-    let mut workday = poison(ctx.workday.lock())?;
+    let mut workday = poison("工作日", ctx.workday.lock())?;
     if workday.is_on_duty() {
         return Err(CommandError::Workday(WorkdayError::AlreadyOnDuty));
     }
@@ -24,7 +24,7 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i
         let mut session = lock(ctx)?;
         session.reset();
     }
-    let id = poison(ctx.storage.lock())?.workday_open_with_event(at, EventKind::ClockIn)?;
+    let id = poison("存储", ctx.storage.lock())?.workday_open_with_event(at, EventKind::ClockIn)?;
     workday.clock_in(at, id)?;
     Ok(id)
 }
@@ -39,14 +39,14 @@ pub(super) fn clock_out_inner<C: Clock>(
     at: i64,
     kind: EventKind,
 ) -> Result<(), CommandError> {
-    let mut workday = poison(ctx.workday.lock())?;
+    let mut workday = poison("工作日", ctx.workday.lock())?;
     let WorkdayState::OnDuty { clock_in_at: _, id } = *workday else {
         return Err(CommandError::Workday(WorkdayError::NotOnDuty));
     };
     // 自动下班：段末事件随下班一并记回填时刻（与纯归约契约测试口径一致）
     let pause_at = matches!(kind, EventKind::AutoClockOut).then_some(at);
     super::session::close_running_segment(ctx, pause_at)?;
-    poison(ctx.storage.lock())?.workday_close_with_event(id, at, kind)?;
+    poison("存储", ctx.storage.lock())?.workday_close_with_event(id, at, kind)?;
     workday.clock_out()?;
     {
         let mut session = lock(ctx)?;
@@ -75,13 +75,13 @@ pub(super) fn day_detail_inner<C: Clock>(
 ) -> Result<DaySummary, CommandError> {
     let (day_start, day_end) = day_bounds(offset, now_secs)?;
     let fetch_start = {
-        let workday = poison(ctx.workday.lock())?;
+        let workday = poison("工作日", ctx.workday.lock())?;
         match *workday {
             WorkdayState::OnDuty { clock_in_at, .. } => day_start.min(clock_in_at),
             WorkdayState::Off => day_start,
         }
     };
-    let events = poison(ctx.storage.lock())?.events_between(fetch_start, day_end)?;
+    let events = poison("存储", ctx.storage.lock())?.events_between(fetch_start, day_end)?;
     Ok(reduce_day(&events, day_start, day_end, now_secs))
 }
 
@@ -91,10 +91,10 @@ pub(super) fn try_auto_clock_out<C: Clock>(
     ctx: &AppContext<C>,
 ) -> Result<Option<i64>, CommandError> {
     let due_at = {
-        let workday = poison(ctx.workday.lock())?;
+        let workday = poison("工作日", ctx.workday.lock())?;
         match *workday {
             WorkdayState::OnDuty { clock_in_at, .. } => {
-                let hours = poison(ctx.settings.lock())?.workday_auto_out_hours;
+                let hours = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
                 auto_out_due(wall_now_secs()?, clock_in_at, hours)
             }
             WorkdayState::Off => None,
@@ -108,7 +108,7 @@ pub(super) fn try_auto_clock_out<C: Clock>(
 }
 /// 计时门禁：未上班严格拒绝（前后端双保险的后端面；托盘/热键/UI 共用）。
 pub(super) fn require_on_duty<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
-    let workday = poison(ctx.workday.lock())?;
+    let workday = poison("工作日", ctx.workday.lock())?;
     if !workday.is_on_duty() {
         return Err(CommandError::Workday(WorkdayError::NotOnDuty));
     }

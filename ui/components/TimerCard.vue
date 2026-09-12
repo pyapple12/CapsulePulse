@@ -112,8 +112,13 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 大计时器：展示级字族（SF/Segoe UI Variable）+ 等宽数字（tabular-nums 防跳动），内容层无框无底 */
+/* 大计时器：展示级字族（SF/Segoe UI Variable）+ 等宽数字（tabular-nums 防跳动），内容层无框无底。
+   PL007.5 渐变描字：紫罗兰渐变经 background-clip 上字；对比度不达标或裁切不可用时挂 .digits-solid 回退纯色 */
 .digits {
+  background: var(--grad-digit);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-family: var(--font-stack);
   font-variant-numeric: tabular-nums;
   font-size: 56px;
@@ -121,6 +126,13 @@ onUnmounted(() => {
   letter-spacing: 1px;
   line-height: 1.1;
   cursor: default;
+}
+
+/* 纯色回退：恢复实色文字（保留等宽与字号），一键换回 */
+.digits-solid {
+  background: none;
+  -webkit-text-fill-color: initial;
+  color: var(--ink);
 }
 
 /* 按钮配方（实底/玻璃/置灰/按压）在 App.vue 全局 .btn-primary/.btn-ghost，此处只留尺寸 */

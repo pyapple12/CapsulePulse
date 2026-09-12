@@ -45,7 +45,7 @@ fn persist_session_with_end<C: Clock>(
     let now = wall_now_secs()?;
     let at = at.unwrap_or(now);
     let started_at = now - segment.as_secs() as i64;
-    poison(ctx.storage.lock())?.record_session_with_event(
+    poison("存储", ctx.storage.lock())?.record_session_with_event(
         started_at,
         segment.as_secs() as i64,
         at,
@@ -56,14 +56,14 @@ fn persist_session_with_end<C: Clock>(
 
 /// 清除提醒触发状态（暂停/开始/重开 = 新段；"暂停即重置"定案的接线点）；锁中毒严格报错。
 fn clear_reminder_fire<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
-    poison(ctx.fire.lock())?.clear();
+    poison("提醒", ctx.fire.lock())?.clear();
     Ok(())
 }
 
 /// 记录段起止事件（按下时间点留痕；时刻取当前真实时钟，供时间图谱归约）。
 fn mark_segment<C: Clock>(ctx: &AppContext<C>, kind: EventKind) -> Result<(), CommandError> {
     let at = wall_now_secs()?;
-    poison(ctx.storage.lock())?.insert_event(at, kind)?;
+    poison("存储", ctx.storage.lock())?.insert_event(at, kind)?;
     Ok(())
 }
 
@@ -169,7 +169,7 @@ fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     if let SessionState::Running { .. } = *session.state() {
         let segment = session.pause()?;
         let now = wall_now_secs()?;
-        poison(ctx.storage.lock())?.record_session_with_event(
+        poison("存储", ctx.storage.lock())?.record_session_with_event(
             now - segment.as_secs() as i64,
             segment.as_secs() as i64,
             now,
@@ -206,13 +206,13 @@ pub(super) fn status_snapshot<C: Clock>(
     let status = SessionStatus {
         state,
         total_ms,
-        on_duty: poison(ctx.workday.lock())?.is_on_duty(),
+        on_duty: poison("工作日", ctx.workday.lock())?.is_on_duty(),
     };
     let segment = lock(ctx)?.segment_secs();
     let decision = {
-        let settings = poison(ctx.settings.lock())?;
+        let settings = poison("设置", ctx.settings.lock())?;
         let config = ReminderConfig::from_minutes(settings.threshold_min);
-        let should = poison(ctx.fire.lock())?.evaluate(segment, &config);
+        let should = poison("提醒", ctx.fire.lock())?.evaluate(segment, &config);
         ReminderDecision {
             fire: should,
             threshold_min: settings.threshold_min,
@@ -483,7 +483,10 @@ mod tests {
             let _guard = ctx.storage.lock().unwrap();
             panic!("污染 storage 锁");
         }));
-        assert!(matches!(pause_session(&ctx), Err(CommandError::Poisoned)));
+        assert!(matches!(
+            pause_session(&ctx),
+            Err(CommandError::Poisoned("存储"))
+        ));
         let s = status_snapshot(&ctx).unwrap().0;
         assert_eq!(s.state, "running", "落库失败回滚：计时继续而非停在 Paused");
     }
@@ -497,7 +500,10 @@ mod tests {
             let _guard = ctx.storage.lock().unwrap();
             panic!("污染 storage 锁");
         }));
-        assert!(matches!(start_session(&ctx), Err(CommandError::Poisoned)));
+        assert!(matches!(
+            start_session(&ctx),
+            Err(CommandError::Poisoned("存储"))
+        ));
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "idle");
     }
 
@@ -514,7 +520,10 @@ mod tests {
             let _guard = ctx.storage.lock().unwrap();
             panic!("污染 storage 锁");
         }));
-        assert!(matches!(resume_session(&ctx), Err(CommandError::Poisoned)));
+        assert!(matches!(
+            resume_session(&ctx),
+            Err(CommandError::Poisoned("存储"))
+        ));
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
     }
 
@@ -529,7 +538,10 @@ mod tests {
             let _guard = ctx.fire.lock().unwrap();
             panic!("污染 fire 锁");
         }));
-        assert!(matches!(pause_session(&ctx), Err(CommandError::Poisoned)));
+        assert!(matches!(
+            pause_session(&ctx),
+            Err(CommandError::Poisoned("提醒"))
+        ));
     }
 
     /// 托盘/热键共用的计时切换：Idle→start、Running→pause、Paused→resume 三态循环。

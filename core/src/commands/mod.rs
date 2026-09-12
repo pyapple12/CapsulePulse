@@ -59,9 +59,9 @@ pub enum CommandError {
     /// 设置层错误（载入/保存/校验失败）。
     #[error(transparent)]
     Settings(#[from] crate::settings::SettingsError),
-    /// 会话锁中毒（此前持锁线程 panic）——严格报错，不静默续行。
-    #[error("会话锁已中毒（此前持锁线程异常终止）")]
-    Poisoned,
+    /// 锁中毒（此前持锁线程 panic）——携带锁名严格报错，不静默续行（y.problems#5②：文案如实反映是哪把锁）。
+    #[error("{0}锁已中毒（此前持锁线程异常终止）")]
+    Poisoned(&'static str),
     /// 系统时钟早于 Unix 纪元（时间戳不可用）。
     #[error("系统时钟异常（早于 Unix 纪元）")]
     Clock,
@@ -82,14 +82,14 @@ impl Serialize for CommandError {
     }
 }
 
-/// 锁结果统一收敛：Mutex 中毒（此前持锁线程 panic）严格报错（Poisoned），不静默续行。
-fn poison<T>(lock: LockResult<T>) -> Result<T, CommandError> {
-    lock.map_err(|_| CommandError::Poisoned)
+/// 锁结果统一收敛：Mutex 中毒（此前持锁线程 panic）严格报错（Poisoned 带锁名），不静默续行。
+fn poison<T>(lock_name: &'static str, lock: LockResult<T>) -> Result<T, CommandError> {
+    lock.map_err(|_| CommandError::Poisoned(lock_name))
 }
 
-/// 取会话锁：中毒严格报错（Poisoned），不 unwrap 不吞错。
+/// 取会话锁：中毒严格报错（Poisoned 带锁名），不 unwrap 不吞错。
 fn lock<C: Clock>(ctx: &AppContext<C>) -> Result<MutexGuard<'_, WorkSession<C>>, CommandError> {
-    poison(ctx.session.lock())
+    poison("会话", ctx.session.lock())
 }
 
 /// 当前 Unix 秒（落库时间戳来源；时钟异常严格报错）。
