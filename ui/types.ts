@@ -42,3 +42,15 @@ export interface DaySummary {
   rest_secs: number;
   blocks: DayBlock[];
 }
+
+/** week_detail 返回体中的单日行（镜像 core/src/commands/workday.rs WeekDay） */
+export interface WeekDay {
+  /** 日期标签（MM-DD） */
+  date: string;
+  /** 星期序（1 = 周一 … 7 = 周日） */
+  weekday: number;
+  /** 当日工作秒数 */
+  work_secs: number;
+  /** 当日在岗秒数 */
+  duty_secs: number;
+}

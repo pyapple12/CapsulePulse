@@ -2,7 +2,8 @@
 //! 事务次序定案：库写入先行、状态转移殿后（中途失败不污染内存态，可安全重试）；
 //! 自动下班以"上班 + N"回填时刻关班（发现可迟到、账目准时）。锁序见 AppContext 注释。
 
-use chrono::{Local, TimeZone};
+use chrono::{Datelike, Local, TimeZone};
+use serde::Serialize;
 use tauri::State;
 
 use super::{lock, poison, wall_now_secs, AppContext, CommandError};
@@ -68,21 +69,65 @@ fn day_bounds(offset: i64, now_secs: i64) -> Result<(i64, i64), CommandError> {
 
 /// 单日明细：events 拉取 + 事件归约（图谱与三值唯一装配点，前端零业务）。
 /// 在岗中且上班时刻早于本日零点（跨夜班）时从上班时刻取事件，归约侧裁剪到本日。
+/// 单日事件拉取起点：在岗且上班时刻早于当日零点（跨夜班）时从上班时刻取（PL005 口径，
+/// day_detail 与 week_detail 共用；取锁顺序恒 workday → storage，用后即还）
+fn day_fetch_start<C: Clock>(ctx: &AppContext<C>, day_start: i64) -> Result<i64, CommandError> {
+    let workday = poison("工作日", ctx.workday.lock())?;
+    Ok(match *workday {
+        WorkdayState::OnDuty { clock_in_at, .. } => day_start.min(clock_in_at),
+        WorkdayState::Off => day_start,
+    })
+}
+
 pub(super) fn day_detail_inner<C: Clock>(
     ctx: &AppContext<C>,
     offset: i64,
     now_secs: i64,
 ) -> Result<DaySummary, CommandError> {
     let (day_start, day_end) = day_bounds(offset, now_secs)?;
-    let fetch_start = {
-        let workday = poison("工作日", ctx.workday.lock())?;
-        match *workday {
-            WorkdayState::OnDuty { clock_in_at, .. } => day_start.min(clock_in_at),
-            WorkdayState::Off => day_start,
-        }
-    };
+    let fetch_start = day_fetch_start(ctx, day_start)?;
     let events = poison("存储", ctx.storage.lock())?.events_between(fetch_start, day_end)?;
     Ok(reduce_day(&events, day_start, day_end, now_secs))
+}
+
+/// 周视图行（serde 单一来源，TS 侧镜像 WeekDay）：日期标签 + 星期序 + workday 口径两值。
+#[derive(Debug, Serialize)]
+pub struct WeekDay {
+    /// 日期标签（MM-DD）
+    pub date: String,
+    /// 星期序（1 = 周一 … 7 = 周日，前端映射单字标签）
+    pub weekday: u32,
+    /// 当日工作秒数
+    pub work_secs: i64,
+    /// 当日在岗秒数
+    pub duty_secs: i64,
+}
+
+/// 周视图装配（PL008.6）：以今日为锚回溯 7 日（旧 → 新），逐日切片归约，
+/// 日界/在岗起点口径与 day_detail 完全一致；锁序按日循环 workday → storage，不跨日持锁。
+pub(super) fn week_detail_inner<C: Clock>(
+    ctx: &AppContext<C>,
+    now_secs: i64,
+) -> Result<Vec<WeekDay>, CommandError> {
+    (-6..=0)
+        .map(|offset| {
+            let (day_start, day_end) = day_bounds(offset, now_secs)?;
+            let start_dt = Local
+                .timestamp_opt(day_start, 0)
+                .single()
+                .ok_or(CommandError::Clock)?;
+            let fetch_start = day_fetch_start(ctx, day_start)?;
+            let events =
+                poison("存储", ctx.storage.lock())?.events_between(fetch_start, day_end)?;
+            let summary = reduce_day(&events, day_start, day_end, now_secs);
+            Ok(WeekDay {
+                date: start_dt.format("%m-%d").to_string(),
+                weekday: start_dt.weekday().number_from_monday(),
+                work_secs: summary.work_secs,
+                duty_secs: summary.duty_secs,
+            })
+        })
+        .collect()
 }
 
 /// 自动下班检查（挂 session_status 评估口）：在岗且满 N 小时 → 以回填时刻执行下班，
@@ -137,6 +182,12 @@ pub async fn day_detail(
     offset: Option<i64>,
 ) -> Result<DaySummary, CommandError> {
     day_detail_inner(&handle, checked_offset(offset)?, wall_now_secs()?)
+}
+
+/// 周视图（PL008.6）：锚 = 今日，回溯 7 日（旧 → 新）。async：同 day_detail 移出主线程。
+#[tauri::command]
+pub async fn week_detail(handle: State<'_, AppContext>) -> Result<Vec<WeekDay>, CommandError> {
+    week_detail_inner(&handle, wall_now_secs()?)
 }
 
 /// 入参校验（FIX002.5）：offset 限定 ±366——极端值会使 chrono 日历加法 panic，
@@ -341,6 +392,73 @@ mod tests {
         }
         assert_eq!(day_detail_inner(&ctx, 0, now).unwrap().duty_secs, 0);
         assert_eq!(day_detail_inner(&ctx, -1, now).unwrap().duty_secs, 3_600);
+    }
+
+    /// 把某"今日零点 + N 日"的秒时间戳格式化为 MM-DD（周用例的期望值锚）。
+    fn mmdd(ts: i64) -> String {
+        Local
+            .timestamp_opt(ts, 0)
+            .single()
+            .unwrap()
+            .format("%m-%d")
+            .to_string()
+    }
+
+    /// PL008.6（L4）：周视图 7 日切片——锚点取"最近的周日"，窗口横跨周边界
+    /// （首日 = 上周一），切片仍按本地日正确；中间空日两值皆零。
+    #[test]
+    fn week_detail_slices_seven_local_days_across_week_boundary() {
+        let ctx = ctx(FakeClock::new());
+        // 把锚点拨到最近的周日：今日零点回退 (星期序 % 7) 日（周一退 1 日、周日原地）
+        let today_start = period::day_start_secs(&Local::now());
+        let back_days = i64::from(Local::now().weekday().number_from_monday() % 7);
+        let sunday_start = today_start - back_days * 86_400;
+        let now = sunday_start + 12 * 3_600;
+        // 上周一（窗口首日）工作 2h/在岗 3h；本周日（锚）工作 1h/在岗 2h；中间五日无事件
+        let monday = sunday_start - 6 * 86_400;
+        {
+            let storage = ctx.storage.lock().unwrap();
+            storage
+                .insert_event(monday + 9 * 3_600, EventKind::ClockIn)
+                .unwrap();
+            storage
+                .insert_event(monday + 9 * 3_600, EventKind::SegmentStart)
+                .unwrap();
+            storage
+                .insert_event(monday + 11 * 3_600, EventKind::SegmentEnd)
+                .unwrap();
+            storage
+                .insert_event(monday + 12 * 3_600, EventKind::ClockOut)
+                .unwrap();
+            storage
+                .insert_event(sunday_start + 9 * 3_600, EventKind::ClockIn)
+                .unwrap();
+            storage
+                .insert_event(sunday_start + 9 * 3_600, EventKind::SegmentStart)
+                .unwrap();
+            storage
+                .insert_event(sunday_start + 10 * 3_600, EventKind::SegmentEnd)
+                .unwrap();
+            storage
+                .insert_event(sunday_start + 11 * 3_600, EventKind::ClockOut)
+                .unwrap();
+        }
+        let week = week_detail_inner(&ctx, now).unwrap();
+        assert_eq!(week.len(), 7);
+        // 窗口首日 = 上周一：跨过周边界后切片仍正确
+        assert_eq!(week[0].weekday, 1);
+        assert_eq!(week[0].date, mmdd(monday));
+        assert_eq!(week[0].work_secs, 2 * 3_600);
+        assert_eq!(week[0].duty_secs, 3 * 3_600);
+        // 中间五日为空日：两值皆零
+        assert!(week[1..6]
+            .iter()
+            .all(|d| d.work_secs == 0 && d.duty_secs == 0));
+        // 末日 = 锚点周日
+        assert_eq!(week[6].weekday, 7);
+        assert_eq!(week[6].date, mmdd(sunday_start));
+        assert_eq!(week[6].work_secs, 3_600);
+        assert_eq!(week[6].duty_secs, 2 * 3_600);
     }
 
     /// 自动下班：到点以回填时刻（上班 + N）关班，迟到发现账目准时；未到点/未上班不动。

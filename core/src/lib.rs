@@ -208,7 +208,8 @@ pub fn run() {
             commands::reminder::set_settings,
             commands::workday::clock_in,
             commands::workday::clock_out,
-            commands::workday::day_detail
+            commands::workday::day_detail,
+            commands::workday::week_detail
         ])
         .on_window_event(|window, event| {
             // 关闭语义 = 隐藏到托盘（PL004 定案）；退出走托盘菜单

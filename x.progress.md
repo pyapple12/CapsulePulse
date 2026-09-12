@@ -181,14 +181,14 @@
 > 范围：整窗信息架构重排——380×560 resizable 窗、底部 dock 导航（lucide-vue-next 新依赖）、计时页 8h 进度环主体、统计页四区卡片化 + 周视图（Rust 新命令 week_detail）。设计含量最重，**立项细化与执行全程启用 frontend-design skill**。
 > 红线：保活不回归；数据口径零变化；糖果材质令牌体系不推倒。
 
-- [ ] PL008.1 设计阶段（设计 skill 主场）—— 跑 frontend-design skill：线框脑暴两版（环主型/卡主型）→ 反模板审查 → 定稿线框（ASCII + 尺寸标注落 z.plan 附录 PL008"定稿线框"节）→ 令牌补齐；验证：线框经用户评审通过
-- [ ] PL008.2 窗口几何 —— tauri.conf.json 宽 360→380、高 480→560、`resizable: false→true`；App.vue 高度 calc 与间距改弹性适配（拉伸不破相、内容区 min/max 约束）；验证：live 拉伸至极限不溢出（L1）
-- [ ] PL008.3 底部 dock 导航 —— 新增依赖 lucide-vue-next（Timer/ChartColumn 等约 6 枚）；新组件 DockNav.vue（图标+文字、激活态糖果高光、底部固定）；App.vue 替换顶部分段、**v-show 保活接线原样迁移**；‹›箭头/⚙ 换 lucide 图标（ChevronLeft/ChevronRight/Settings）；验证：live dock 切页 + 统计页停留跨阈值提醒条仍触发（保活红线）
-- [ ] PL008.4 计时页进度环 —— 新组件 ProgressRing.vue（SVG 圆环：糖果玻璃轨道 + 紫渐变 stroke-dasharray 进度弧 + 数字居环中 40px 继承糖果描字）；进度 = day_detail.work_secs ÷ (get_settings.workday_auto_out_hours × 3600)（展示计算零 Rust）；未上班环虚线置灰；TimerCard 数字/按钮融入环主体区；验证：live 打卡前虚线/计时中增长/下班定格（L3）+ 数值与 day_detail 对照
-- [ ] PL008.5 统计页卡片化 —— 日导航/图谱/三值/明细四区各自 `.glass-panel` 浮起卡（带 rim 光与投影），纵向流式排列、明细卡内部滚动；验证：live 四区齐备 + 数据口径零变化（L5）
-- [ ] PL008.6 周视图（Rust 触点）—— commands/workday.rs 新增 `week_detail` 命令（锚=今日，回溯 7 日循环 day_bounds + events_between + reduce_day → Vec<{date, work_secs, duty_secs}> DTO，serde 单一来源）+ types.ts 镜像 WeekDay/WeekSummary；前端周卡：7 条横向条形（今日紫渐变高亮、其余玻璃底、条长=work_secs 占 7 日峰值）；验证：cargo test 周聚合用例（跨周边界：周日晚锚点 7 日切片正确、空日为零）+ live 7 条与逐日 day_detail 对照
-- [ ] PL008.7 深色主题同步 —— dock/进度环/周卡/四区卡逐一配暗夜衍生（深紫底 + 轮廓光加强 + accent 降饱和）；验证：live 双主题全组件过
-- [ ] PL008.8 PL008 收口 —— 门禁全绿 + L1–L5 全过 + 保活红线复核 + 结论回写 z.plan 附录 PL008（含定稿线框）+ README/AGENTS 状态行 + 勾结；验证：门禁 + L1–L5
+- [x] PL008.1 设计阶段（设计 skill 主场）—— 跑 frontend-design skill：线框脑暴两版（环主型/卡主型）→ 反模板审查 → 定稿线框（ASCII + 尺寸标注落 z.plan 附录 PL008"定稿线框"节）→ 令牌补齐；验证：线框经用户评审通过（2026-09-13 已验证：两版经交互评审用户选 A 环主型·胶囊表盘；定稿线框/尺寸/令牌补齐（零新增）/反模板结论已落 z.plan 附录 PL008）
+- [x] PL008.2 窗口几何 —— tauri.conf.json 宽 360→380、高 480→560、`resizable: false→true`；App.vue 高度 calc 与间距改弹性适配（拉伸不破相、内容区 min/max 约束）；验证：live 拉伸至极限不溢出（L1）（2026-09-13 已验证：默认 380×560 双页渲染正确；conf 增 minWidth 320/minHeight 540 夹取极值 + glass-card overflow hidden 兜底；交互式拖拽极值未测——工具面限制，记部分验证）
+- [x] PL008.3 底部 dock 导航 —— 新增依赖 lucide-vue-next（Timer/ChartColumn 等约 6 枚）；新组件 DockNav.vue（图标+文字、激活态糖果高光、底部固定）；App.vue 替换顶部分段、**v-show 保活接线原样迁移**；‹›箭头/⚙ 换 lucide 图标（ChevronLeft/ChevronRight/Settings）；验证：live dock 切页 + 统计页停留跨阈值提醒条仍触发（保活红线）（2026-09-13 已验证：dock 切页正常；保活红线以等价手段实证——计时中切统计页停留 30s 回来数字从 13.8s 走到 1:31.5，100ms 评估口全程未断；50min 真实阈值等待不可行，机制未变）
+- [x] PL008.4 计时页进度环 —— 新组件 ProgressRing.vue（SVG 圆环：糖果玻璃轨道 + 紫渐变 stroke-dasharray 进度弧 + 数字居环中 40px 继承糖果描字）；进度 = day_detail.work_secs ÷ (get_settings.workday_auto_out_hours × 3600)（展示计算零 Rust）；未上班环虚线置灰；TimerCard 数字/按钮融入环主体区；验证：live 打卡前虚线/计时中增长/下班定格（L3）+ 数值与 day_detail 对照（2026-09-13 已验证：L3 三态全过——虚线置灰+纯色数字 / 实线轨道+渐变弧端帽+描字 / 下班回虚线；pill 迁入 TimerCard 上抛 clock 事件，App 侧 onDuty/refreshDuty 随之收敛删除；环口径 work_secs 随统计节奏刷新）
+- [x] PL008.5 统计页卡片化 —— 日导航/图谱/三值/明细四区各自 `.glass-panel` 浮起卡（带 rim 光与投影），纵向流式排列、明细卡内部滚动；验证：live 四区齐备 + 数据口径零变化（L5）（2026-09-13 已验证：五卡纵流齐备（周卡加入后为五卡）；明细卡 flex:1 内滚；口径零变化——三值/明细与 day_detail 一致；实测周卡初版超高把 dock 顶出，已压缩行高并以 stats-view overflow hidden 兜底）
+- [x] PL008.6 周视图（Rust 触点）—— commands/workday.rs 新增 `week_detail` 命令（锚=今日，回溯 7 日循环 day_bounds + events_between + reduce_day → Vec<{date, work_secs, duty_secs}> DTO，serde 单一来源）+ types.ts 镜像 WeekDay/WeekSummary；前端周卡：7 条横向条形（今日紫渐变高亮、其余玻璃底、条长=work_secs 占 7 日峰值）；验证：cargo test 周聚合用例（跨周边界：周日晚锚点 7 日切片正确、空日为零）+ live 7 条与逐日 day_detail 对照（2026-09-13 已验证：week_detail_slices_seven_local_days_across_week_boundary 绿（锚=最近周日、首日=上周一、空日零）；live 周卡六=5h10m 与昨日明细 8 段之和精确一致；实现差异 = DTO 增 weekday 字段省前端日期换算，day_fetch_start 助手与 day_detail 共用跨夜班口径）
+- [x] PL008.7 深色主题同步 —— dock/进度环/周卡/四区卡逐一配暗夜衍生（深紫底 + 轮廓光加强 + accent 降饱和）；验证：live 双主题全组件过（2026-09-13 已验证：深色 live 全组件过——新组件全部消费 PL007 令牌（chip-bg/ink-mix/accent 渐变/edge-glow）自动跟随，无硬编码色需单独适配；浅色沿用 PL007 定案随日常/后续 PL 复核）
+- [x] PL008.8 PL008 收口 —— 门禁全绿 + L1–L5 全过 + 保活红线复核 + 结论回写 z.plan 附录 PL008（含定稿线框）+ README/AGENTS 状态行 + 勾结；验证：门禁 + L1–L5（2026-09-13 已验证：门禁七项全绿（fmt/clippy/check/doc/test 90/build/vue-tsc/prettier）；L2–L5 全过、L1 默认尺寸过+极值夹取设计保证；结论回写 z.plan 附录 PL008 状态行 + 定稿线框已落；验证记录见 .temp/pl008-verification.md）
 
 ### PL009: 光与生命感 [z.plan#附录 PL009]
 

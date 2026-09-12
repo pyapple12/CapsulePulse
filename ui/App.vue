@@ -2,14 +2,17 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+// PL008.3：dock 时代 ⚙ 换 lucide 线性图标（与 DockNav 同源图标库）
+import { Settings } from "lucide-vue-next";
 
 import ConfirmModal from "./components/ConfirmModal.vue";
+import DockNav from "./components/DockNav.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import StatsCard from "./components/StatsCard.vue";
 import StatsView from "./components/StatsView.vue";
 import TimerCard from "./components/TimerCard.vue";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
-import type { ReminderSettings, SessionStats, SessionStatus } from "./types";
+import type { DaySummary, ReminderSettings, SessionStats } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
 // 提示音经 vite 打包（哈希进 dist）——不用 public/ 目录（publicDir 默认在根，曾有 404 教训）
@@ -23,6 +26,8 @@ const STATS_TICK_MS = 30_000;
 const todaySecs = ref(0);
 const weekSecs = ref(0);
 const allSecs = ref(0);
+// 今日工作秒（PL008.4 环口径：day_detail.work_secs，daywork 口径，随统计刷新节奏更新）
+const todayWorkSecs = ref(0);
 const settings = ref<ReminderSettings | null>(null);
 const panelVisible = ref(false);
 const reminderVisible = ref(false);
@@ -33,8 +38,7 @@ const saveError = ref("");
 // 动作/打卡失败的可见反馈（FIX002.3：命令失败不再只进 console）；动作成功即清除
 const actionError = ref("");
 const chimeRef = ref<HTMLAudioElement | null>(null);
-// PL005：在岗态 + 打卡确认框 + 双标签视图
-const onDuty = ref(false);
+// PL005：打卡确认框 + 双标签视图（pill 移入 TimerCard 后，在岗态由其自有轮询驱动）
 const confirmMode = ref<"in" | "out" | null>(null);
 const activeTab = ref<"timer" | "stats">("timer");
 const autoOutVisible = ref(false);
@@ -45,7 +49,7 @@ let statsTimer: number | undefined;
 let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
 
-/** 拉取统计快照 */
+/** 拉取统计快照 + 今日工作秒（环口径：day_detail.work_secs，与统计同节奏更新） */
 async function refreshStats(): Promise<void> {
   try {
     const s = await invoke<SessionStats>("session_stats");
@@ -55,6 +59,12 @@ async function refreshStats(): Promise<void> {
   } catch (err) {
     console.error("session_stats 调用失败", err);
   }
+  try {
+    const day = await invoke<DaySummary>("day_detail", { offset: 0 });
+    todayWorkSecs.value = day.work_secs;
+  } catch (err) {
+    console.error("day_detail 调用失败（环口径沿用上次取值）", err);
+  }
 }
 
 /** 拉取提醒设置 */
@@ -63,16 +73,6 @@ async function refreshSettings(): Promise<void> {
     settings.value = await invoke<ReminderSettings>("get_settings");
   } catch (err) {
     console.error("get_settings 调用失败", err);
-  }
-}
-
-/** 拉取在岗态（挂载 + 打卡动作后刷新；日常翻转由确认框动作与自动下班事件驱动） */
-async function refreshDuty(): Promise<void> {
-  try {
-    const s = await invoke<SessionStatus>("session_status");
-    onDuty.value = s.on_duty;
-  } catch (err) {
-    console.error("session_status 调用失败", err);
   }
 }
 
@@ -128,9 +128,9 @@ function onTabClick(tab: "timer" | "stats"): void {
   }
 }
 
-/** 打卡 pill 点击 → 弹对应方向确认框（双向确认，不直接执行） */
-function onPillClick(): void {
-  confirmMode.value = onDuty.value ? "out" : "in";
+/** 打卡 pill（TimerCard 上抛方向）→ 弹对应方向确认框（双向确认，不直接执行） */
+function onPillClick(direction: "in" | "out"): void {
+  confirmMode.value = direction;
 }
 
 /** 确认框取消：仅收起 */
@@ -156,7 +156,6 @@ async function onConfirmOk(): Promise<void> {
   if (mode === "out" && !actionError.value) {
     reminderVisible.value = false;
   }
-  await refreshDuty();
   void refreshStats();
   statsRefreshKey.value++;
 }
@@ -164,7 +163,6 @@ async function onConfirmOk(): Promise<void> {
 onMounted(() => {
   void refreshStats();
   void refreshSettings();
-  void refreshDuty();
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
@@ -180,7 +178,6 @@ onMounted(() => {
   listen<number>("workday-auto-out", (event) => {
     autoOutAt.value = event.payload;
     autoOutVisible.value = true;
-    void refreshDuty();
     void refreshStats();
     statsRefreshKey.value++;
   })
@@ -203,45 +200,28 @@ onUnmounted(() => {
   <main class="glass-card" data-tauri-drag-region>
     <div class="topbar">
       <h1 class="title" data-tauri-drag-region>CapsulePulse</h1>
-      <button class="gear" type="button" title="设置" @click="togglePanel">⚙</button>
+      <button class="gear" type="button" title="设置" @click="togglePanel">
+        <Settings :size="16" :stroke-width="2.2" aria-hidden="true" />
+      </button>
     </div>
     <p v-if="reminderVisible" class="reminder">
       已连续工作 {{ reminderThreshold }} 分钟，休息一下吧
     </p>
     <p v-if="autoOutVisible" class="reminder auto-out">已于 {{ hhmm(autoOutAt) }} 自动下班</p>
     <p v-if="actionError" class="reminder action-error" role="alert">{{ actionError }}</p>
-    <div class="tabs" role="tablist">
-      <span class="tabs-thumb" :class="{ right: activeTab === 'stats' }" aria-hidden="true"></span>
-      <button
-        class="tab"
-        :class="{ active: activeTab === 'timer' }"
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === 'timer'"
-        @click="activeTab = 'timer'"
-      >
-        计时
-      </button>
-      <button
-        class="tab"
-        :class="{ active: activeTab === 'stats' }"
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === 'stats'"
-        @click="onTabClick('stats')"
-      >
-        统计
-      </button>
-    </div>
     <StatsCard :today-secs="todaySecs" :week-secs="weekSecs" :all-secs="allSecs" />
     <!-- 双标签均 v-show 保活：TimerCard 的 100ms tick 是提醒/自动下班评估口，切页不得中断 -->
     <div v-show="activeTab === 'timer'" class="timer-pane">
-      <button class="pill" :class="{ active: onDuty }" type="button" @click="onPillClick">
-        {{ onDuty ? "下班" : "上班" }}
-      </button>
-      <TimerCard @changed="onTimerChanged" @error="actionError = $event" />
+      <TimerCard
+        :work-secs="todayWorkSecs"
+        :target-hours="settings?.workday_auto_out_hours ?? null"
+        @changed="onTimerChanged"
+        @error="actionError = $event"
+        @clock="onPillClick"
+      />
     </div>
     <StatsView v-show="activeTab === 'stats'" :refresh-key="statsRefreshKey" />
+    <DockNav :active="activeTab" @change="onTabClick" />
     <Transition name="sheet">
       <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
         <section class="floating-sheet iridescent" role="dialog" aria-label="设置">
@@ -453,19 +433,20 @@ onUnmounted(() => {
 </style>
 
 <style scoped>
-/* 玻璃卡片：四周留 12px 露出 Acrylic 底；本体 = 唯一玻璃配方（令牌）+ 高光内描边 */
+/* 玻璃卡片：四周留 12px 露出 Acrylic 底；本体 = 唯一玻璃配方（令牌）+ 高光内描边。
+   PL008：窗口可缩放——overflow hidden 防溢出破相（L1），纵向节奏压缩为弹性 gap（dock 定底后由页面区吃掉富余高度） */
 .glass-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  gap: 10px;
   height: calc(100vh - 24px);
   margin: 12px;
   border-radius: var(--r-card);
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--rim-light), var(--glass-highlight);
+  overflow: hidden;
   user-select: none;
   color: var(--ink);
   font-family: var(--font-stack);
@@ -489,10 +470,10 @@ onUnmounted(() => {
 }
 
 .gear {
+  display: flex;
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 16px;
   cursor: pointer;
   opacity: 0.55;
 }
@@ -533,108 +514,23 @@ onUnmounted(() => {
   }
 }
 
-/* iOS 式分段控件（PL007.4 蒙皮）：紫晕玻璃轨道 + 白色滑块浮起带色投影，随 activeTab 位移 */
-.tabs {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  width: 200px;
-  padding: 3px;
-  border-radius: var(--r-pill);
-  background: rgba(139, 92, 246, 0.12);
-}
-
-.tabs-thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: calc(50% - 3px);
-  height: calc(100% - 6px);
-  border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow:
-    0 1px 4px rgba(0, 0, 0, 0.12),
-    0 3px 10px rgba(139, 92, 246, 0.3);
-  transition: transform 0.22s var(--ease-spring);
-}
-
-.tabs-thumb.right {
-  transform: translateX(100%);
-}
-
-.tab {
-  position: relative;
-  z-index: 1;
-  padding: 5px 0;
-  border: none;
-  border-radius: var(--r-pill);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 13px;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.tab.active {
-  color: var(--ink);
-  font-weight: 600;
-}
-
 @media (prefers-color-scheme: dark) {
-  .tabs {
-    background: rgba(139, 92, 246, 0.16);
-  }
-
-  .tabs-thumb {
-    background: rgba(255, 255, 255, 0.22);
-    box-shadow:
-      0 1px 4px rgba(0, 0, 0, 0.3),
-      0 3px 10px rgba(139, 92, 246, 0.35);
-  }
-
   .reminder.auto-out {
     background: linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(13, 148, 136, 0.3) 100%);
   }
 }
 
-/* 计时页容器：打卡 pill + 计时卡片 */
+/* 计时页容器（PL008 定底布局）：吃掉 dock 以上全部富余高度，内容纵向居中 */
 .timer-pane {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 14px;
   width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
-/* 打卡 pill（PL007.3 糖果蒙皮）：未上班 = 紫 accent 描边可按态；在岗中 = 紫渐变实底 + 内凹高光（视觉常驻"已按下"） */
-.pill {
-  padding: 8px 36px;
-  border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
-  border-radius: var(--r-pill);
-  background: transparent;
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.pill:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.pill:active {
-  transform: scale(0.96);
-}
-
-.pill.active {
-  border-color: transparent;
-  background: var(--grad-primary);
-  color: #fff;
-  box-shadow:
-    var(--rim-light),
-    inset 0 2px 6px rgba(0, 0, 0, 0.22),
-    var(--shadow-candy);
-}
+/* 打卡 pill 蒙皮随组件迁移 TimerCard（PL008.4），此处不再有 pill 样式 */
 </style>
