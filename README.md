@@ -1,8 +1,8 @@
 # CapsulePulse — 玻璃质感的工作计时看板
 
-[![Version](https://img.shields.io/badge/Version-0.1.0.12-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.0.13-blue.svg)](core/Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
-[![Phase](https://img.shields.io/badge/Phase-PL008_完成-brightgreen.svg)](z.plan.md)
+[![Phase](https://img.shields.io/badge/Phase-PL009_完成-brightgreen.svg)](z.plan.md)
 
 极简的工作计时看板：上班/下班打卡开启一天，班内计时 = 工作、空隙 = 休息，下班出在岗/工作/休息三值与时间图谱；连续工作超阈值时声音 + 系统通知提醒休息。三端（Windows / macOS / Linux）通用。
 
@@ -15,7 +15,7 @@
 | 玻璃 UI  | 糖果玻璃材质：pastel 紫/薄荷色板 + 轮廓光 + 虹彩浮层，深浅色自适应       |
 | 常驻后台 | 托盘常驻、全局快捷键唤起、关闭最小化到托盘                               |
 
-> 当前状态：**PL001–PL008 已完成**（V0.1.0.12）——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻 + 工作日/打卡模型与统计视图 + 苹果玻璃 UI 重设计（Liquid Glass 令牌化）+ 糖果玻璃材质层 + 布局翻新（380×560 可缩放窗、底部 dock 导航、8h 进度环表盘、统计五卡 + 周视图）；90 项测试全绿（含 1 项存储探针集成测试）。下一个大件：PL009 光与生命感（已立项）。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
+> 当前状态：**PL001–PL009 已完成**（V0.1.0.13）——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻 + 工作日/打卡模型与统计视图 + 苹果玻璃 UI 重设计（Liquid Glass 令牌化）+ 糖果玻璃材质层 + 布局翻新 + 光与生命感（指针高光/环境光呼吸/微交互，全部尊重 reduced-motion；three.js 时间盒结论 = 不引入主线）；90 项测试全绿（含 1 项存储探针集成测试）。立项任务全部收口，下一步待用户规划。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
 
 ## 技术栈
 

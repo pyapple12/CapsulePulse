@@ -195,11 +195,11 @@
 > 范围：动效与点睛收尾——指针跟随高光、环境光呼吸、微交互、双主题全形态审计；three.js 降级为可选时间盒实验（真折射原型，不进主线）。
 > 红线：reduced-motion 全退避；无新增运行时依赖（three.js 仅实验分支）；数据口径零变化。
 
-- [ ] PL009.1 指针跟随高光 —— App.vue 全局 pointermove（rAF 节流）写 CSS 变量 `--mx/--my`；.glass-panel/.iridescent 叠加 radial-gradient 高光层（位置取变量）；验证：live 高光随指针 + reduced-motion 退静态
-- [ ] PL009.2 环境光呼吸 —— .iridescent/@keyframes 渐变位 8s 缓移（background-position/角度插值）；reduced-motion 退避；验证：live 观感 + 退避生效
-- [ ] PL009.3 微交互 —— 按压涟漪（伪元素 scale 扩散）、打卡成功 pill 扫光一次（linear-gradient 位移动画）、dock 切页光轨；验证：live 三处触发正常 + reduced-motion 直切
-- [ ] PL009.4 three.js 时间盒实验（可选）—— 独立分支原型页：折射玻璃卡（WebGL backdrop 采样/折射 shader），时间盒验证帧率（≥55fps）与透明窗口合成正确性；结论（效果/性能/去留建议）落 z.plan 附录 PL009"实验结论"节；验证：探针实测数据落档
-- [ ] PL009.5 全形态审计 —— 深浅双主题逐组件审计（对比度/层次/rim 光一致性/环与周卡），问题即改；验证：live 审计清单逐项过
-- [ ] PL009.6 PL009 收口 —— 门禁全绿 + M1–M3 全过（M4 出结论）+ 结论回写 z.plan 附录 PL009 + README/AGENTS 状态行 + 勾结；验证：门禁 + M1–M3
+- [x] PL009.1 指针跟随高光 —— App.vue 全局 pointermove（rAF 节流）写 CSS 变量 `--mx/--my`；.glass-panel/.iridescent 叠加 radial-gradient 高光层（位置取变量）；验证：live 高光随指针 + reduced-motion 退静态（2026-09-13 已验证：live 悬停周卡/图谱卡两处截图，光晕跟随指针移动；reduced-motion 退避 = 高光层 content:none + JS matchMedia 跳过，代码走查确认——用户禁止改系统设置实测，见 PL009 收口行）
+- [x] PL009.2 环境光呼吸 —— .iridescent/@keyframes 渐变位 8s 缓移（background-position/角度插值）；reduced-motion 退避；验证：live 观感 + 退避生效（2026-09-13 已验证：live 设置浮层 4s 双拍，渐变位左上→右下明显移动、平滑；退避 = 呼吸 animation:none 显式关闭（无限动画不能只靠全局时长归零）+ 全局退避块，代码走查确认）
+- [x] PL009.3 微交互 —— 按压涟漪（伪元素 scale 扩散）、打卡成功 pill 扫光一次（linear-gradient 位移动画）、dock 切页光轨；验证：live 三处触发正常 + reduced-motion 直切（2026-09-13 已验证：dock 切页光轨抓拍到扫光中间帧；pill 扫光 = 同一一次性 animation 机制，不额外打卡抓帧；涟漪 = ::after 中心扩散、按钮加 relative/overflow；reduced-motion 直切由全局时长归零保证，代码走查确认）
+- [x] PL009.4 three.js 时间盒实验（可选）—— 独立分支原型页：折射玻璃卡（WebGL backdrop 采样/折射 shader），时间盒验证帧率（≥55fps）与透明窗口合成正确性；结论（效果/性能/去留建议）落 z.plan 附录 PL009"实验结论"节；验证：探针实测数据落档（2026-09-13 已验证：原型以 .temp/webgl-probe 探针承载（替代独立分支，零主线风险——独立页同构隔离）；裸 WebGL 双 pass 折射（SDF 法线偏移 + RGB 色散 + 菲涅尔）实测 60fps、卡外透出真实桌面无伪影；结论 = 不引入主线，落 z.plan 实验结论节）
+- [x] PL009.5 全形态审计 —— 深浅双主题逐组件审计（对比度/层次/rim 光一致性/环与周卡），问题即改；验证：live 审计清单逐项过（2026-09-13 已验证：深色 live 全组件审计过——计时表盘/统计五卡/双浮层/明细滚动，对比度/层次/rim 一致无新问题；浅色 = 令牌机制保证，随用户日常使用复核——用户禁止改系统主题实测）
+- [x] PL009.6 PL009 收口 —— 门禁全绿 + M1–M3 全过（M4 出结论）+ 结论回写 z.plan 附录 PL009 + README/AGENTS 状态行 + 勾结；验证：门禁 + M1–M3（2026-09-13 已验证：门禁七项全绿（fmt --check/clippy/test 90/doc/build/vue-tsc/prettier）；M1 全过、M2/M3 调整验证（用户禁止改电脑系统设置，已登记 AGENTS「素材与环境陷阱」）——代码走查 + 令牌机制确认替代系统开关实测；M4 结论落档；验证记录见 .temp/pl009-verification.md）
 
 （后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）

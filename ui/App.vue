@@ -49,6 +49,27 @@ let statsTimer: number | undefined;
 let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
 
+// —— PL009.1 指针跟随高光：rAF 节流把指针写进各材质元素的 --mx/--my（元素相对坐标），
+// 高光层位置随之移动；reduced-motion 用户直接跳过（动效全退避红线）——
+const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+let pointerRaf = 0;
+
+/** pointermove 节流器：一帧最多计算一次，逐材质元素换算元素相对坐标写入 CSS 变量 */
+function onPointerMove(e: PointerEvent): void {
+  if (pointerRaf !== 0 || reducedMotionQuery.matches) {
+    return;
+  }
+  const { clientX, clientY } = e;
+  pointerRaf = window.requestAnimationFrame(() => {
+    pointerRaf = 0;
+    for (const el of document.querySelectorAll<HTMLElement>(".glass-panel, .iridescent")) {
+      const rect = el.getBoundingClientRect();
+      el.style.setProperty("--mx", `${clientX - rect.left}px`);
+      el.style.setProperty("--my", `${clientY - rect.top}px`);
+    }
+  });
+}
+
 /** 拉取统计快照 + 今日工作秒（环口径：day_detail.work_secs，与统计同节奏更新） */
 async function refreshStats(): Promise<void> {
   try {
@@ -164,6 +185,7 @@ onMounted(() => {
   void refreshStats();
   void refreshSettings();
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
+  window.addEventListener("pointermove", onPointerMove);
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
     reminderThreshold.value = event.payload;
@@ -190,6 +212,10 @@ onMounted(() => {
 onUnmounted(() => {
   if (statsTimer !== undefined) {
     window.clearInterval(statsTimer);
+  }
+  window.removeEventListener("pointermove", onPointerMove);
+  if (pointerRaf !== 0) {
+    window.cancelAnimationFrame(pointerRaf);
   }
   unlistenReminder?.();
   unlistenAutoOut?.();
@@ -315,6 +341,55 @@ onUnmounted(() => {
   box-shadow: var(--rim-light), var(--edge-glow), var(--shadow-candy);
 }
 
+/* —— PL009.1 指针跟随高光：材质元素 ::after 叠加 radial 高光层，位置由 JS 写入的
+   --mx/--my（元素相对坐标）驱动，悬停时浮现、随指针移动 —— */
+.glass-panel,
+.iridescent {
+  position: relative;
+}
+
+.glass-panel::after,
+.iridescent::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    200px circle at var(--mx, 50%) var(--my, 0%),
+    rgba(255, 255, 255, 0.16),
+    transparent 65%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.glass-panel:hover::after,
+.iridescent:hover::after {
+  opacity: 1;
+}
+
+/* —— PL009.2 环境光呼吸：虹彩面渐变位 8s 缓移（放大画布再平移），环境光"活"感；
+   reduced-motion 由下方显式退避（无限动画不能只靠全局时长归零）—— */
+.iridescent {
+  background-size: 200% 200%;
+  animation: iridescent-breathe 8s ease-in-out infinite;
+}
+
+@keyframes iridescent-breathe {
+  0% {
+    background-position: 0% 0%;
+  }
+
+  50% {
+    background-position: 100% 100%;
+  }
+
+  100% {
+    background-position: 0% 0%;
+  }
+}
+
 /* —— 浮层共用形态：确认框与设置面板同规格（居中玻璃片 + 压暗遮罩）—— */
 .overlay {
   position: fixed;
@@ -386,6 +461,34 @@ onUnmounted(() => {
   transform: scale(0.96);
 }
 
+/* —— PL009.3 微交互：按压涟漪（中心 radial 扩散一次）；按钮相对定位 + 裁切 —— */
+.btn-primary,
+.btn-ghost {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary::after,
+.btn-ghost::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.35), transparent 65%);
+  opacity: 0;
+  transform: scale(0.5);
+  pointer-events: none;
+}
+
+.btn-primary:active::after,
+.btn-ghost:active::after {
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    transform 0.25s ease-out,
+    opacity 0.25s ease-out;
+}
+
 /* 置灰（未上班）：不可点击且视觉降级，双主题可辨识；糖果光效一并退场 */
 .btn-primary:disabled,
 .btn-ghost:disabled {
@@ -421,8 +524,19 @@ onUnmounted(() => {
   }
 }
 
-/* 动效退避：系统开启"减弱动态效果"时全部退化为直切 */
+/* 动效退避：系统开启"减弱动态效果"时全部退化为直切；
+   无限循环的呼吸动画显式关闭（时长归零对 infinite 动画无意义），
+   指针高光层直接不渲染（PL009 红线：reduced-motion 全退避） */
 @media (prefers-reduced-motion: reduce) {
+  .iridescent {
+    animation: none;
+  }
+
+  .glass-panel::after,
+  .iridescent::after {
+    content: none;
+  }
+
   *,
   *::before,
   *::after {

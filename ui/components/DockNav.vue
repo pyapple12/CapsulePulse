@@ -49,6 +49,7 @@ const emit = defineEmits<{ change: [tab: "timer" | "stats"] }>();
 
 /* 页签项：图标 + 文字纵排；激活 = 紫渐变胶囊 + 白 icon + 彩色边缘泛光 */
 .dock-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -61,10 +62,45 @@ const emit = defineEmits<{ change: [tab: "timer" | "stats"] }>();
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  overflow: hidden;
   transition:
     background 0.2s var(--ease-spring),
     color 0.2s ease,
     transform 0.15s ease;
+}
+
+/* PL009.3 切页光轨：页签被激活瞬间高光扫过一道（一次性 animation） */
+.dock-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 70%
+  );
+  background-size: 250% 100%;
+  background-position: 130% 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dock-item.active::after {
+  animation: dock-sweep 0.5s ease-out 0.1s;
+}
+
+@keyframes dock-sweep {
+  0% {
+    opacity: 1;
+    background-position: 130% 0;
+  }
+
+  100% {
+    opacity: 1;
+    background-position: -130% 0;
+  }
 }
 
 .dock-item:active {

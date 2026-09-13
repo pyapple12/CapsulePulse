@@ -160,6 +160,8 @@ onUnmounted(() => {
 /* 打卡 pill（PL007.3 糖果蒙皮，PL008.4 移入环主体区）：未上班 = 紫 accent 描边可按态；
    在岗中 = 紫渐变实底 + 内凹高光（视觉常驻"已按下"） */
 .pill {
+  position: relative;
+  overflow: hidden;
   padding: 8px 36px;
   border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
   border-radius: var(--r-pill);
@@ -170,6 +172,40 @@ onUnmounted(() => {
   letter-spacing: 2px;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+/* PL009.3 打卡成功扫光：pill 翻转为在岗态（上班/下班确认成功）时高光扫过一道 */
+.pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 70%
+  );
+  background-size: 250% 100%;
+  background-position: 130% 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pill.active::after {
+  animation: pill-sweep 0.7s ease-out 0.15s;
+}
+
+@keyframes pill-sweep {
+  0% {
+    opacity: 1;
+    background-position: 130% 0;
+  }
+
+  100% {
+    opacity: 1;
+    background-position: -130% 0;
+  }
 }
 
 .pill:hover {
