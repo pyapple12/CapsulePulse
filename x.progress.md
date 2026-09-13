@@ -174,8 +174,6 @@
 - [x] PL007.7 PL007 收口 —— 门禁全绿（七项）+ C1 双主题/C2 保活与全链/C3 数据对照/C4 对比度（正文 ≥4.5:1）全过 + 布局零改动自查（diff 无结构变更）+ 结论回写 z.plan 附录 PL007 + README/AGENTS 状态行 + 勾结；验证：门禁 + C1–C4（2026-09-13 已验证：七项门禁全绿（fmt/clippy/test 89/doc/build/vue-tsc/prettier）；C4 探针 16/16；布局零改动自查——模板 diff 仅 class 追加、零元素增删移动；live 启动冒烟正常；C1 深色全组件视觉核验通过（计时页/分段滑块/图谱/chips/双浮层）+ C3 live 对照通过（工作 5h10m 与 sessions 八段之和精确一致、三值自洽）+ C2 切页/浮层交互通过（未触打卡写操作）；浅色主题随 PL008/PL009 双主题环节顺带复核——用户定案：深色暂时过，后两轮 PL 不缺复核机会）
 - [x] PL007.8 锁中毒取证与文案（y.problems#5 第①②层）—— lib.rs setup 最前挂 `std::panic::set_hook`（take_hook 取默认 hook 链式回调，保留开发期 stderr 输出）：panic 消息 + 位置 + 线程名经 diag::log 落 data/pulse.log（"PANIC（线程 X）：panicked at ..."），首次 panic 不再无痕；commands/mod.rs `CommandError::Poisoned` 改携带锁名 `Poisoned(&'static str)`（display "{0}锁已中毒…"），poison() 助手增锁名参数，全部调用点按锁实名传入（会话/存储/工作日/设置/提醒）；FIX002.1 四个 catch_unwind 用例断言升级为带锁名变体；验证：cargo 门禁 + 用例（2026-09-13 已验证：fmt/clippy -D warnings/check/doc/test 89 全绿；锁名断言 4 处过 = 锁名贯通到错误文案；panic hook 本体行为待下次实机复现在 pulse.log 验证，y.problems#5 状态已回改）
 
-## 未完成
-
 ### PL008: 布局翻新 [z.plan#附录 PL008]
 
 > 范围：整窗信息架构重排——380×560 resizable 窗、底部 dock 导航（lucide-vue-next 新依赖）、计时页 8h 进度环主体、统计页四区卡片化 + 周视图（Rust 新命令 week_detail）。设计含量最重，**立项细化与执行全程启用 frontend-design skill**。
@@ -201,5 +199,32 @@
 - [x] PL009.4 three.js 时间盒实验（可选）—— 独立分支原型页：折射玻璃卡（WebGL backdrop 采样/折射 shader），时间盒验证帧率（≥55fps）与透明窗口合成正确性；结论（效果/性能/去留建议）落 z.plan 附录 PL009"实验结论"节；验证：探针实测数据落档（2026-09-13 已验证：原型以 .temp/webgl-probe 探针承载（替代独立分支，零主线风险——独立页同构隔离）；裸 WebGL 双 pass 折射（SDF 法线偏移 + RGB 色散 + 菲涅尔）实测 60fps、卡外透出真实桌面无伪影；结论 = 不引入主线，落 z.plan 实验结论节）
 - [x] PL009.5 全形态审计 —— 深浅双主题逐组件审计（对比度/层次/rim 光一致性/环与周卡），问题即改；验证：live 审计清单逐项过（2026-09-13 已验证：深色 live 全组件审计过——计时表盘/统计五卡/双浮层/明细滚动，对比度/层次/rim 一致无新问题；浅色 = 令牌机制保证，随用户日常使用复核——用户禁止改系统主题实测）
 - [x] PL009.6 PL009 收口 —— 门禁全绿 + M1–M3 全过（M4 出结论）+ 结论回写 z.plan 附录 PL009 + README/AGENTS 状态行 + 勾结；验证：门禁 + M1–M3（2026-09-13 已验证：门禁七项全绿（fmt --check/clippy/test 90/doc/build/vue-tsc/prettier）；M1 全过、M2/M3 调整验证（用户禁止改电脑系统设置，已登记 AGENTS「素材与环境陷阱」）——代码走查 + 令牌机制确认替代系统开关实测；M4 结论落档；验证记录见 .temp/pl009-verification.md）
+
+### PL010: 材质重构·真实玻璃 [z.plan#附录 PL010]
+
+> 范围：用户实机审查五问题（观感差距 / 拖拽 bug / 双层灰泥 / 失焦透明消失 / 贴边）的材质返工——路线三易其稿：①Mica（废弃：暗色≈不透）②采集式自绘（废弃：被遮挡像素物理不可采集，插值近似 + 延迟，效果不符）③**最终路线：DWM 系统背板**（DWMWA_SYSTEMBACKDROP_TYPE，Terminal 同款，聚焦态真磨砂）+ 浅色高透令牌基准 + 呼吸边距 + 拖拽必修。
+> 红线：保活不回归；数据口径零变化；布局骨架（dock/环/五卡/周视图）零重排；零新依赖。
+> 结果：拖拽全窗恢复 + 浅色高透配方表冻结落地 + DWM 系统背板聚焦真磨砂（壁纸色彩透板、DWM 实时合成零延迟）+ 全窗单层收敛；三条路线教训沉淀——Mica 暗色≈不透、采集管线被遮挡像素物理不可采、DWM 系统背板材质焦点绑定（失焦回退灰板，Windows 无第三方可用通道，终端 1.19 的失焦保磨砂走 WinUI 私有机制）；失焦态演进另立 PL011 焦点联动路线。全组 9 条勾结。
+
+- [x] PL010.1 拖拽 bug 修复（独立先行）—— App.vue 增全局 `mousedown` 处理：`e.target.closest("button, input, textarea, a, .dock, .floating-sheet, .pill")` 命中即忽略，其余 `getCurrentWindow().startDragging()`（@tauri-apps/api/window）；移除 main/title/digits 三处 data-tauri-drag-region；核对 capabilities 已含 core:window:allow-start-dragging（旧属性方案已生效，权限应在）；验证：V1——非交互区按住任意位置可拖动窗口（修复前仅标题/数字两行）（2026-09-13 已验证：live 拖动实证——空白板面按住拖动，窗口 [64,64]→[1117,156]）
+- [x] PL010.2 采集式常驻玻璃管线（C 路线，Mica 路线返工后重构）—— 新增 core/src/backdrop.rs（Windows 专属，零新依赖，GDI/USER32 extern 直连）：15fps 线程抓取"窗口矩形 + 外扩 64px"屏幕区域（StretchBlt 降采样 ≤320 长边）→ 自身矩形环形插值填充（自身像素绝不入背景，镜像反馈根治）→ 盒模糊 r=3 两趟 → BGRA 转 RGBA → base64 → `backdrop-frame` 事件；前端 `<canvas class="backdrop">` putImageData + CSS 拉伸 blur(18px) saturate(1.25)；lib.rs 移除 apply_acrylic/apply_mica（Mica 暗色≈不透，首次实施被用户判定退化返工）；纯逻辑与 GDI 装配分离，4 单元测试（base64 标准向量/环形插值/盒模糊摊薄/字节序交换）；验证：V2 live 焦点切走后玻璃完整常驻（Mica/Acrylic 均无法达成）（2026-09-13 已验证）
+- [x] PL010.3 材质配方表（frontend-design skill，用户审后冻结）—— 参考图五要素（透/亮/边/影/厚度）→ 逐件令牌值表：板/统计卡/dock/chips/浮层/文案条/环/按钮 × 浅色基准 + 暗色衍生（纱体色 0.1–0.25 量级、亮边描边、rim、投影、文字对比度手段），落 z.plan 附录 PL010"材质配方表"节；验证：配方表经用户评审通过（2026-09-13 已验证：AskUserQuestion 交互评审，用户选"冻结，按此执行"；冻结稿落 z.plan 附录 PL010"材质配方表"节）
+- [x] PL010.4 令牌与结构落地 —— App.vue :root 按冻结配方表换血（浅暗双套：板纱 12%/38%、五卡 38%/6%、--panel-cast/--btn-cast/--text-shadow 新令牌）+ .glass-card 改唯一玻璃板（margin 12→26px、radius 20、纱层::before + 亮边 + rim；暗卡概念删除；`:not(.overlay):not(.backdrop)` 提层规则避让 fixed 遮罩与画布）+ 五卡降级轻浮起 + 按钮厚度三件套（白顶光/底缘暗线/落影）+ .digits 排除 text-shadow；.temp 对比度探针更新为 pl010 版（新配方双主题正文 ≥4.5 断言）；验证：V4 探针 + vue-tsc/build 绿（2026-09-13 已验证：pl010 探针 16/16；修 pointerRaf 重复声明一处）
+- [x] PL010.5 live 审计（采集路线，后被否）—— V1–V5 全跑 + 参考图五要素逐项对照，问题即改；验证：live 审计清单逐项过（2026-09-13 已验证：五要素当时全过——透/亮/边/影/厚度；但用户随后实测判定采集效果整体不符（插值近似糊弄感 + 延迟），路线否决，本条结论随之失效）
+- [x] PL010.6 首轮收口（采集路线，后被否）—— 门禁全绿 + V1–V5 + 结论回写 + README/AGENTS 状态行 + 勾结；验证：门禁 + V1–V5（2026-09-13：门禁七项全绿、文档回写完成；用户随后判定采集效果不符，最终收口移至 PL010.9）
+- [x] PL010.7 DWM 系统背板（Terminal 同款，最终路线）—— lib.rs 增 DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE = 38 / DWMSBT_TRANSIENTWINDOW = 3 Acrylic)（复用 extern dwmapi 直连模式）：DWM 实时模糊窗口背后**真实内容**并常驻合成；同时移除采集管线（core/src/backdrop.rs 删除 + lib.rs spawn 调用移除 + 前端画布/监听/校准开关清除，window-vibrancy 依赖一并移除）；验证：live 聚焦真磨砂 + 背后内容真实实时（拖动背后窗口可见变化）+ 无采集延迟感（2026-09-13 已验证：聚焦态真磨砂实证——壁纸色彩透板、DWM 实时合成零延迟；**失焦时 DWM 将该材质回退为不透明灰板**，系 Windows 系统背板焦点绑定的材质设计边界（核实：微软终端 1.19 前同样默认失焦掉磨砂，其失焦保磨砂靠 WinUI 私有通道，WebView2 无等价物）；用户实机复核后接受该边界，失焦态演进另立 PL011 焦点联动路线）
+- [x] PL010.8 全窗单层收敛 —— 删除"板/边距"双层语义：整窗一块磨砂（DWM 背板铺满 + 全窗统一薄纱调浓度 10%），20px 内层板与 26px 透明边距概念移除，内容呼吸内缩（padding 24px 20px）；验证：live 单框无内外之分 + 观感用户判定（2026-09-13 已验证：App.vue .glass-card 改全窗单层（margin 0、height 100vh、radius 8px、::before 10% 纱）；用户实机判定单框观感通过）
+- [x] PL010.9 PL010 终版收口 —— 门禁七项 + live 审计（真磨砂/单框/五要素/拖拽）+ 三条路线教训回写 z.plan 附录 PL010 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过（2026-09-13 已验证：门禁七项全绿（cargo fmt/clippy/test 90/doc + vue-tsc/build/prettier）；live——聚焦真磨砂/单框/拖拽用户实机过，失焦常驻经实证判定为 DWM 材质边界不可达、如实登记不宣布达成；三条路线教训（Mica 不透/采集不可采/DWM 背板焦点绑定）回写 z.plan 方向修订节；README/AGENTS 回写；PL011 立项承接失焦演进）
+
+## 未完成
+
+### PL011: 焦点联动材质·平时透明聚焦磨砂 [z.plan#附录 PL011]
+
+> 范围：用户拍板路线——平时纯 alpha 透明（alpha 像素合成不绑定焦点，OS 从不没收，失焦常驻不变），窗口聚焦瞬间挂 DWM Acrylic 系统背板（真磨砂点睛），失焦即刻撤回透明。承接 PL010.7 实证的材质边界：真磨砂只存在于聚焦态，常态由透明承担。
+> 红线：保活不回归；数据口径零变化；布局骨架零重排；零新依赖；复用 extern dwmapi 直连模式。
+
+- [ ] PL011.1 焦点联动背板切换 —— core/src/lib.rs：Windows 装配抽局部闭包 `set_backdrop(hwnd, kind: u32)`（封装 DwmSetWindowAttribute(hwnd, 38, &kind, 4) 与 HRESULT 非零严格抛错）；setup 启动默认**不挂背板**（平时透明态）；`.on_window_event` 增 `WindowEvent::Focused(focused)` 分支——focused=true 调 set_backdrop(3)（DWMSBT_TRANSIENTWINDOW Acrylic）、false 调 set_backdrop(0)（DWMSBT_NONE）；事件回调在主线程、DWM 属性切换无额外线程约束可直调；验证：live——平时窗口透明透出桌面（alpha 合成，与 PL009 失焦态同观感）、点窗口聚焦瞬间真磨砂浮现、切走即刻回透明、反复切换无闪烁/无灰板残留
+- [ ] PL011.2 透明态观感与可读性复核 —— App.vue：平时透明态下全窗 10% 纱 + text-shadow/亮边令牌在"壁纸直透"背景上的可读性复核（文字/数字/统计卡），不足则仅调纱浓度或描边强度（不动结构与布局）；验证：live 双主题（跟随系统，禁改系统设置）+ 用户实机判定
+- [ ] PL011.3 PL011 收口 —— 门禁七项 + live 审计（平时透明/聚焦磨砂/切换瞬时性/拖拽/托盘与全局热键唤起后状态正确）+ 结论回写 z.plan 附录 PL011 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过
 
 （后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）

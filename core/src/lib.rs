@@ -3,7 +3,7 @@
 //! 也是 `cargo test` 与命令层（commands/ 目录，按职责分文件）的承载处。
 //! 层边界：业务纯逻辑（session.rs 等）平铺于本 src 下且禁 import tauri，
 //! 装配层只在本文件——纯逻辑可脱离窗口 cargo test 直测。
-//! 玻璃效果：Windows 实机走 Acrylic（PL001 阶段 B 已判定通过）；macOS/Linux 延后（y.problems.md #1）。
+//! 玻璃效果：Windows 实机走 DWM 系统背板常驻真磨砂（PL010.7，Terminal 同款机制）；macOS/Linux 延后（y.problems.md #1）。
 
 pub mod commands;
 pub mod period;
@@ -229,14 +229,31 @@ pub fn run() {
                 crate::diag::log(&format!("PANIC（线程 {name}）：{info}"));
                 default_hook(info);
             }));
-            // 玻璃效果挂载：失败严格抛错（setup 错误会上抛阻断启动），不静默降级
+            // 玻璃效果挂载（PL010.7 最终路线）：DWM 系统背板——微软终端同款机制。
+            // DWM 自己合成"窗口背后真实内容的磨砂"并常驻绘制：失焦不消失（老 SWCA Acrylic 会撤）、
+            // 零采集延迟、真实时。应用侧只叠薄纱调浓度（CSS 层）。
+            // DWMSBT_TRANSIENTWINDOW = 3（Acrylic 材质）；失败严格抛错（玻璃挂载同策略）
             #[cfg(target_os = "windows")]
             {
                 let Some(window) = app.get_webview_window("main") else {
                     return Err("主窗口不存在（tauri.conf.json 声明与代码不符）".into());
                 };
-                // 浅暖紫色调（PL007.2 糖果玻璃基底）：静态 tint，深浅色观感由前端 CSS 分层处理
-                window_vibrancy::apply_acrylic(&window, Some((238, 233, 246, 130)))?;
+                #[link(name = "dwmapi")]
+                extern "system" {
+                    fn DwmSetWindowAttribute(
+                        hwnd: isize,
+                        attr: u32,
+                        value: *const u32,
+                        size: u32,
+                    ) -> i32;
+                }
+                let hwnd = window.hwnd().map_err(|e| format!("取窗口句柄失败：{e}"))?.0 as isize;
+                // DWMWA_SYSTEMBACKDROP_TYPE = 38；DWMSBT_TRANSIENTWINDOW = 3（Acrylic）
+                let backdrop: u32 = 3;
+                let hr = unsafe { DwmSetWindowAttribute(hwnd, 38, &backdrop, 4) };
+                if hr != 0 {
+                    return Err(format!("设置系统背板失败（HRESULT {hr:#x}）").into());
+                }
             }
             build_tray(app)?;
             register_global_shortcuts(app)?;

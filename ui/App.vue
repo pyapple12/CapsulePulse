@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 // PL008.3：dock 时代 ⚙ 换 lucide 线性图标（与 DockNav 同源图标库）
 import { Settings } from "lucide-vue-next";
 
@@ -53,6 +54,24 @@ let unlistenAutoOut: (() => void) | undefined;
 // 高光层位置随之移动；reduced-motion 用户直接跳过（动效全退避红线）——
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 let pointerRaf = 0;
+
+// —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
+// 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
+// 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）——
+const DRAG_INTERACTIVE =
+  "button, input, textarea, select, a, .dock, .floating-sheet, .pill, .detail-panel";
+
+/** 非交互区按下即启动窗口拖拽 */
+function onWindowDown(e: MouseEvent): void {
+  if (e.button !== 0) {
+    return;
+  }
+  const target = e.target as HTMLElement | null;
+  if (target?.closest(DRAG_INTERACTIVE)) {
+    return;
+  }
+  void getCurrentWindow().startDragging();
+}
 
 /** pointermove 节流器：一帧最多计算一次，逐材质元素换算元素相对坐标写入 CSS 变量 */
 function onPointerMove(e: PointerEvent): void {
@@ -186,6 +205,7 @@ onMounted(() => {
   void refreshSettings();
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
   window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("mousedown", onWindowDown);
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
     reminderThreshold.value = event.payload;
@@ -214,6 +234,7 @@ onUnmounted(() => {
     window.clearInterval(statsTimer);
   }
   window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("mousedown", onWindowDown);
   if (pointerRaf !== 0) {
     window.cancelAnimationFrame(pointerRaf);
   }
@@ -223,9 +244,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="glass-card" data-tauri-drag-region>
+  <main class="glass-card">
     <div class="topbar">
-      <h1 class="title" data-tauri-drag-region>CapsulePulse</h1>
+      <h1 class="title">CapsulePulse</h1>
       <button class="gear" type="button" title="设置" @click="togglePanel">
         <Settings :size="16" :stroke-width="2.2" aria-hidden="true" />
       </button>
@@ -267,8 +288,8 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* —— PL007 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份。
-   糖果玻璃材质层：紫（主/工作）+ 薄荷（次/休息）pastel 色板，轮廓光/带色投影/虹彩渐变齐备 —— */
+/* —— PL010 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份。
+   真实玻璃材质：高透薄纱体色 + 亮边定义形状 + 顶缘 rim + 落影；磨砂由 Mica 承担 —— */
 :root {
   --accent: #7c3aed;
   --mint: #0f766e;
@@ -276,18 +297,24 @@ onUnmounted(() => {
   --ink: #1d1d1f;
   --ink-2: color-mix(in srgb, #1d1d1f 55%, transparent);
   --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --glass-bg: rgba(252, 250, 255, 0.66);
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.78);
+  --panel-bg: rgba(255, 255, 255, 0.38);
+  --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+  --panel-cast: rgba(90, 70, 140, 0.1);
+  --btn-cast: rgba(90, 70, 140, 0.35);
+  --text-shadow: none;
   --chip-bg: rgba(255, 255, 255, 0.45);
   --glass-blur: blur(28px) saturate(1.6);
   --glass-highlight:
     inset 0 1px rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.16);
   --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.9);
   --edge-glow: 0 0 0 1px rgba(255, 255, 255, 0.55), 0 2px 12px rgba(139, 92, 246, 0.25);
-  --shadow-candy: 0 10px 28px rgba(90, 70, 140, 0.2);
+  --shadow-candy: 0 16px 40px rgba(80, 60, 120, 0.25);
   --grad-primary: linear-gradient(165deg, #8a5cff 0%, #7448f5 55%, #6a3ae8 100%);
   --grad-digit: linear-gradient(165deg, #7c3aed 0%, #5b21b6 100%);
   --grad-mint: linear-gradient(165deg, #34d399 0%, #10b981 100%);
-  --iridescent: linear-gradient(135deg, #fbcfe8 0%, #ddd6fe 45%, #a5f3fc 100%);
+  --iridescent: linear-gradient(135deg, #fcd9ed 0%, #e1defe 45%, #b7f5fc 100%);
   --r-card: 20px;
   --r-ctrl: 13px;
   --r-pill: 999px;
@@ -297,19 +324,25 @@ onUnmounted(() => {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* 暗夜霓虹衍生版：深紫灰底 + 降饱和 accent + 加强轮廓光（PL007 方向定案 5） */
+    /* 暗夜衍生：同一配方的低透深纱版（浅字 + 暗投影保对比），磨砂仍由 Mica 承担 */
     --accent: #c0b0fd;
     --mint: #5eead4;
     --mint-bright: #2dd4bf;
     --ink: #f5f5f7;
     --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
-    --glass-bg: rgba(24, 18, 40, 0.72);
+    --glass-bg: rgba(24, 18, 40, 0.1);
+    --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
+    --panel-bg: rgba(255, 255, 255, 0.07);
+    --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+    --panel-cast: rgba(0, 0, 0, 0.3);
+    --btn-cast: rgba(0, 0, 0, 0.45);
+    --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     --chip-bg: rgba(255, 255, 255, 0.1);
     --glass-highlight:
       inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
     --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
     --edge-glow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 2px 16px rgba(167, 139, 250, 0.4);
-    --shadow-candy: 0 10px 28px rgba(0, 0, 0, 0.5);
+    --shadow-candy: 0 16px 40px rgba(0, 0, 0, 0.5);
     --grad-primary: linear-gradient(165deg, #7a5cf0 0%, #5b3fd6 55%, #4c2fb8 100%);
     --grad-digit: linear-gradient(165deg, #d8c7ff 0%, #a78bfa 100%);
     --grad-mint: linear-gradient(165deg, #0c8a60 0%, #075e42 100%);
@@ -325,9 +358,8 @@ onUnmounted(() => {
 /* —— 糖果材质工具类（PL007.1）：半径由消费方自定，材质配方收敛于此 ——
    .glass-panel 玻璃面板（PL008 布局卡的底材）/ .glass-chip 胶囊小件 / .iridescent 虹彩浮层 */
 .glass-panel {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--rim-light), var(--glass-highlight), var(--shadow-candy);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-stroke), var(--rim-light), var(--panel-cast);
 }
 
 .glass-chip {
@@ -416,12 +448,18 @@ onUnmounted(() => {
   user-select: none;
 }
 
-/* —— 全局按钮配方（PL007.3 糖果蒙皮）：主 = 紫渐变 + 轮廓光 + 带色投影 / 次 = 薄荷渐变，跨组件单一来源 —— */
+/* —— PL010 按钮厚度三件套（配方表）：白顶光层 + 底缘暗线 + 落影 = 立体玻璃圆柱；
+   主 = 紫渐变体色、次 = 薄荷渐变体色 —— */
 .btn-primary {
   border: none;
   border-radius: var(--r-pill);
-  background: var(--grad-primary);
-  box-shadow: var(--rim-light), var(--shadow-candy);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 38%),
+    var(--grad-primary);
+  box-shadow:
+    var(--rim-light),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+    0 8px 20px var(--btn-cast);
   color: #fff;
   font-family: var(--font-stack);
   cursor: pointer;
@@ -442,8 +480,12 @@ onUnmounted(() => {
 .btn-ghost {
   border: 1px solid color-mix(in srgb, var(--mint) 45%, transparent);
   border-radius: var(--r-pill);
-  background: var(--grad-mint);
-  box-shadow: var(--rim-light);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 38%), var(--grad-mint);
+  box-shadow:
+    var(--rim-light),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.14),
+    0 6px 16px var(--btn-cast);
   color: inherit;
   font-family: var(--font-stack);
   cursor: pointer;
@@ -547,23 +589,43 @@ onUnmounted(() => {
 </style>
 
 <style scoped>
-/* 玻璃卡片：四周留 12px 露出 Acrylic 底；本体 = 唯一玻璃配方（令牌）+ 高光内描边。
-   PL008：窗口可缩放——overflow hidden 防溢出破相（L1），纵向节奏压缩为弹性 gap（dock 定底后由页面区吃掉富余高度） */
+/* 玻璃板（PL010.8 全窗单层收敛）：磨砂 = DWM 系统背板铺满整窗（Rust 侧挂载），
+   页面只叠 10% 白纱体色（::before）+ 亮边 + rim + 落影；内容呼吸内缩（padding 24/20）。
+   8px 圆角与系统窗口圆角对齐；overflow hidden 防溢出破相 */
 .glass-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  height: calc(100vh - 24px);
-  margin: 12px;
-  border-radius: var(--r-card);
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--rim-light), var(--glass-highlight);
+  width: 100%;
+  height: 100vh;
+  padding: 24px 20px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  box-shadow: var(--glass-stroke), var(--rim-light), var(--shadow-candy);
   overflow: hidden;
+  text-shadow: var(--text-shadow);
   user-select: none;
   color: var(--ink);
   font-family: var(--font-stack);
+}
+
+/* 白纱体色层：叠在 DWM 磨砂背板之上、内容之下（体色即玻璃自身材质的一部分） */
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: var(--glass-bg);
+  pointer-events: none;
+}
+
+/* 直接子件一律浮于体色层之上（.overlay 是 fixed 全屏遮罩，排除） */
+.glass-card > :not(.overlay) {
+  position: relative;
+  z-index: 1;
 }
 
 .topbar {

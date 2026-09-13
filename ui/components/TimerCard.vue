@@ -78,7 +78,7 @@ onUnmounted(() => {
 <template>
   <section class="timer">
     <ProgressRing :on-duty="onDuty" :work-secs="workSecs" :target-hours="targetHours">
-      <div class="digits" :class="{ 'digits-solid': !onDuty }" data-tauri-drag-region>
+      <div class="digits" :class="{ 'digits-solid': !onDuty }">
         {{ formatDisplay(totalMs) }}
       </div>
     </ProgressRing>
@@ -148,6 +148,8 @@ onUnmounted(() => {
   letter-spacing: 1px;
   line-height: 1.1;
   cursor: default;
+  /* 渐变描字排除继承的 text-shadow（暗色对比补偿令牌）：投影会从透明字身透出毁掉渐变 */
+  text-shadow: none;
 }
 
 /* 纯色回退：恢复实色文字（保留等宽与字号） */
