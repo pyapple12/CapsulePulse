@@ -3,7 +3,7 @@
 //! 也是 `cargo test` 与命令层（commands/ 目录，按职责分文件）的承载处。
 //! 层边界：业务纯逻辑（session.rs 等）平铺于本 src 下且禁 import tauri，
 //! 装配层只在本文件——纯逻辑可脱离窗口 cargo test 直测。
-//! 玻璃效果：Windows 实机走 DWM 系统背板常驻真磨砂（PL010.7，Terminal 同款机制）；macOS/Linux 延后（y.problems.md #1）。
+//! 玻璃效果：焦点联动材质（PL011）——平时纯 alpha 透明常驻，聚焦瞬间挂 DWM Acrylic 真磨砂（extern dwmapi 直连）；macOS/Linux 延后（y.problems.md #1）。
 
 pub mod commands;
 pub mod period;
@@ -32,19 +32,26 @@ use crate::settings::ReminderSettings;
 use crate::storage::Storage;
 use crate::workday::WorkdayState;
 
+/// 运行期警告双写：eprintln（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
+/// 文件日志是唯一落点——FIX003.8）。仅用于失败不中断主流程的容错路径。
+fn warn_diag(msg: &str) {
+    eprintln!("{msg}");
+    diag::log(msg);
+}
+
 /// 显示主窗口并聚焦（还原最小化；失败逐项记日志，不中断流程）。
 fn show_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
     if let Err(err) = window.show() {
-        eprintln!("窗口显示失败：{err}");
+        warn_diag(&format!("窗口显示失败：{err}"));
     }
     if let Err(err) = window.unminimize() {
-        eprintln!("窗口还原失败：{err}");
+        warn_diag(&format!("窗口还原失败：{err}"));
     }
     if let Err(err) = window.set_focus() {
-        eprintln!("窗口聚焦失败：{err}");
+        warn_diag(&format!("窗口聚焦失败：{err}"));
     }
 }
 
@@ -54,7 +61,7 @@ fn hide_main_window(app: &AppHandle) {
         return;
     };
     if let Err(err) = window.hide() {
-        eprintln!("窗口隐藏失败：{err}");
+        warn_diag(&format!("窗口隐藏失败：{err}"));
     }
 }
 
@@ -66,7 +73,7 @@ fn toggle_main_window(app: &AppHandle) {
     match window.is_visible() {
         Ok(true) => hide_main_window(app),
         Ok(false) => show_main_window(app),
-        Err(err) => eprintln!("窗口可见性查询失败：{err}"),
+        Err(err) => warn_diag(&format!("窗口可见性查询失败：{err}")),
     }
 }
 
@@ -77,7 +84,7 @@ fn handle_action(app: &AppHandle, id: &str) {
         "toggle_timer" => {
             let ctx = app.state::<AppContext>();
             if let Err(err) = commands::session::toggle_session(&ctx) {
-                eprintln!("计时切换失败：{err}");
+                warn_diag(&format!("计时切换失败：{err}"));
             }
         }
         "quit" => {
@@ -130,7 +137,7 @@ fn register_global_shortcuts(app: &tauri::App) -> Result<(), Box<dyn std::error:
             if event.state == ShortcutState::Pressed {
                 let ctx = app.state::<AppContext>();
                 if let Err(err) = commands::session::toggle_session(&ctx) {
-                    eprintln!("计时切换失败：{err}");
+                    warn_diag(&format!("计时切换失败：{err}"));
                 }
             }
         })?;
@@ -204,7 +211,8 @@ pub fn run() {
         }
     };
     if workday.is_on_duty() {
-        eprintln!("已恢复在岗状态（上次下班打卡缺失）");
+        // 用户可感知的关键状态（上次下班打卡缺失，班账从恢复时刻起算），双写落档备查
+        warn_diag("已恢复在岗状态（上次下班打卡缺失）");
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {

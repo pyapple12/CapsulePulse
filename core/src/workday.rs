@@ -60,15 +60,6 @@ pub enum WorkdayError {
     NotOnDuty,
 }
 
-/// 在岗时段信息：clock_out 转移的返回值，命令层据其落库关行（workdays.id 行句柄）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DutySpan {
-    /// 上班打卡时刻（Unix 秒）。
-    pub clock_in_at: i64,
-    /// workdays 表行 id。
-    pub id: i64,
-}
-
 /// 工作日状态机：Off（未上班）/ OnDuty（在岗中）。
 /// OnDuty 携带 clock_in_at（自动下班回填的基准）与 id（下班关行的库句柄）——
 /// id 属库行引用而非业务语义，随态流转避免命令层二次查询。
@@ -101,15 +92,15 @@ impl WorkdayState {
         Ok(())
     }
 
-    /// 下班转移：仅 OnDuty 合法，返回在岗信息供落库关行。
+    /// 下班转移：仅 OnDuty 合法（落库关行所需的上班时刻与 id 在转移前由命令层读取）。
     /// # 错误
     /// 未上班返回 [`WorkdayError::NotOnDuty`]。
-    pub fn clock_out(&mut self) -> Result<DutySpan, WorkdayError> {
-        let WorkdayState::OnDuty { clock_in_at, id } = *self else {
+    pub fn clock_out(&mut self) -> Result<(), WorkdayError> {
+        if !self.is_on_duty() {
             return Err(WorkdayError::NotOnDuty);
-        };
+        }
         *self = WorkdayState::Off;
-        Ok(DutySpan { clock_in_at, id })
+        Ok(())
     }
 
     /// 是否在岗中（计时门禁与启动恢复判断用）。
@@ -348,18 +339,12 @@ mod tests {
         );
     }
 
-    /// OnDuty 下班：返回在岗信息（clock_in_at + id 供落库关行）并回到 Off。
+    /// OnDuty 下班：转移回 Off（在岗信息由命令层转移前读取，此处只管状态）。
     #[test]
-    fn clock_out_returns_span_and_exits() {
+    fn clock_out_exits_duty() {
         let mut s = WorkdayState::Off;
         s.clock_in(1_000, 7).unwrap();
-        assert_eq!(
-            s.clock_out(),
-            Ok(DutySpan {
-                clock_in_at: 1_000,
-                id: 7
-            })
-        );
+        s.clock_out().unwrap();
         assert_eq!(s, WorkdayState::Off);
         assert!(!s.is_on_duty());
     }

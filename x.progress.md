@@ -228,6 +228,21 @@
 
 ## 未完成
 
-（当前无未完成任务组；下一步方向见 z.plan.md 待完成清单，由用户定）
+### FIX003: 第3轮审计修复 [audit#A003]
+
+> 范围：A003 报告（2026-09-13）P2 一项 + P3 十二项，专项 = 死代码与作废功能清理（用户指定）；无 P0/P1。
+> 红线：审计修复不引入行为变化（P2-1 与 P3-11/13 除外，均为缺陷修复本身）；保活不回归；零新依赖。
+
+- [x] FIX003.1 [P2] 拖拽白名单补 `.overlay` —— ui/App.vue:65-66 `DRAG_INTERACTIVE` 常量追加 `".overlay"`（设置浮层与确认框遮罩均为 `.overlay` + `@click.self` 点外关闭，现点击遮罩会触发 startDragging 吞掉 click）；验证：live——打开设置浮层点遮罩空白处应正常关闭不拖窗、确认框点外取消同验、正常区域拖拽不回归（2026-09-13 已验证：用户实机目验通过——点遮罩正常关闭不拖窗，FIX003.1 闭环，全组 11 条收口完成）
+- [x] FIX003.2 [P3] 死代码：last_fired 隔离 —— core/src/reminder.rs:49 `pub fn last_fired` 上加 `#[cfg(test)]`（生产零调用仅本模块测试用；A002-P3-15 登记已修实际漏改）；验证：cargo clippy -D warnings + cargo test（2 用例仍过）+ 全仓 grep 生产零调用复核（2026-09-13 已验证：clippy 绿、2 用例过、A002 漏改闭环）
+- [x] FIX003.3 [P3] 死代码：删 DutySpan —— core/src/workday.rs `WorkdayState::clock_out` 返回改 `Result<(), WorkdayError>`（107-112 行去掉 DutySpan 构造），删除 `DutySpan` struct（65-70 行）及其过时 doc；workday.rs 测试同步改断 Off 态；commands/workday.rs:51 调用点无需改（`?` 已兼容，命令层在转移前已解构读取 id）；验证：cargo test 全绿 + grep DutySpan 零残留（2026-09-13 已验证：91 项测试全绿、grep 归零）
+- [x] FIX003.4 [P3] 死代码：storage 三方法测试隔离 —— core/src/storage.rs `add_session`/`workday_open`/`workday_close` 各加 `#[cfg(test)]`（事务化后生产零调用；同 crate 测试可见不受影响）；验证：cargo test 全绿（storage + stats 测试不破）（2026-09-13 已验证：91 项全绿）
+- [x] FIX003.5 [P3] 死代码：删孤儿变量 —— ui/App.vue 删 `--r-ctrl: 13px` 行（全 ui/ 零消费，分段控件已被 PL008 dock 取代）；验证：grep `var(--r-ctrl)` 零命中 + vue-tsc + npm run build（2026-09-13 已验证：grep 归零、vue-tsc/build 绿）
+- [x] FIX003.6 [P3] 过时注释五处更正 —— ①core/src/lib.rs:6 模块头改"焦点联动：平时透明、聚焦挂 DWM Acrylic（PL011）"；②ui/App.vue 两处"磨砂由 Mica 承担"改"DWM Acrylic 背板承担（焦点联动，PL011）"；③core/src/commands/mod.rs:30 "三个读命令"改"四个读命令"；④AGENTS.md 技术栈行与架构要点的 window-vibrancy/apply_acrylic 描述改 extern dwmapi 直连 + 焦点联动；验证：grep Mica/vibrancy/常驻真磨砂 在上述文件零残留（2026-09-13 已验证：grep 归零——AGENTS 陷阱节平台差异行语义仍成立按清单范围保留）
+- [x] FIX003.7 [P3] 容错白名单登记第 ⑦ 项 + eprintln 收敛 diag —— AGENTS.md 错误策略白名单追加第 ⑦ 项（场景=焦点联动 DWM 背板切换失败与 window-focus 事件发送失败；降级=落诊断日志、材质维持前态；理由=材质为纯装饰层，运行时焦点事件不可中断主流程，下次切换自动重试自愈）；core/src/commands/reminder.rs 通知失败在 eprintln 之外补 `crate::diag::log`（白名单 ② 登记降级行为"落日志"release 下曾落空）；验证：AGENTS 白名单节核对三要素 + reminder.rs 双写确认（2026-09-13 已验证）
+- [x] FIX003.8 [P3] release 可观测性补口 —— core/src/lib.rs 抽局部助手 `warn_diag`（eprintln + diag::log 双写，消重 8 处）：窗口显隐/还原/聚焦/可见性查询失败、计时切换失败（托盘与热键两处）、已恢复在岗提示全部落档；验证：grep warn_diag 调用数 ≥8 + 构建绿（2026-09-13 已验证：9 处调用、clippy/test 绿）
+- [x] FIX003.9 [P3] restart 留痕失败回滚 —— core/src/commands/session.rs restart_session：mark_segment 失败时 reset 回 Idle + 诊断日志（**实现偏差注记**：任务原写法"克隆快照写回"经分析有双计缺陷——Running 分支旧段刚落库成功，写回旧 Running 态会使内存累计含已落库段、下次 pause 双计；reset 回 Idle 后内存与库严格一致，损失仅新段起点事件缺失由图谱归约容错吸收）；新增 2 锚测试（Idle 态 mark 失败回 Idle / Running 态落库失败停 Paused 段保留内存）；**TDD 实证：首版实现写 `lock(ctx)?.reset()` 在持有 session guard 时重取同锁自锁死锁，被新锚测试当场卡死抓出，改用已持有 guard 修复**；验证：cargo test 91 项全绿（2026-09-13 已验证）
+- [x] FIX003.10 [P3] 统计失败可见性 —— ui/components/StatsView.vue：week_detail 失败并入 loadError 通道（catch 内置 loadError，周卡失败不再静默消失）；空文案行改 `v-else-if="!loadError"`（加载失败时不再显示"本日无打卡记录"伪装空数据）；验证：vue-tsc + build 绿 + 代码走查（2026-09-13 已验证：vue-tsc/build 绿；停 db 模拟失败为破坏性操作不做，走查确认两 catch 均置 loadError）
+- [x] FIX003.11 [P3] FIX003 收口 —— storage_probe.rs **维持保留**（A002-O4 豁免继续；用户未拍板删除前不做破坏性动作，删除选项保留随时可做，删则需同步测试口径 91→90）；门禁七项全量（cargo fmt --check / clippy -D warnings / test 91 / doc + vue-tsc / build / prettier 全绿）+ 反向验证逐条过（overlay 入白名单 / last_fired cfg(test) 在位 / DutySpan 归零 / --r-ctrl 归零 / 白名单⑦ 登记 / warn_diag 9 处）+ A003 状态行回写 + 勾结 + commit 草案（fix: V0.1.1.2，用户审核后自行执行）；验证：门禁 + 反向验证清单逐项过（2026-09-13 已验证：门禁全绿、反向验证 9 项全过、FIX003.1 live 目验移交用户）
 
 （后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）

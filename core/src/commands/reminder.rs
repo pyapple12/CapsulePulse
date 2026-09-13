@@ -33,6 +33,7 @@ fn send_notification(app: &AppHandle, threshold_min: u32) {
         .show()
     {
         eprintln!("系统通知发送失败（降级仅声音）：{err}");
+        crate::diag::log(&format!("系统通知发送失败（降级仅声音）：{err}"));
     }
 }
 

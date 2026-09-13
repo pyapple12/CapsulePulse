@@ -1,6 +1,6 @@
 # CapsulePulse — 玻璃质感的工作计时看板
 
-[![Version](https://img.shields.io/badge/Version-0.1.1.1-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.1.2-blue.svg)](core/Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Phase](https://img.shields.io/badge/Phase-PL011_完成-brightgreen.svg)](z.plan.md)
 
@@ -15,7 +15,7 @@
 | 玻璃 UI  | 糖果玻璃材质：pastel 紫/薄荷色板 + 轮廓光 + 虹彩浮层，深浅色自适应       |
 | 常驻后台 | 托盘常驻、全局快捷键唤起、关闭最小化到托盘                               |
 
-> 当前状态：**PL001–PL011 已完成**（V0.1.1.1）——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻 + 工作日/打卡模型与统计视图 + UI 三连（糖果玻璃材质 / 布局翻新 / 光与生命感）+ 材质重构·真实玻璃 + **焦点联动材质**（平时 alpha 透明常驻，聚焦瞬间 DWM Acrylic 真磨砂、失焦即刻回透明，分态纱浓度）。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
+> 当前状态：**PL001–PL011 已完成 + A003 审计修复（V0.1.1.2）**——玻璃壳计时闭环 + 存储统计 + 提醒设置 + 托盘常驻 + 工作日/打卡模型与统计视图 + UI 三连（糖果玻璃材质 / 布局翻新 / 光与生命感）+ 材质重构·真实玻璃 + 焦点联动材质（平时 alpha 透明常驻，聚焦瞬间 DWM Acrylic 真磨砂、失焦即刻回透明，分态纱浓度）+ 死代码清理与合规补口（FIX003）。方案与实测结论见 `z.plan.md` 附录，任务档案见 `x.progress.md`。
 
 ## 技术栈
 

@@ -78,7 +78,8 @@ impl Storage {
         Ok(Self { conn })
     }
 
-    /// 写入一个工作段（参数化绑定）。
+    /// 写入一个工作段（参数化绑定；仅测试用——生产链走 record_session_with_event 事务版）。
+    #[cfg(test)]
     pub fn add_session(&self, started_at: i64, seconds: i64) -> Result<(), StorageError> {
         self.conn.execute(
             "INSERT INTO sessions (started_at, seconds) VALUES (?1, ?2)",
@@ -119,7 +120,9 @@ impl Storage {
         )?)
     }
 
-    /// 开一个工作日（上班打卡）：写入 clock_in_at 并返回行 id（clock_out 保持 NULL = 在岗中）。
+    /// 开一个工作日（上班打卡）：写入 clock_in_at 并返回行 id（clock_out 保持 NULL = 在岗中；
+    /// 仅测试用——生产链走 workday_open_with_event 事务版）。
+    #[cfg(test)]
     pub fn workday_open(&self, clock_in_at: i64) -> Result<i64, StorageError> {
         self.conn.execute(
             "INSERT INTO workdays (clock_in_at, clock_out_at) VALUES (?1, NULL)",
@@ -128,9 +131,10 @@ impl Storage {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// 关工作日（下班打卡）：按 id 写 clock_out_at。
+    /// 关工作日（下班打卡）：按 id 写 clock_out_at（仅测试用——生产链走 workday_close_with_event）。
     /// # 错误
     /// id 不存在返回 [`StorageError::WorkdayMissing`]（严格报错，不静默成功）。
+    #[cfg(test)]
     pub fn workday_close(&self, id: i64, clock_out_at: i64) -> Result<(), StorageError> {
         let affected = self.conn.execute(
             "UPDATE workdays SET clock_out_at = ?1 WHERE id = ?2",

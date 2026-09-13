@@ -61,9 +61,10 @@ let pointerRaf = 0;
 
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
-// 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）——
+// 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）；
+// .overlay 不可拖（FIX003.1）：遮罩 @click.self 点外关闭依赖 click，拖拽循环会吞掉它——
 const DRAG_INTERACTIVE =
-  "button, input, textarea, select, a, .dock, .floating-sheet, .pill, .detail-panel";
+  "button, input, textarea, select, a, .dock, .floating-sheet, .pill, .detail-panel, .overlay";
 
 /** 非交互区按下即启动窗口拖拽 */
 function onWindowDown(e: MouseEvent): void {
@@ -309,7 +310,7 @@ onUnmounted(() => {
 
 <style>
 /* —— PL010 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份。
-   真实玻璃材质：高透薄纱体色 + 亮边定义形状 + 顶缘 rim + 落影；磨砂由 Mica 承担 —— */
+   真实玻璃材质：高透薄纱体色 + 亮边定义形状 + 顶缘 rim + 落影；磨砂由 DWM Acrylic 背板承担（焦点联动，PL011）—— */
 :root {
   --accent: #7c3aed;
   --mint: #0f766e;
@@ -336,7 +337,6 @@ onUnmounted(() => {
   --grad-mint: linear-gradient(165deg, #34d399 0%, #10b981 100%);
   --iridescent: linear-gradient(135deg, #fcd9ed 0%, #e1defe 45%, #b7f5fc 100%);
   --r-card: 20px;
-  --r-ctrl: 13px;
   --r-pill: 999px;
   --r-sheet: 24px;
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -344,7 +344,7 @@ onUnmounted(() => {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* 暗夜衍生：同一配方的低透深纱版（浅字 + 暗投影保对比），磨砂仍由 Mica 承担 */
+    /* 暗夜衍生：同一配方的低透深纱版（浅字 + 暗投影保对比），磨砂仍由 DWM Acrylic 背板承担 */
     --accent: #c0b0fd;
     --mint: #5eead4;
     --mint-bright: #2dd4bf;

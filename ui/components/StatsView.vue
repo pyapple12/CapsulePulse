@@ -20,7 +20,8 @@ const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"] as cons
 // 拉取失败可见化（FIX002.4）：区分"空日"与"加载失败"，避免错误伪装成无打卡
 const loadError = ref("");
 
-/** 拉取单日明细 + 周视图（offset 为日偏移：0 今日 / -1 昨日）；失败保留旧数据并标错误 */
+/** 拉取单日明细 + 周视图（offset 为日偏移：0 今日 / -1 昨日）；任一失败保留旧数据并标错误
+ *  （FIX003.10：周卡失败与单日同通道可见，不再静默消失） */
 async function refresh(): Promise<void> {
   try {
     day.value = await invoke<DaySummary>("day_detail", { offset: offset.value });
@@ -32,6 +33,7 @@ async function refresh(): Promise<void> {
   try {
     week.value = await invoke<WeekDay[]>("week_detail");
   } catch (err) {
+    loadError.value = String(err);
     console.error("week_detail 调用失败", err);
   }
 }
@@ -120,7 +122,8 @@ watch(offset, refresh);
         </div>
       </div>
     </template>
-    <p v-else class="empty">本日无打卡记录</p>
+    <!-- 错误态不显空文案（FIX003.10）：加载失败时"本日无打卡记录"会伪装成真实空数据 -->
+    <p v-else-if="!loadError" class="empty">本日无打卡记录</p>
     <div v-if="week.length > 0" class="panel glass-panel week-panel">
       <p class="week-title">最近 7 日</p>
       <div

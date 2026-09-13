@@ -163,6 +163,10 @@ pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), C
 /// 重开（先落库再重开，用户定案）：仅 Running 有未落库本段——Paused 的段已在
 /// 最近一次 pause 落库、Paused 期间不累计；随后 reset + start 单锁原子完成。
 /// 未上班严格拒绝（重开隐含 start，同一门禁）。
+/// 留痕失败回滚回 Idle（FIX003.9）：旧账此刻已全部落库（Running 分支刚收段）或本无
+/// 未落库数据，reset 后内存与库一致；不用快照写回——Running 分支落库成功后写回旧
+/// Running 态会使内存累计含已落库段（下次 pause 双计）。损失仅新段起点事件缺失，
+/// 时间图谱归约容错吸收；诊断日志留痕（容错白名单 ⑥ 通道）。
 fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     require_on_duty(ctx)?;
     let mut session = lock(ctx)?;
@@ -178,7 +182,12 @@ fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     }
     session.reset();
     session.start()?;
-    mark_segment(ctx, EventKind::SegmentStart)?;
+    if let Err(err) = mark_segment(ctx, EventKind::SegmentStart) {
+        // 回滚复用已持有的 session 锁 guard——此处再 lock(ctx) 即自锁死锁（本测试实测抓出）
+        session.reset();
+        crate::diag::log(&format!("重开留痕失败已回滚（回 Idle，可重新开始）：{err}"));
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -525,6 +534,45 @@ mod tests {
             Err(CommandError::Poisoned("存储"))
         ));
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+    }
+
+    /// FIX003.9：Idle 态重开留痕失败回滚回 Idle（mark_segment 失败 → reset，与 start 同款）。
+    #[test]
+    fn restart_from_idle_rolls_back_to_idle_on_mark_failure() {
+        let ctx = ctx(FakeClock::new());
+        begin_duty(&ctx);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.storage.lock().unwrap();
+            panic!("污染 storage 锁");
+        }));
+        assert!(matches!(
+            restart_session(&ctx),
+            Err(CommandError::Poisoned("存储"))
+        ));
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "idle");
+    }
+
+    /// FIX003.9：Running 态重开在落库步失败——状态停 Paused（段保留内存可续走，非数据丢失态）。
+    #[test]
+    fn restart_running_stays_paused_on_persist_failure() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx);
+        start_session(&ctx).unwrap();
+        clock.advance(secs(60));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.storage.lock().unwrap();
+            panic!("污染 storage 锁");
+        }));
+        assert!(matches!(
+            restart_session(&ctx),
+            Err(CommandError::Poisoned("存储"))
+        ));
+        assert_eq!(
+            status_snapshot(&ctx).unwrap().0.state,
+            "paused",
+            "落库失败停 Paused：段未落库保留内存，可继续"
+        );
     }
 
     /// 锁中毒严格报错：fire 锁被污染后动作命令传播 Poisoned，而非静默跳过清零（回归锚）。

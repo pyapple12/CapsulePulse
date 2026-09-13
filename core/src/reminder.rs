@@ -45,7 +45,8 @@ impl ReminderFire {
         due
     }
 
-    /// 段内上次触发点（只读视图）。
+    /// 段内上次触发点（只读视图，仅测试断言用——生产链不读此状态）。
+    #[cfg(test)]
     pub fn last_fired(&self) -> Option<Duration> {
         self.last_fired
     }

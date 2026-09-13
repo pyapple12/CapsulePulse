@@ -1060,3 +1060,90 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 ### 拆分 todo
 
 见 x.progress.md「PL011」任务组。
+
+---
+
+## 附录 A003：全量代码审计报告（第3轮，2026-09-13）
+
+> 状态：✅ 已修复（2026-09-13 收口，V0.1.1.2；FIX003 十一条勾结见 x.progress.md，反向验证与死锁 TDD 实证记录见该文件条目注记；storage_probe.rs 维持保留——A002-O4 豁免继续，删除选项保留；FIX003.1 live 用户目验移交收尾确认）
+> 范围：core/ 全部 .rs + Cargo.toml + tauri.conf.json + capabilities/default.json + ui/ 全部前端（11 文件）+ 根配置 + 静态资源引用；不审计 node_modules / dist / target / .temp / .agents / 第三方依赖与生成代码。
+> 方式：主会话回归复核（A002 十五项逐项 grep + git 行级对比）+ 三路并行逐文件通读（Rust 纯逻辑组 / Tauri 集成组 / 前端组 explore 子任务）+ 门禁实测（cargo fmt --check / clippy -D warnings / test 90 / doc + vue-tsc / prettier 全绿）。基线 2b9e380（V0.1.1.1）。
+> 本轮专项（用户指定）：清理死代码与已作废功能——设独立死代码专项清单（7 项确认），并对全部命令/依赖/组件/CSS 变量/选择器/TS 导出做对账式存活核对。
+
+### 零、上轮修复复核清单（A002 → FIX002，V0.1.0.10）
+
+| 上轮条目                                                           | 现状                                                                                                                                                  | 证据                                                                    |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| P2-1 三处回滚（pause/start/resume）                                | ✅ 在位且带 3 条锚测试                                                                                                                                | commands/session.rs:75-130、476-512                                     |
+| P3-3 段末回填口径 / P3-9 async 化 / P3-10 storage 事务化           | ✅ 在位（四读命令 async、三对事务方法 + 测试）                                                                                                        | stats.rs:34、session.rs:252、workday.rs:180/189；storage.rs:213/235/259 |
+| P3-11 按钮类收敛 / P3-12 字体继承 / P3-13 format.ts                | ✅ 在位                                                                                                                                               | App.vue:473-524、467；format.ts 三函数四组件消费                        |
+| P3-14 persist/close 合一 / P3-16 白名单登记 / P3-17 paths 测试分支 | ✅ 在位                                                                                                                                               | session.rs:148-161；AGENTS 白名单 ⑤；paths.rs:67-77                     |
+| **P3-15 死代码（last_fired 加 cfg(test)）**                        | ⚠️ **半漏改**：clock_out_inner 已改 ()，但 `ReminderFire::last_fired()` 的 `#[cfg(test)]` 未加（git 证实 d7a85cb 未触 reminder.rs）——登记已修实际未修 | reminder.rs:49                                                          |
+| 材质废弃路线残留（vibrancy/采集管线/Mica API）                     | ✅ 源码零残留（Cargo/imports/CSS 全净；残留仅注释与文档层，见 P3-4/5/6）                                                                              | 全仓 grep                                                               |
+
+结论：15 项中 14 项完好、1 项半漏改；FIX002 之后历经 PL008–PL011 四轮大改，零回退、零新引入回归（既有观察项全部维持原状无恶化）。
+
+### 一、P0-P3 修复清单（按严重度）
+
+无 P0/P1；P2 一项、P3 十二项。性质标注：上轮已列未修 = 遗留，其余 = 新增。
+
+| #     | 文件:行号                                                | 类型 | 描述                                                                                                                                                                                                                                                                                      | 建议                                                                                                                                   | 性质                        | 影响面         |
+| ----- | -------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------------- |
+| P2-1  | App.vue:65-66（根因）+ App.vue:293 + ConfirmModal.vue:15 | 1    | 拖拽白名单 `DRAG_INTERACTIVE` 不含 `.overlay`：设置浮层与确认框均为 `.overlay` + `@click.self`（点外关闭）——点遮罩空白处先触发 `startDragging()` 进入 OS 拖拽循环，click 大概率被吞，点外关闭面板/取消确认框疑似失效且意外拖窗（PL010.1 引入的交互回归；需 live 验证确认 click 派发行为） | 白名单补 `.overlay`                                                                                                                    | 新增                        | Vue 前端       |
+| P3-1  | reminder.rs:49                                           | 5    | `ReminderFire::last_fired()` 生产零调用仅本模块测试用，`#[cfg(test)]` 未落地                                                                                                                                                                                                              | 加 `#[cfg(test)]` 一行；x.progress FIX002 该条结论更正                                                                                 | 遗留（上轮漏改）            | 死代码         |
+| P3-2  | workday.rs:65-70,107-112                                 | 5    | `DutySpan` 只产不读：生产唯一调用点（commands/workday.rs:51）`?` 丢弃返回值，"供落库关行"职责已被 OnDuty.id + 事务方法取代，字段 doc 过时                                                                                                                                                 | `WorkdayState::clock_out` 返回改 `Result<(), WorkdayError>`，删 `DutySpan`（workday.rs:358 测试同步）                                  | 遗留（P3-15 同根残留）      | 纯逻辑 API     |
+| P3-3  | storage.rs:82,123,134                                    | 5    | `add_session`/`workday_open`/`workday_close` 在 FIX002 事务化后生产调用归零，仅测试在用——测试专用 API 未隔离                                                                                                                                                                              | 加 `#[cfg(test)]`（与 session_count 同款）或删除并迁测试到事务版                                                                       | 新增                        | 存储层封装     |
+| P3-4  | lib.rs:6                                                 | 6    | 模块头注释"DWM 系统背板**常驻**真磨砂（PL010.7）"——描述已废弃的 PL010 常驻架构，PL011 焦点联动后失实                                                                                                                                                                                      | 改"焦点联动：平时透明、聚焦挂 DWM Acrylic（PL011）"                                                                                    | 新增                        | 文档           |
+| P3-5  | App.vue:312,347                                          | 6    | 注释"磨砂由 Mica 承担"×2——Mica 路线 PL010 二次拍板已弃，与现实现（PL011 焦点联动 DWM Acrylic）矛盾                                                                                                                                                                                        | 改"DWM Acrylic 背板承担（焦点联动）"                                                                                                   | 新增                        | 文档           |
+| P3-6  | AGENTS.md:15,37                                          | 6    | 技术栈表"window-vibrancy（macOS vibrancy / Windows acrylic / Linux blur）"与架构要点"apply_acrylic/apply_vibrancy"——依赖已于 V0.1.0.14 移除，文档未随收口                                                                                                                                 | 改为 extern dwmapi 直连 + 焦点联动描述                                                                                                 | 新增                        | 文档           |
+| P3-7  | commands/mod.rs:30                                       | 6    | 注释"三个读命令已 async 化"——实为四个（week_detail PL008.6 起 async）                                                                                                                                                                                                                     | 数字更正                                                                                                                               | 新增                        | 文档           |
+| P3-8  | lib.rs:253-255,259-261                                   | 13   | 背板切换失败落日志继续、window-focus emit 失败落日志继续——两处未登记容错（白名单 6 项外，违反"新增容错须先登记"）；且 window-focus 与同体系 reminder-due（commands/reminder.rs:22）emit 失败严格报错双策略并存                                                                            | 白名单登记第 ⑦ 项三要素（场景=焦点联动 DWM 切换/事件发送失败；降级=落日志维持前态；理由=材质为纯装饰层，运行时焦点事件不可中断主流程） | PL011 新增                  | 错误策略合规   |
+| P3-9  | commands/reminder.rs:35                                  | 13   | 白名单 ② 登记降级行为"错误落日志"，实际落 `eprintln`——release GUI 下无处可落等于零记录，登记的降级行为落空                                                                                                                                                                                | 改 `crate::diag::log(...)`                                                                                                             | 遗留（FIX002.8 覆盖面缺口） | 容错白名单合规 |
+| P3-10 | lib.rs:41,44,47,57,69,80,133,207                         | 10   | 托盘/热键路径窗口操作失败、计时切换失败、"已恢复在岗状态"提示仍只走 eprintln——release 不可见（diag 通道已建未接全；207 行为用户可感知关键状态）                                                                                                                                           | 关键失败路径（toggle_session 失败、恢复在岗）补 diag::log，eprintln 保留作 dev 输出                                                    | 遗留（同 P3-9 根因）        | 可观测性       |
+| P3-11 | commands/session.rs:166-183                              | 2    | restart 留痕失败无回滚：`reset()+start()` 后 `mark_segment` 失败直接返回 Err，新段 Running 但 SegmentStart 事件丢失——与 FIX002.1 为 start/resume/pause 建立的回滚原则不一致；后果 = 时间图谱该段缺起点（reduce_day 容错吸收三值不差错），可达 = 存储持久故障（低频）                      | 与 FIX002.1 同款补回滚（restore 到 reset 前态），或注释声明"restart 留痕失败不回滚"的理由                                              | 新增                        | events 完整性  |
+| P3-12 | App.vue:339                                              | 5    | `--r-ctrl: 13px` 孤儿变量——全 ui/ 定义零消费（分段控件被 PL008 dock 取代）                                                                                                                                                                                                                | 删除一行                                                                                                                               | 新增                        | Vue 前端       |
+| P3-13 | StatsView.vue:32-36,88,123 + App.vue:97-112              | 13   | ① week_detail 失败仅 console.error，周卡静默消失（与 day_detail 的 loadError 不对称，FIX002 只覆盖了单日）；② 首拉失败时 loadError 红条与"本日无打卡记录"空文案同屏；③ session_stats 失败仅 console，统计行静默冻结旧值（环口径 day_detail 失败沿用旧值属有意降级但未登记）               | 周卡失败并入 loadError；loadError 时隐藏 empty 行；session_stats 维持现状登记观察                                                      | 新增                        | Vue 前端       |
+
+### 死代码专项清单（用户本轮指定重点，7 项确认）
+
+| 符号/位置                                                                      | 判定依据                                                                    | 建议动作                                   |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------ |
+| `ReminderFire::last_fired()`（reminder.rs:49-51）                              | 生产零调用，仅同模块 tests（79/99 行）                                      | `#[cfg(test)]`                             |
+| `Storage::add_session`/`workday_open`/`workday_close`（storage.rs:82,123,134） | 事务化后生产零调用（生产走 *_with_event），仅 tests                         | `#[cfg(test)]` 或删除迁测试                |
+| `DutySpan`（workday.rs:65-70）                                                 | 只产不读（唯一生产调用点丢弃）                                              | 删除（随 P3-2）                            |
+| `--r-ctrl`（App.vue:339）                                                      | 定义零消费孤儿                                                              | 删除（随 P3-12）                           |
+| `core/tests/storage_probe.rs` 整文件                                           | PL002 依赖探针，自注"收口时若无复用价值随任务注记决定去留"；删后测试总数 89 | **留用户决断**：删（简练）或留（集成冒烟） |
+| 过时注释五处（lib.rs:6 / App.vue:312,347 / mod.rs:30 / AGENTS.md:15,37）       | 描述已废弃架构（常驻磨砂/Mica/vibrancy/三个读命令）                         | 随 P3-4/5/6/7 更正                         |
+| `saturate(1.6)`（App.vue:328，--glass-blur 内）                                | PL006 玻璃配方遗产，现唯一消费点 .iridescent 浮层                           | 观察项，可评估精简                         |
+
+对账为"活"的高频嫌疑项（免重审）：12 个 Tauri 命令全部有前端 invoke 对账（generate_handler ↔ ui/ grep）；Cargo.toml 10 依赖零未用；package.json 零幽灵依赖；7 组件（含 StatsCard.vue 36 行）全部在引用链；33 个 CSS 变量除 --r-ctrl 外全部有消费；零孤儿选择器；零孤儿 TS（ref/导出/props/emits 全接线）；settings.rs 四字段全消费；period.rs/diag.rs 无未用能力；assets 两资源全引用；data-tauri-drag-region/backdrop 画布/CALIBRATION 零残留。
+
+### 二、参考级观察项（记录不修；含回落理由）
+
+**既有豁免维持（A001/A002 定案，本轮无恶化）**：O1 DST 边界（period.rs + commands/workday.rs:67 固定 86400 + StatsView dayLabel 86400000）；O2 events 无索引；冗余 clock_out 双计（workday.rs:212，仅外部改库可达，需验证）；原子写无 fsync；未知菜单 id 静默；窗口缺失分支静默（3 处）；notification:default 零消费 + core:default 偏宽（打包期随 CSP 收窄）；无 CSP；label "main" 隐式引用；clock_in 先 reset 后写库；提醒文案双端维护；week_detail 逐日取锁（本地毫秒级）；refreshKey/offset 同 tick 双拉（概率极低）；TimerCard 100ms tick（既有定案）；.arrow 第三按钮变体（有意保留）。
+
+**新增观察项**：
+
+| 位置                                     | 内容                                                                            | 回落理由                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| main.rs:4                                | 无 windows_subsystem，release 构建弹控制台黑窗                                  | 打包期既定延后项（diag.rs:4 已登记评估点）；落地后 P3-10 优先级升高              |
+| commands/session.rs:93-110,171-177       | pause 回滚窗口与 async 自动下班的理论竞态；restart 双锁窗口（149 行注释已自认） | 触发需存储失败 + 操作同毫秒多重条件；FIX002.8 时点全部状态转移仍在主线程，需验证 |
+| reminder.rs:21                           | 重发间隔 300s 硬编码                                                            | 2026-09-09 用户定案常量，单一出现点带注释（豁免规则：注释依据参数）              |
+| lib.rs:162,252                           | DWMWA=38、DWMSBT=3/1 魔数内联                                                   | dwmapi 无 crate 可引，extern 直连为零依赖定案一部分，行内注释有依据              |
+| lib.rs:247-256 ↔ 托盘 hide/show          | 隐藏到托盘时 Focused(false) 是否必然触发未实证                                  | PL011 用户目验含日常显隐，终态正确中间态不可见；需 live 验证                     |
+| diag.rs                                  | pulse.log 无轮转/上限                                                           | 写入点全为低频失败路径；引日志框架违反 YAGNI                                     |
+| App.vue:454,392                          | 浮层开时双层 backdrop-filter 并存                                               | 短暂低频态、240px 小面积，性能证据出现前维持                                     |
+| App.vue:88                               | pointermove 每帧 querySelectorAll                                               | rAF 节流 + 元素 ≤10                                                              |
+| App.vue:97-112                           | session_stats 失败静默冻结旧值                                                  | 环口径 day_detail 失败沿用旧值已有注释声明，属有意降级（P3-13 仅登记不修）       |
+| DockNav.vue:16                           | role="tab" 无 tablist 父级                                                      | 桌面小窗两页签、button 键盘可达，收益低                                          |
+| tsconfig.json                            | 未开 noUnusedLocals/Parameters                                                  | 本轮人工扫描零命中，开启属加固非缺陷                                             |
+| settings.rs:87 + commands/reminder.rs:35 | 两处 eprintln（另见 P3-9）                                                      | 随 P3-9 一并收敛 diag                                                            |
+
+豁免清单必填声明：如上，无遗漏。
+
+### 三、亮点
+
+- FIX002 十五项经 PL008–PL011 四轮大改零回退；唯一漏改（last_fired cfg(test)）一行可补
+- 锁序纪律逐函数复核零违反（三路独立交叉）；生产代码零 unwrap/expect；SQL 全参数化零拼接
+- 材质路线三易其稿但废弃源码清理彻底（vibrancy/采集管线/Mica API 零源码残留），残留仅在注释与文档层——"不长期保留废弃方案"原则在代码层执行到位
+- 三方契约（12 命令 / serde 结构 / types.ts / 事件名）逐字段对齐；设置默认值单一来源（default_* 函数族）无漂移；reduced-motion 退避完整覆盖（PL011 分态纱为瞬时切换不属运动，无需退避）
