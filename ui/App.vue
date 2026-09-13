@@ -49,6 +49,10 @@ const statsRefreshKey = ref(0);
 let statsTimer: number | undefined;
 let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
+// PL011 分态纱浓度：聚焦磨砂态 0% 纱（磨砂已足够）、失焦透明态 30% 纱（保可读）——
+// 初值经 isFocused 查询兜底，此后随 Rust 的 window-focus 事件翻转
+const windowFocused = ref(false);
+let unlistenFocus: (() => void) | undefined;
 
 // —— PL009.1 指针跟随高光：rAF 节流把指针写进各材质元素的 --mx/--my（元素相对坐标），
 // 高光层位置随之移动；reduced-motion 用户直接跳过（动效全退避红线）——
@@ -206,6 +210,21 @@ onMounted(() => {
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("mousedown", onWindowDown);
+  // 焦点态初值兜底：错过启动期事件也不至于滞留错误纱浓度（查询失败仅记录，退回默认纱态）
+  getCurrentWindow()
+    .isFocused()
+    .then((focused) => {
+      windowFocused.value = focused;
+    })
+    .catch((err) => console.error("isFocused 查询失败", err));
+  // window-focus：Rust Focused 事件转发（payload = 聚焦与否），驱动分态纱与 focused class
+  listen<boolean>("window-focus", (event) => {
+    windowFocused.value = event.payload;
+  })
+    .then((un) => {
+      unlistenFocus = un;
+    })
+    .catch((err) => console.error("window-focus 监听注册失败", err));
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
     reminderThreshold.value = event.payload;
@@ -240,11 +259,12 @@ onUnmounted(() => {
   }
   unlistenReminder?.();
   unlistenAutoOut?.();
+  unlistenFocus?.();
 });
 </script>
 
 <template>
-  <main class="glass-card">
+  <main class="glass-card" :class="{ focused: windowFocused }">
     <div class="topbar">
       <h1 class="title">CapsulePulse</h1>
       <button class="gear" type="button" title="设置" @click="togglePanel">
@@ -297,7 +317,7 @@ onUnmounted(() => {
   --ink: #1d1d1f;
   --ink-2: color-mix(in srgb, #1d1d1f 55%, transparent);
   --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.3);
   --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.78);
   --panel-bg: rgba(255, 255, 255, 0.38);
   --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
@@ -330,7 +350,7 @@ onUnmounted(() => {
     --mint-bright: #2dd4bf;
     --ink: #f5f5f7;
     --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
-    --glass-bg: rgba(24, 18, 40, 0.1);
+    --glass-bg: rgba(0, 0, 0, 0.3);
     --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
     --panel-bg: rgba(255, 255, 255, 0.07);
     --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
@@ -589,9 +609,9 @@ onUnmounted(() => {
 </style>
 
 <style scoped>
-/* 玻璃板（PL010.8 全窗单层收敛）：磨砂 = DWM 系统背板铺满整窗（Rust 侧挂载），
-   页面只叠 10% 白纱体色（::before）+ 亮边 + rim + 落影；内容呼吸内缩（padding 24/20）。
-   8px 圆角与系统窗口圆角对齐；overflow hidden 防溢出破相 */
+/* 玻璃板（PL010.8 全窗单层收敛 / PL011 焦点联动材质）：聚焦 = DWM Acrylic 背板真磨砂（0% 纱），
+   失焦 = 纯 alpha 透明 + 30% 纱（浅白/暗黑双主题，保可读）
+   + 亮边 + rim + 落影；内容呼吸内缩（padding 24/20）；8px 圆角对齐系统窗口圆角 */
 .glass-card {
   position: relative;
   display: flex;
@@ -611,7 +631,8 @@ onUnmounted(() => {
   font-family: var(--font-stack);
 }
 
-/* 白纱体色层：叠在 DWM 磨砂背板之上、内容之下（体色即玻璃自身材质的一部分） */
+/* 纱体色层：叠在 DWM 背板/透明底之上、内容之下（体色即玻璃自身材质的一部分）；
+   分态浓度（PL011 用户定案）——失焦透明态 30% 纱保可读，聚焦磨砂态退 0%（磨砂已足够） */
 .glass-card::before {
   content: "";
   position: absolute;
@@ -620,6 +641,10 @@ onUnmounted(() => {
   border-radius: inherit;
   background: var(--glass-bg);
   pointer-events: none;
+}
+
+.glass-card.focused::before {
+  background: transparent;
 }
 
 /* 直接子件一律浮于体色层之上（.overlay 是 fixed 全屏遮罩，排除） */

@@ -21,7 +21,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -143,7 +143,31 @@ fn register_global_shortcuts(app: &tauri::App) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-/// 装配并运行 Tauri 应用：窗口属性由 tauri.conf.json 声明（透明无边框 360×480），玻璃效果在 setup 挂载。
+/// 设置窗口 DWM 系统背板材质（PL011 焦点联动）：kind = DWMSBT_TRANSIENTWINDOW（3，Acrylic
+/// 真磨砂，DWM 实时合成背后真实内容）或 DWMSBT_NONE（1，撤回背板、纯 alpha 透明）。透明走
+/// 像素 alpha 合成不绑定焦点、失焦常驻；磨砂是 DWM 焦点绑定材质，只做聚焦态点睛。失败返回
+/// Err 由调用方记录——焦点切换是运行时事件，不可中断主流程（错误策略：明确记录非吞错）。
+///
+/// # 参数
+/// - `window`：目标窗口（取其原生句柄）
+/// - `kind`：DWM_SYSTEMBACKDROP_TYPE 枚举值（3 = Acrylic，1 = 无背板）
+#[cfg(target_os = "windows")]
+fn set_system_backdrop(window: &tauri::Window, kind: u32) -> Result<(), String> {
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(hwnd: isize, attr: u32, value: *const u32, size: u32) -> i32;
+    }
+    let hwnd = window.hwnd().map_err(|e| format!("取窗口句柄失败：{e}"))?.0 as isize;
+    // DWMWA_SYSTEMBACKDROP_TYPE = 38
+    let hr = unsafe { DwmSetWindowAttribute(hwnd, 38, &kind, 4) };
+    if hr != 0 {
+        return Err(format!("设置系统背板（kind={kind}）失败：HRESULT {hr:#x}"));
+    }
+    Ok(())
+}
+
+/// 装配并运行 Tauri 应用：窗口属性由 tauri.conf.json 声明（透明无边框 380×560），玻璃效果走
+/// 焦点联动（平时纯 alpha 透明，聚焦瞬间挂 DWM Acrylic 真磨砂，PL011 定案）。
 pub fn run() {
     // 存储 + 设置：默认运行时路径（configs/ + data/，双落址见 paths）；失败严格报错退出（错误策略主线）
     let storage = match Storage::open_default() {
@@ -217,6 +241,25 @@ pub fn run() {
                 api.prevent_close();
                 hide_main_window(window.app_handle());
             }
+            // 焦点联动材质（PL011）：平时纯 alpha 透明（不挂背板，启动也不挂），聚焦瞬间挂
+            // Acrylic 真磨砂、失焦即刻撤回——透明不绑定焦点可常驻，磨砂是 DWM 焦点绑定材质
+            // 只做聚焦点睛；启动后窗口获得首焦的 Focused(true) 事件自动完成首次挂载
+            if let WindowEvent::Focused(focused) = event {
+                #[cfg(target_os = "windows")]
+                {
+                    // DWMSBT_TRANSIENTWINDOW = 3（Acrylic）；DWMSBT_NONE = 1（无背板，非 0——
+                    // 0 是 DWMSBT_AUTO，会让 DWM 自行决定材质）
+                    let kind: u32 = if *focused { 3 } else { 1 };
+                    if let Err(err) = set_system_backdrop(window, kind) {
+                        diag::log(&format!("焦点联动背板切换失败：{err}"));
+                    }
+                }
+                // 分态纱浓度联动（用户定案：磨砂态 0% 纱、透明态 30% 纱）——前端监听本事件
+                // 切换 focused class；发送失败落日志不吞（材质降级为常纱态，功能不受损）
+                if let Err(err) = window.emit("window-focus", *focused) {
+                    diag::log(&format!("window-focus 事件发送失败：{err}"));
+                }
+            }
         })
         .setup(|app| {
             // PANIC 取证（y.problems#5①）：默认 hook 只把 panic 打到 stderr（GUI 进程无人看见），
@@ -229,32 +272,9 @@ pub fn run() {
                 crate::diag::log(&format!("PANIC（线程 {name}）：{info}"));
                 default_hook(info);
             }));
-            // 玻璃效果挂载（PL010.7 最终路线）：DWM 系统背板——微软终端同款机制。
-            // DWM 自己合成"窗口背后真实内容的磨砂"并常驻绘制：失焦不消失（老 SWCA Acrylic 会撤）、
-            // 零采集延迟、真实时。应用侧只叠薄纱调浓度（CSS 层）。
-            // DWMSBT_TRANSIENTWINDOW = 3（Acrylic 材质）；失败严格抛错（玻璃挂载同策略）
-            #[cfg(target_os = "windows")]
-            {
-                let Some(window) = app.get_webview_window("main") else {
-                    return Err("主窗口不存在（tauri.conf.json 声明与代码不符）".into());
-                };
-                #[link(name = "dwmapi")]
-                extern "system" {
-                    fn DwmSetWindowAttribute(
-                        hwnd: isize,
-                        attr: u32,
-                        value: *const u32,
-                        size: u32,
-                    ) -> i32;
-                }
-                let hwnd = window.hwnd().map_err(|e| format!("取窗口句柄失败：{e}"))?.0 as isize;
-                // DWMWA_SYSTEMBACKDROP_TYPE = 38；DWMSBT_TRANSIENTWINDOW = 3（Acrylic）
-                let backdrop: u32 = 3;
-                let hr = unsafe { DwmSetWindowAttribute(hwnd, 38, &backdrop, 4) };
-                if hr != 0 {
-                    return Err(format!("设置系统背板失败（HRESULT {hr:#x}）").into());
-                }
-            }
+            // 玻璃效果不在此挂载（PL011 定案）：启动默认纯 alpha 透明（不设背板），聚焦瞬间
+            // 由 on_window_event 的 Focused 分支挂 DWM Acrylic 背板、失焦撤回——见
+            // set_system_backdrop 与焦点联动注释
             build_tray(app)?;
             register_global_shortcuts(app)?;
             Ok(())

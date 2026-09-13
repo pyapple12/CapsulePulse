@@ -216,15 +216,18 @@
 - [x] PL010.8 全窗单层收敛 —— 删除"板/边距"双层语义：整窗一块磨砂（DWM 背板铺满 + 全窗统一薄纱调浓度 10%），20px 内层板与 26px 透明边距概念移除，内容呼吸内缩（padding 24px 20px）；验证：live 单框无内外之分 + 观感用户判定（2026-09-13 已验证：App.vue .glass-card 改全窗单层（margin 0、height 100vh、radius 8px、::before 10% 纱）；用户实机判定单框观感通过）
 - [x] PL010.9 PL010 终版收口 —— 门禁七项 + live 审计（真磨砂/单框/五要素/拖拽）+ 三条路线教训回写 z.plan 附录 PL010 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过（2026-09-13 已验证：门禁七项全绿（cargo fmt/clippy/test 90/doc + vue-tsc/build/prettier）；live——聚焦真磨砂/单框/拖拽用户实机过，失焦常驻经实证判定为 DWM 材质边界不可达、如实登记不宣布达成；三条路线教训（Mica 不透/采集不可采/DWM 背板焦点绑定）回写 z.plan 方向修订节；README/AGENTS 回写；PL011 立项承接失焦演进）
 
-## 未完成
-
 ### PL011: 焦点联动材质·平时透明聚焦磨砂 [z.plan#附录 PL011]
 
 > 范围：用户拍板路线——平时纯 alpha 透明（alpha 像素合成不绑定焦点，OS 从不没收，失焦常驻不变），窗口聚焦瞬间挂 DWM Acrylic 系统背板（真磨砂点睛），失焦即刻撤回透明。承接 PL010.7 实证的材质边界：真磨砂只存在于聚焦态，常态由透明承担。
 > 红线：保活不回归；数据口径零变化；布局骨架零重排；零新依赖；复用 extern dwmapi 直连模式。
+> 结果：焦点联动材质落地——平时纯 alpha 透明常驻（OS 不没收、失焦不变），聚焦瞬间 DWM Acrylic 真磨砂、失焦即刻撤回；分态纱浓度定案（透明态 30% 浅白/纯黑纱，磨砂态 0% 纱）；DWMSBT_NONE=1 语义修正（0=AUTO）；window-focus 事件 + focused class 联动管线建成。全组 3 条勾结。
 
-- [ ] PL011.1 焦点联动背板切换 —— core/src/lib.rs：Windows 装配抽局部闭包 `set_backdrop(hwnd, kind: u32)`（封装 DwmSetWindowAttribute(hwnd, 38, &kind, 4) 与 HRESULT 非零严格抛错）；setup 启动默认**不挂背板**（平时透明态）；`.on_window_event` 增 `WindowEvent::Focused(focused)` 分支——focused=true 调 set_backdrop(3)（DWMSBT_TRANSIENTWINDOW Acrylic）、false 调 set_backdrop(0)（DWMSBT_NONE）；事件回调在主线程、DWM 属性切换无额外线程约束可直调；验证：live——平时窗口透明透出桌面（alpha 合成，与 PL009 失焦态同观感）、点窗口聚焦瞬间真磨砂浮现、切走即刻回透明、反复切换无闪烁/无灰板残留
-- [ ] PL011.2 透明态观感与可读性复核 —— App.vue：平时透明态下全窗 10% 纱 + text-shadow/亮边令牌在"壁纸直透"背景上的可读性复核（文字/数字/统计卡），不足则仅调纱浓度或描边强度（不动结构与布局）；验证：live 双主题（跟随系统，禁改系统设置）+ 用户实机判定
-- [ ] PL011.3 PL011 收口 —— 门禁七项 + live 审计（平时透明/聚焦磨砂/切换瞬时性/拖拽/托盘与全局热键唤起后状态正确）+ 结论回写 z.plan 附录 PL011 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过
+- [x] PL011.1 焦点联动背板切换 —— core/src/lib.rs：Windows 装配抽局部闭包 `set_backdrop(hwnd, kind: u32)`（封装 DwmSetWindowAttribute(hwnd, 38, &kind, 4) 与 HRESULT 非零严格抛错）；setup 启动默认**不挂背板**（平时透明态）；`.on_window_event` 增 `WindowEvent::Focused(focused)` 分支——focused=true 调 set_backdrop(3)（DWMSBT_TRANSIENTWINDOW Acrylic）、false 调 set_backdrop(1)（DWMSBT_NONE）；事件回调在主线程、DWM 属性切换无额外线程约束可直调；验证：live——平时窗口透明透出桌面（alpha 合成，与 PL009 失焦态同观感）、点窗口聚焦瞬间真磨砂浮现、切走即刻回透明、反复切换无闪烁/无灰板残留（2026-09-13 已验证：用户目验通过——聚焦磨砂/失焦透明/无灰板残留；实施细节两则：①失焦撤回用 DWMSBT_NONE=1 而非 0（0=DWMSBT_AUTO 会让 DWM 自行决定材质，微软文档核实）；②CUA 桌面控制服务中断期间曾写 PowerShell 探针尝试自动验证，因 Windows 前台锁 + 提权窗口 UIPI 限制失败废弃，改用户目验定案，探针残留已在 .temp 留档）
+- [x] PL011.2 透明态观感与可读性复核 —— App.vue：平时透明态下全窗纱 + text-shadow/亮边令牌在"壁纸直透"背景上的可读性复核；两轮实机调校定案（用户拍板）：纱浓度 10% → **30%**（浅色白纱 rgba(255,255,255,0.3)），暗色纱由暗紫 rgba(24,18,40,?) 改**纯黑** rgba(0,0,0,0.3)，结构与布局零改动；验证：live 双主题（跟随系统，禁改系统设置）+ 用户实机判定（2026-09-13 已验证：用户目验两轮后定案上述数值）
+- [x] PL011.3 PL011 收口 —— 门禁七项 + live 审计（平时透明/聚焦磨砂/切换瞬时性/拖拽/托盘与全局热键唤起后状态正确）+ 结论回写 z.plan 附录 PL011 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过（2026-09-13 已验证：追加**分态纱浓度**定案（用户拍板）——聚焦磨砂态 0% 纱、失焦透明态 30% 纱：lib.rs Focused 分支加发 `window-focus` 事件（Emitter，失败落日志）+ App.vue 监听挂 focused class + isFocused() 启动兜底查询 + `.glass-card.focused::before` transparent；门禁全绿（cargo fmt/clippy/test 90/doc + prettier/vue-tsc/build）；live 用户目验过；版本推进 Cargo.toml 0.1.0 → 0.1.1（R 回 1，提交 V0.1.1.1）；文档回写完成）
+
+## 未完成
+
+（当前无未完成任务组；下一步方向见 z.plan.md 待完成清单，由用户定）
 
 （后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）
