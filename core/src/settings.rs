@@ -85,6 +85,7 @@ impl ReminderSettings {
             // 清理临时文件；清理失败仅残留 .tmp（下次保存覆盖），主错误照常上抛
             if let Err(cleanup) = std::fs::remove_file(&tmp) {
                 eprintln!("设置临时文件清理失败：{cleanup}");
+                crate::diag::log(&format!("设置临时文件清理失败：{cleanup}"));
             }
         }
         result?;

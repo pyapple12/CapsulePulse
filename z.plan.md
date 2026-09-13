@@ -32,20 +32,63 @@
 ## 四、审计观察项豁免定案清单
 
 > 豁免唯一权威源：已定案项审计时（audit-project）不再重复报告。新定案条目由归档环节（audit-report）经用户确认后追加。分级：①**永久豁免**——不再报告不再讨论；②**条件豁免**——标注触发条件，条件变化时重新评估。
+> 2026-09-13 全量整理（A003 收口后）：三轮审计（A001/A002/A003）观察项去重归并于此——失效项销项（A001-O3 window-vibrancy 随依赖移除；restart 双锁窗口随 FIX003.9 消除；eprintln 半收敛已完成）、重复项归并（A002/A003 对 O4/O6 的重复报告删除），三份审计报告中的观察项节同步删除（原位置留归并指引）。整理时逐项重审定案，含 A002"其余"合并行的 4 小项与托盘 hide 焦点语义。
 
-### ① 永久豁免
+### ① 永久豁免（21 项）
+
+**A001 定案维持（3 项）：**
 
 1. **存储探针保留**（来源 A001-O4，2026-09-09 定案）：`core/tests/storage_probe.rs` 为 rusqlite bundled 工具链冒烟资产，定案保留，去留悬置就此了结；仅当 rusqlite 依赖移除时随之退役。
 2. **configs/ 目录语义**（来源 A001-O5，2026-09-09 定案；**2026-09-10 翻案重订**）：原案"用户参数落 ~/.capsule-pulse/、configs 留给固定参数"已废止——用户拍板杜绝机器用户目录，运行时数据双落址：config.json 落 configs/、pulse.db 落 data/（dev=项目根 / release=exe 同级，2026-09-10 热更新定案）。
-3. **提醒重发间隔 5 分钟硬编码**（来源 A001-O6，2026-09-09 定案）：`ReminderConfig::from_minutes` 内 repeat=300s 为 2026-09-09 用户定案值，有注释依据、无外部调参场景；远期若做多档位/可配置重发属新需求设计，非审计问题。
+3. **提醒重发间隔 5 分钟硬编码**（来源 A001-O6，2026-09-09 定案；A003 重复报告已归并）：`ReminderConfig::from_minutes` 内 repeat=300s 为 2026-09-09 用户定案值，有注释依据、无外部调参场景；远期若做多档位/可配置重发属新需求设计，非审计问题。
 
-### ② 条件豁免
+**2026-09-13 整理定案（18 项）：**
 
-1. **周边界 DST 偏差**（来源 A001-O1，2026-09-09 定案）：`week_start_secs` 整日回退在含 DST 切换时区有 1 小时偏差；触发条件 = 跨平台适配立项（[problems#1]）或面向 DST 时区用户分发前，届时补注入时区用例验证（需验证）。
-2. **聚合查询无索引**（来源 A001-O2，2026-09-09 定案）：`total_since` 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）；触发条件 = 出现性能证据（db 体积/查询耗时异常）或数据模型演进（标签/项目）时重新评估。
-3. **window-vibrancy 全平台依赖**（来源 A001-O3，2026-09-09 定案）：非 Windows 构建白背依赖；触发条件 = [problems#1] 跨平台适配启动时，随平台分支迁移至 `[target.'cfg(windows)'.dependencies]`。
-4. **前端 listen 卸载竞态**（来源 A001-O7，2026-09-09 定案）：根组件生命周期 = 应用生命周期，当前无可达路径；触发条件 = App.vue 不再是永不卸载的根组件（结构调整）时重新评估（需验证）。
-5. **跨零点段归属起点日**（来源 A001-O8，2026-09-09 定案）：单表 `(started_at, seconds)` schema 定案的固有语义（段不拆分）；触发条件 = 远期引入"跨零点段拆分"需求时重新评估数据模型。
+4. **DWM 属性魔数内联**（A003）：DWMWA=38、DWMSBT=3/1 无官方 Rust 绑定可引（引 windows crate 违反零新依赖定案），extern 直连行内注释有依据。
+5. **未知菜单 id 静默 + 窗口缺失分支静默**（A002→A003）：菜单 id 闭环构造、主窗口 setup 硬校验且从不销毁——架构保证不可达的防御分支。
+6. **clock_in 先 reset 后写库**（A002→A003）：Off 态 session 恒 Idle，reset 幂等空操作，注释已声明语义。
+7. **冗余 clock_out 双计**（A002→A003，workday.rs:212）：仅外部改库可达，状态机 + 锁原子化永久保证应用内不可达。
+8. **提醒文案双端独立维护**（A002→A003）：双端语义耦合，收敛成本大于漂移风险（YAGNI）。
+9. **快速翻日请求乱序覆盖**（A002→A003，StatsView）：本地 IPC 毫秒回程 + 手速限制，架构性低概率。
+10. **TimerCard 100ms tick**（A002 维持）：U1 三轮验收定案（十分秒位显示语义）。
+11. **.arrow 第三按钮变体**（A003，StatsView）：有意保留的视觉中性小件设计决策。
+12. **refreshKey/offset 同 tick 双拉**（A002→A003）：watch 双源幂等读命令，同 #9 低概率无害。
+13. **pointermove 每帧 querySelectorAll**（A003）：rAF 节流 + 元素 ≤10，成本可忽略。
+14. **session_stats 失败静默冻结旧值**（A003）：有意降级——轮询场景冻结旧值优于报错打断，注释声明。
+15. **DockNav role="tab" 无 tablist 父级**（A003）：桌面小工具两页签、button 键盘可达，a11y 收益低（YAGNI）。
+16. **`saturate(1.6)` 配方遗产**（A003，--glass-blur）：浮层虹彩色彩增强仍有视觉作用，非死配置。
+17. **托盘 hide 时 Focused(false) 触发语义未实证**（A003）：PL011 用户目验已含日常显隐路径，材质终态正确自愈，中间态无观察者。
+18. **vite envPrefix 前瞻键**（A002"其余"拆分）：前瞻配置有意保留。
+19. **`:key` 索引键**（A002"其余"拆分）：v-for 列表（blocks/week）静态无重排，索引键无缺陷。
+20. **`v-model.number` 空串**（A002"其余"拆分）：Rust 侧校验兜底（1–240 / 1–72 严格夹取）。
+21. **命令命名三风格并存**（A002"其余"拆分）：改名连带全量 invoke + generate_handler，高风险低收益；破坏性 API 变更时机（若有）另议。
+
+### ② 条件豁免（13 项，按触发条件分组）
+
+**触发 = 打包分发（Phase 6，一组销 5 项）：**
+
+1. **capability 偏宽**（A002→A003，default.json:5）：notification:default 前端零消费（通知走 Rust 侧不经 ACL）+ core:default 范围；打包期随能力清单收窄。
+2. **未配 CSP**（A002→A003，tauri.conf.json）：本地内嵌资产无远程内容；打包期配置。
+3. **窗口 label 依赖默认值 "main"**（A002→A003）：代码 3 处 + capabilities 1 处隐式引用；打包期显式化。
+4. **main.rs 无 windows_subsystem**（A003）：release 构建弹控制台黑窗；打包期添加（diag.rs:4 已登记评估点），落地后关键失败路径已由 warn_diag 双写兜底。
+5. **diag 日志无轮转/上限**（A003）：写入点全为低频失败路径；打包期随长期运行场景一并评估。
+
+**触发 = 跨平台适配（[problems#1]，2 项）：**
+
+6. **周边界 DST 偏差**（A001-O1，3 处同根：period.rs week_start_secs / commands/workday.rs day_bounds 固定 86400 / StatsView dayLabel 固定 86400000ms）：含 DST 切换时区有 1 小时偏差；跨平台立项或面向 DST 时区分发前补注入时区用例（需验证）。
+7. **前端 listen 卸载竞态**（A001-O7）：根组件生命周期 = 应用生命周期，当前无可达路径；App.vue 不再是永不卸载的根组件时重新评估（需验证）。
+
+**触发 = 性能证据（db 体积/查询耗时异常，3 项）：**
+
+8. **events 无索引**（A001-O2）：`total_since` 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）。
+9. **week_detail 逐日取锁**（A002→A003）：7 天 14 次取锁 + 7 次查询，本地 SQLite 毫秒级、翻页触发低频。
+10. **浮层双层 backdrop-filter 并存**（A002"4 层"表述已随 PL010/011 架构更新 → A003 现状 2 层）：短暂低频态、240px 小面积。
+
+**触发 = 需求演进 / 理论缺口（3 项）：**
+
+11. **跨零点段归属起点日 + as_secs 秒级截断**（A001-O8）：单表 `(started_at, seconds)` schema 固有语义（段不拆分）；引入"跨零点段拆分"需求时重评数据模型。
+12. **原子写无 fsync**（A002→A003，settings.rs:82）：断电窗口 rename 后可能旧内容，纯理论缺口；产品定位升级为关键数据可靠性时重评。
+13. **pause 回滚窗口与 async 自动下班理论竞态**（A003，commands/session.rs:93-110）：需存储失败 + 操作同毫秒多重条件交错；错账实际复现时重评（需验证）。
 
 ---
 
@@ -663,28 +706,7 @@
 | P3-17 | paths.rs:59-66                                                           | 10   | dev 恢复测试断言 core/ 目录存在，`cargo test --release` 时 runtime_root 走 exe 分支必失败（需验证，静态推演成立）                                                                                                                                                                                                                                | 按 cfg!(debug_assertions) 分支断言                                                                          | 新增 | 可测试性        |
 | P3-18 | README.md:18 + AGENTS.md:5                                               | 6    | 状态行"77 项测试全绿"：全仓实际 78（lib 77 + tests/storage_probe.rs 1，探针随 cargo test 执行），口径未注明（需验证：实跑汇总）                                                                                                                                                                                                                  | 改 78 或注明口径                                                                                            | 新增 | 文档            |
 
-### 二、参考级观察项（记录不修；含回落理由）
-
-**既有豁免维持（A001 定案）**：O1 DST 边界（period.rs:14-16）——本轮新增两处同根位置并入该豁免：commands/workday.rs:83（day_bounds 固定 86400 切日）、StatsView.vue:37-42（dayLabel 固定 86400000ms），触发条件同为"跨平台/DST 时区分发前补注入用例"；O2 events 无索引（写入量级不变，出现性能证据前维持）；O8 跨零点段归属起点日 + as_secs 秒级截断；O4 storage_probe 探针留存。
-
-**新增观察项**：
-
-| 位置                         | 内容                                                                                                                                               | 回落理由                                                                          |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| workday.rs:212               | 冗余 clock_out 致 duty 窗口双计                                                                                                                    | 应用内不可达（状态机 + workday 锁原子化），仅外部改库可达；无可达触发路径，需验证 |
-| settings.rs:82               | 原子写无 fsync，断电窗口 rename 后可能旧内容                                                                                                       | A001-P2-1 定案范围即 tmp+rename；纯断电理论缺口                                   |
-| commands/workday.rs:26-29    | clock_in 的 session.reset() 先于库写，字面与"库写先行"不符                                                                                         | Off 态 session 恒 Idle，reset 幂等无害，注释已声明语义                            |
-| lib.rs:89、36-68             | 未知菜单 id 静默忽略；窗口缺失分支静默 return                                                                                                      | 闭环构造 + setup 硬校验，不可达防御分支                                           |
-| capabilities/default.json:5  | notification:default 前端零消费、core:default 偏宽                                                                                                 | A001"主动预防"定案保留；打包期随 CSP 一并收窄                                     |
-| tauri.conf.json              | 未配 CSP；窗口 label 依赖默认值 "main"（代码三处隐式引用）                                                                                         | 本地内嵌资产无远程内容；打包期定                                                  |
-| reminder.rs:32 ↔ App.vue:201 | 提醒文案两处独立维护；payload = 阈值而非实测连续分钟（误差 ≤ 100ms）                                                                               | 双端语义耦合，漂移低频                                                            |
-| session.rs:194-207           | session_status 包装层（emit/自动下班接线）无直测                                                                                                   | tauri::test 未启用；包装层薄且状态自愈                                            |
-| StatsView.vue:60-61          | 快速翻日多请求乱序覆盖（需验证）                                                                                                                   | 本地 IPC 毫秒回程 + 手速限制，概率极低                                            |
-| StatsView.vue:67             | offset 无下界可无限前翻、老日期无年份                                                                                                              | 数据量小无害，交互语义非缺陷                                                      |
-| commands/mod.rs test_support | 测试内 unwrap；FakeClock/secs 两处重复                                                                                                             | 测试代码豁免错误策略；运行时零影响，可收敛 test_support                           |
-| 其余                         | vite envPrefix 前瞻键、backdrop-filter 最坏 4 层并存、:key 索引键、v-model.number 空串（Rust 校验兜底）、命令命名三风格并存（改名连带全量 invoke） | 均有豁免依据                                                                      |
-
-豁免清单必填声明：如上，无遗漏。
+> 观察项已于 2026-09-13 全量整理归并至「四、审计观察项豁免定案清单」（失效销项 + 重复归并 + 逐项重审定案），本报告不再保留平行副本。
 
 ### 三、亮点
 
@@ -1118,28 +1140,7 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 
 对账为"活"的高频嫌疑项（免重审）：12 个 Tauri 命令全部有前端 invoke 对账（generate_handler ↔ ui/ grep）；Cargo.toml 10 依赖零未用；package.json 零幽灵依赖；7 组件（含 StatsCard.vue 36 行）全部在引用链；33 个 CSS 变量除 --r-ctrl 外全部有消费；零孤儿选择器；零孤儿 TS（ref/导出/props/emits 全接线）；settings.rs 四字段全消费；period.rs/diag.rs 无未用能力；assets 两资源全引用；data-tauri-drag-region/backdrop 画布/CALIBRATION 零残留。
 
-### 二、参考级观察项（记录不修；含回落理由）
-
-**既有豁免维持（A001/A002 定案，本轮无恶化）**：O1 DST 边界（period.rs + commands/workday.rs:67 固定 86400 + StatsView dayLabel 86400000）；O2 events 无索引；冗余 clock_out 双计（workday.rs:212，仅外部改库可达，需验证）；原子写无 fsync；未知菜单 id 静默；窗口缺失分支静默（3 处）；notification:default 零消费 + core:default 偏宽（打包期随 CSP 收窄）；无 CSP；label "main" 隐式引用；clock_in 先 reset 后写库；提醒文案双端维护；week_detail 逐日取锁（本地毫秒级）；refreshKey/offset 同 tick 双拉（概率极低）；TimerCard 100ms tick（既有定案）；.arrow 第三按钮变体（有意保留）。
-
-**新增观察项**：
-
-| 位置                                     | 内容                                                                            | 回落理由                                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| main.rs:4                                | 无 windows_subsystem，release 构建弹控制台黑窗                                  | 打包期既定延后项（diag.rs:4 已登记评估点）；落地后 P3-10 优先级升高              |
-| commands/session.rs:93-110,171-177       | pause 回滚窗口与 async 自动下班的理论竞态；restart 双锁窗口（149 行注释已自认） | 触发需存储失败 + 操作同毫秒多重条件；FIX002.8 时点全部状态转移仍在主线程，需验证 |
-| reminder.rs:21                           | 重发间隔 300s 硬编码                                                            | 2026-09-09 用户定案常量，单一出现点带注释（豁免规则：注释依据参数）              |
-| lib.rs:162,252                           | DWMWA=38、DWMSBT=3/1 魔数内联                                                   | dwmapi 无 crate 可引，extern 直连为零依赖定案一部分，行内注释有依据              |
-| lib.rs:247-256 ↔ 托盘 hide/show          | 隐藏到托盘时 Focused(false) 是否必然触发未实证                                  | PL011 用户目验含日常显隐，终态正确中间态不可见；需 live 验证                     |
-| diag.rs                                  | pulse.log 无轮转/上限                                                           | 写入点全为低频失败路径；引日志框架违反 YAGNI                                     |
-| App.vue:454,392                          | 浮层开时双层 backdrop-filter 并存                                               | 短暂低频态、240px 小面积，性能证据出现前维持                                     |
-| App.vue:88                               | pointermove 每帧 querySelectorAll                                               | rAF 节流 + 元素 ≤10                                                              |
-| App.vue:97-112                           | session_stats 失败静默冻结旧值                                                  | 环口径 day_detail 失败沿用旧值已有注释声明，属有意降级（P3-13 仅登记不修）       |
-| DockNav.vue:16                           | role="tab" 无 tablist 父级                                                      | 桌面小窗两页签、button 键盘可达，收益低                                          |
-| tsconfig.json                            | 未开 noUnusedLocals/Parameters                                                  | 本轮人工扫描零命中，开启属加固非缺陷                                             |
-| settings.rs:87 + commands/reminder.rs:35 | 两处 eprintln（另见 P3-9）                                                      | 随 P3-9 一并收敛 diag                                                            |
-
-豁免清单必填声明：如上，无遗漏。
+> 观察项已于 2026-09-13 全量整理归并至「四、审计观察项豁免定案清单」（失效销项 + 重复归并 + 逐项重审定案），本报告不再保留平行副本。
 
 ### 三、亮点
 
