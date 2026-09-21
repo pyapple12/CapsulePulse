@@ -16,7 +16,9 @@
   --r-pill: 999px;
   /* —— 控件交互令牌（UI 打磨：右上角齿轮设置钮 + tooltip + 飞出玻璃板）—— */
   --ctrl-hover: rgba(0, 0, 0, 0.25); /* 设置钮悬停/开板底 = 25% 黑（用户定案） */
-  --grad-digit: linear-gradient(165deg, #8fc9f2 0%, #2b7fc4 100%);
+  /* —— 计时区令牌（重构）—— */
+  --work: #ff6b4a; /* 工作段（时钟弧）橙红 */
+  --rest: #34d399; /* 休息段（时钟弧）绿 */
 
   /* —— 定稿配方令牌（试验场读数直换）—— */
   --veil-a: 0.15; /* 纱浓度 15% */
@@ -279,63 +281,591 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 16px; /* 各行统一间距（用户定案） */
   min-height: 0;
 }
 
-/* 8h 进度环表盘（PL008） */
-.ringwrap {
-  position: relative;
-  width: 180px;
-  height: 180px;
-}
-.ringwrap svg {
-  transform: rotate(-90deg);
-}
-.ring-bg {
-  stroke: rgba(255, 255, 255, 0.55);
-  stroke-width: 10;
-  fill: none;
-}
-.ring-dash {
-  stroke: rgba(255, 255, 255, 0.45);
-  stroke-width: 10;
-  fill: none;
-  stroke-dasharray: 4 7;
-}
-.ring-fill {
-  stroke: url(#gradRing);
-  stroke-width: 10;
-  fill: none;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.2s linear;
-}
-.ring-center {
-  position: absolute;
-  inset: 0;
+/* ============================================================
+   计时区（重构）：日期卡 + 区间时钟 / 翻转计时 / 状态行
+   ============================================================ */
+
+/* ① 顶行：日期时间卡 + 时钟（紧挨成组，水平居中） */
+.timer-top {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 10px; /* 卡 ↔ 时钟 间距（用户定案） */
+  width: 100%;
 }
-.digits {
-  font-size: 26px;
+
+/* 日期时间卡（毛玻璃 + 主题色） */
+.date-card {
+  position: relative;
+  flex: none;
+  width: 168px; /* 用户定案 */
+  height: 72px; /* 96 × 75%（用户定案） */
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  color: #fff;
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--accent) 78%, #fff) 0%,
+    var(--accent) 55%,
+    color-mix(in srgb, var(--accent) 72%, #000) 100%
+  );
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.6),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.7),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5); /* 与翻转卡同款阴影（用户定案） */
+}
+.date-card .dc-time-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.date-card .dc-time {
+  font-size: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-  background: var(--grad-digit);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
-.digits.idle {
-  background: none;
-  color: rgba(29, 29, 31, 0.38);
+.date-card .dc-ampm {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
 }
-.ring-note {
+.date-card .dc-day {
+  margin-top: 1px;
   font-size: 11px;
-  color: var(--ink-2);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+/* 日/月图标（Bootstrap moon-stars / sun，卡片 hover 放大） */
+.date-card .dc-ic {
+  position: absolute;
+  top: 9px;
+  right: 11px;
+  width: 15px;
+  height: 15px;
+  color: #fff;
+  transition: transform 0.3s ease-in-out;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.5));
+}
+.date-card .dc-sun {
+  display: none;
+}
+.date-card.day .dc-sun {
+  display: block;
+}
+.date-card.day .dc-moon {
+  display: none;
+}
+.date-card:hover .dc-ic {
+  transform: scale(1.15); /* 参考卡：20 → 23px ≈ 1.15×（用户定案） */
+}
+
+/* 时钟：参考 uiverse rraushan1205 原始表盘（金属面 + II 刻度 + 三针），
+   整体 0.4 缩放以匹配 72px 尺寸；区间弧染色（工作橙红 / 休息绿）不变 */
+.dial {
+  position: relative;
+  flex: none;
+  width: 72px;
+  height: 72px;
+}
+.dial .face {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 180px;
+  height: 180px;
+  margin: -90px 0 0 -90px;
+  border-radius: 50%;
+  outline: 10px solid #333;
+  background:
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      rgba(200, 200, 200, 0.2) 0%,
+      rgba(200, 200, 200, 0.2) 2%,
+      transparent 2%,
+      transparent 3%,
+      rgba(200, 200, 200, 0.2) 3%,
+      transparent 3%
+    ),
+    conic-gradient(
+      white 0%,
+      silver 10%,
+      white 35%,
+      silver 45%,
+      white 60%,
+      silver 70%,
+      white 80%,
+      silver 95%,
+      white 100%
+    );
+  box-shadow:
+    inset 0 0 20px #0007,
+    5px 5px 10px rgba(42, 42, 42, 0.2),
+    -5px -5px 10px rgba(255, 255, 255, 0.5); /* 与日期卡同款阴影（face 缩放 0.4，×2.5 换算） */
+  transform: scale(0.4);
+}
+/* 区间弧覆盖层（染色不变，仅几何随 180 表盘换算） */
+.dial .face-arcs {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.dial .dial-track {
+  fill: none;
+  stroke: var(--accent); /* 上班→自动下班 区间轨道 = 主题蓝（用户定案） */
+  stroke-width: 7;
+}
+.dial .dial-arc {
+  fill: none;
+  stroke-width: 7;
+  stroke-linecap: butt;
+}
+.dial .dial-arc.work {
+  stroke: var(--work);
+}
+.dial .dial-arc.rest {
+  stroke: var(--rest);
+}
+/* II 刻度（原组件用 text-shadow 复制到对侧 12/6 与 9/3） */
+.dial .v-index,
+.dial .h-index {
+  position: absolute;
+  margin: 0;
+  color: #333;
+  font-size: 24px;
+  z-index: 1;
+}
+.dial .v-index {
+  left: 83.5px;
+  top: -3px;
+  text-shadow: 0 157px 0 #333;
+}
+.dial .h-index {
+  left: 5px;
+  top: 72px;
+  transform: rotate(-90deg);
+  text-shadow: 0 158px 0 #333;
+}
+/* 指针（原组件样式；旋转由 JS 驱动，去掉演示用无限动画） */
+.dial .hour {
+  position: absolute;
+  width: 5px;
+  height: 60px;
+  background: #aaa;
+  left: 87.5px;
+  top: 43px;
+  border-radius: 3px 3px 1px 1px;
+  transform-origin: 2px 47px;
+  box-shadow:
+    0 0 5px #0005,
+    inset 1.5px 3px 0 #333,
+    inset -1.5px -3px 0 #333;
+  z-index: 1;
+}
+.dial .minute {
+  position: absolute;
+  width: 4px;
+  height: 78px;
+  background: #aaa;
+  left: 88px;
+  top: 25px;
+  border-radius: 3px 3px 1px 1px;
+  transform-origin: 2px 65px;
+  box-shadow:
+    0 0 5px #0005,
+    inset 1.5px 3px 0 #333,
+    inset -1.5px -3px 0 #333;
+  z-index: 2;
+}
+.dial .second {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: red;
+  left: 85px;
+  top: 85px;
+  border-radius: 50%;
+  border: 1px solid #eee;
+  z-index: 3;
+}
+.dial .second::before {
+  content: "";
+  position: absolute;
+  width: 1px;
+  height: 85px;
+  left: 3px;
+  bottom: -10px;
+  background: red;
+  border-radius: 2px;
+  box-shadow: 5px 0 2px rgba(128, 128, 128, 0.2);
+}
+.dial .second::after {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  left: 2px;
+  top: 2px;
+  background: #555;
+  border-radius: 50%;
+}
+
+/* ② 翻转计时（时 : 分 : 秒 . 十分位）
+   参考 uiverse whoisyourdeadie 原配色（#e0e0e0 卡 / #333 字 / 中央分割线 / neumorphic 阴影），
+   非玻璃；几何按 50px 高整体缩放，翻页由 JS 驱动 */
+.flip-clock {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  height: 52px;
+  margin-top: 4px; /* 第一行 ↔ 第二行 单独 20px（stage gap 16 + 4，用户定案） */
+}
+.flip-sep {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 50px;
+  color: #333;
+}
+.flip {
+  --flip-dur: 0.09s;
+  position: relative;
+  width: 30px;
+  height: 50px;
+  font-size: 34px;
+  line-height: 50px;
+  font-weight: 400;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #333;
+  background: #e0e0e0;
+  border-radius: 5px;
+  perspective: 1000px;
+  box-shadow:
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+.flip.small {
+  --flip-dur: 0.045s;
+  width: 24px;
+  font-size: 26px;
+}
+/* 中央分割线（参考 .nums:before） */
+.flip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1px;
+  border-bottom: 1px solid #d2d2d2;
+  transform: translate3d(0, -1px, 0);
+  z-index: 4;
+}
+.flip .half {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  overflow: hidden;
+  background: #e0e0e0;
+  color: #333;
+  backface-visibility: hidden;
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.08);
+}
+.flip .half.top {
+  top: 0;
+  border-radius: 5px 5px 0 0;
+}
+.flip .half.bottom {
+  top: 50%;
+  border-radius: 0 0 5px 5px;
+  border-bottom: 1px solid #d2d2d2;
+}
+.flip .half > span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50px;
+  line-height: 50px;
+}
+.flip .half.top > span {
+  top: 0;
+}
+.flip .half.bottom > span {
+  top: -25px; /* 下半天显示字形下半 */
+}
+.flip .flap {
+  animation-duration: var(--flip-dur);
+  animation-fill-mode: forwards;
+}
+.flip .flap-top {
+  z-index: 3;
+  transform-origin: bottom;
+  animation-name: flap-top;
+  animation-timing-function: ease-in;
+}
+.flip .flap-bottom {
+  z-index: 2;
+  transform-origin: top;
+  transform: rotateX(90deg);
+  animation-name: flap-bottom;
+  animation-delay: var(--flip-dur);
+  animation-timing-function: ease-out;
+}
+@keyframes flap-top {
+  from {
+    transform: rotateX(0);
+  }
+
+  to {
+    transform: rotateX(-90deg);
+  }
+}
+@keyframes flap-bottom {
+  from {
+    transform: rotateX(90deg);
+  }
+
+  to {
+    transform: rotateX(0);
+  }
+}
+
+/* ③ 状态行：START + 电量（成组居中，像日期卡+时钟） */
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+/* START 状态字：待机 = 主题色描边；工作 = 原组件动画色填充 + 辉光；无交互 */
+.start-label {
+  position: relative;
+  flex: none;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: transparent;
+  -webkit-text-stroke: 1px var(--accent); /* 待机保持主题色（用户定案） */
+  text-shadow: 0.5px 0.5px 3px #000; /* 黑色阴影（模糊 3px / 距离 0.5px，用户定案） */
+}
+.start-label .sl-fill {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #ff6b4a; /* 橙红（= 时钟工作段 --work，用户定案） */
+  -webkit-text-stroke: 1px #ff6b4a;
+  border-right: 0 solid #ff6b4a;
+  transition:
+    width 0.45s ease,
+    border-right-width 0.45s ease;
+}
+.start-label.working .sl-fill {
+  width: 100%;
+  border-right-width: 3px;
+}
+
+/* ============================================================
+   沙漏（参考 uiverse nima-mollazadeh）：50 分钟提醒器
+   工作 = 匀速漏沙 50min；到点/暂停 = 翻转 + 重启（暂停快速漏完）
+   ============================================================ */
+.hourglass {
+  --hg-dur: 3000s; /* 50 分钟 */
+  --hg-flip: 0.6s; /* 翻转时长；落沙等翻转完再开始 */
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: block;
+}
+.hourglass .loader__model {
+  transform: translate(13.75px, 9.25px) rotate(0deg);
+  transform-origin: 12.25px 16.75px;
+  transition: transform var(--hg-flip) cubic-bezier(0.83, 0, 0.17, 1);
+}
+/* 落沙流：独立短循环（不受 50 分钟拖慢），仅工作态流动；点阵 = 一串"沙粒"。
+   出现时机由 JS 在翻转结束后挂 .flowing 控制（翻转期间不出现） */
+.hourglass .loader__sand-drop {
+  stroke-dasharray: 0.7 2.6;
+  opacity: 0;
+}
+.hourglass.flowing .loader__sand-drop {
+  opacity: 1;
+  animation: hg-fall 0.45s linear infinite;
+}
+.hourglass.run .loader__sand-fill {
+  opacity: 0; /* 旧的"落沙柱"实线与水位重叠，隐藏之（只留点状沙流） */
+}
+.hourglass.run .loader__sand-grain-left {
+  animation: hg-sand-grain-left var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
+}
+.hourglass.run .loader__sand-grain-right {
+  animation: hg-sand-grain-right var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
+}
+.hourglass.run .loader__sand-line-left {
+  opacity: 0; /* 旧"落沙柱"的细线之一：隐藏，避免与点状沙流叠成一根柱子 */
+}
+.hourglass.run .loader__sand-line-right {
+  opacity: 0; /* 旧"落沙柱"的主角（12 单位长实线）：隐藏 */
+}
+.hourglass.run .loader__sand-mound-top {
+  animation: hg-mound-top var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
+}
+.hourglass.run .loader__sand-mound-bottom {
+  animation: hg-mound-bottom var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
+  transform-origin: 12.25px 31.5px;
+}
+/* 装饰弧与高光不再随 50 分钟周期缓慢淡入（否则看似"加载中"）；环直接隐藏，高光保持静态反光 */
+.hourglass.run .loader__motion-thick,
+.hourglass.run .loader__motion-medium,
+.hourglass.run .loader__motion-thin {
+  animation: none;
+}
+.hourglass .loader__motion-thick,
+.hourglass .loader__motion-medium,
+.hourglass .loader__motion-thin {
+  display: none;
+}
+/* 沙子：匀速漏完整段（原组件 10%→70% 的区间改为 0→100%） */
+@keyframes hg-fall {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -3.3;
+  }
+}
+@keyframes hg-sand-grain-left {
+  from {
+    stroke-dashoffset: 29;
+  }
+
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+@keyframes hg-sand-grain-right {
+  from {
+    stroke-dashoffset: 27;
+  }
+
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@keyframes hg-sand-line-left {
+  from {
+    stroke-dashoffset: 53;
+  }
+
+  to {
+    stroke-dashoffset: -55;
+  }
+}
+@keyframes hg-sand-line-right {
+  from {
+    stroke-dashoffset: 14;
+  }
+
+  to {
+    stroke-dashoffset: -24.5;
+  }
+}
+@keyframes hg-mound-top {
+  from {
+    transform: translate(0, 0);
+  }
+
+  to {
+    transform: translate(0, 13px);
+  }
+}
+@keyframes hg-mound-bottom {
+  from {
+    transform: scale(1, 0);
+  }
+
+  to {
+    transform: scale(1, 1);
+  }
+}
+
+/* 电量条：外壳 + 电极 + 填充（余量） */
+.battery {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: none;
+}
+.battery .bat-shell {
+  box-sizing: border-box;
+  width: 64px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.8),
+    inset 0 0 0 2.5px color-mix(in srgb, var(--accent) 22%, transparent),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5); /* 计时同款阴影（用户定案） */
+}
+.battery .bat-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  background: greenyellow;
+  transition:
+    width 0.3s ease,
+    background 0.3s ease;
+}
+.battery .bat-nub {
+  width: 3px;
+  height: 10px;
+  border-radius: 0 2px 2px 0;
+  background: rgba(255, 255, 255, 0.8);
+}
+.battery .bat-pct {
+  min-width: 34px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: greenyellow; /* 随电量阈值变色（与填充同色） */
+  text-shadow: 0.5px 0.5px 3px #000; /* 0.5px 距离 / 3px 模糊（用户定案） */
+}
+/* 原组件阈值色：≥45% greenyellow / 20–45% yellow / <20% red（填充与百分比同色） */
+.battery.mid .bat-fill {
+  background: yellow;
+}
+.battery.low .bat-fill {
+  background: red;
+}
+.battery.mid .bat-pct {
+  color: yellow;
+}
+.battery.low .bat-pct {
+  color: red;
 }
 
 /* ============================================================
@@ -391,6 +921,29 @@ button {
   justify-content: center;
   gap: 8px;
   font-size: 13px;
+}
+/* pill：在辉光之外叠加"计时同款"阴影（base / hover / active 三态都保留，用户定案） */
+.pill-cast {
+  box-shadow:
+    0 0 12.5px var(--btn-glow),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+.pill-cast:hover {
+  box-shadow:
+    0 0 2.5px var(--btn-glow),
+    0 0 12.5px var(--btn-glow),
+    0 0 25px var(--btn-glow),
+    0 0 50px var(--btn-glow),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+.pill-cast:active {
+  box-shadow:
+    inset 0 0.5px 8px rgba(255, 255, 255, 0.75),
+    0 0 4px var(--btn-glow),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
 }
 .pill-cast .cv {
   margin-left: 12px;
@@ -869,8 +1422,20 @@ button {
   .sideButton,
   .sideButton svg,
   .tooltip,
-  .board-glass {
+  .board-glass,
+  .start-label .sl-fill,
+  .battery .bat-fill,
+  .date-card .dc-ic,
+  .hourglass .loader__model {
     transition: none;
+  }
+
+  .flip .flap {
+    animation: none;
+  }
+
+  .hourglass * {
+    animation: none;
   }
 
   .title-canvas {

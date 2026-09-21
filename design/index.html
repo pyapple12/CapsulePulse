@@ -23,12 +23,6 @@
   <body>
     <!-- ============ 位移折射滤镜（窗口专用，25% 定稿强度） ============ -->
     <svg width="0" height="0" style="position: absolute">
-      <defs>
-        <linearGradient id="gradRing" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#8fc9f2" />
-          <stop offset="1" stop-color="#2b7fc4" />
-        </linearGradient>
-      </defs>
       <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
         <feImage x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m" />
         <feDisplacementMap
@@ -56,7 +50,7 @@
 
         <!-- 文案条（提醒 / 自动下班） -->
         <div class="banner remind" id="bn-remind">
-          <span class="dot"></span>已连续工作 50 分钟，休息一下吧
+          <span class="dot"></span><span id="remindText">已连续工作 50 分钟，休息一下吧</span>
         </div>
         <div class="banner auto" id="bn-auto">
           <span class="dot"></span>已到自动下班时间（上班 + 8h），已回填记账
@@ -64,30 +58,244 @@
 
         <!-- 计时页 -->
         <section class="stage" id="page-timer">
-          <div class="ringwrap">
-            <svg width="180" height="180" viewBox="0 0 180 180">
-              <circle class="ring-bg" cx="90" cy="90" r="78" />
-              <circle class="ring-dash" id="ringDash" cx="90" cy="90" r="78" />
-              <circle
-                class="ring-fill"
-                id="ringFill"
-                cx="90"
-                cy="90"
-                r="78"
-                stroke-dasharray="490"
-                stroke-dashoffset="490"
-              />
-            </svg>
-            <div class="ring-center">
-              <div class="digits idle" id="digits">00:00:00.0</div>
-              <div class="ring-note" id="ringNote">未上班 · 打卡后开始计时</div>
+          <!-- ① 日期卡（左）+ 区间时钟（右），等高 -->
+          <div class="timer-top">
+            <div class="date-card" id="dcCard">
+              <div class="dc-time-row">
+                <span class="dc-time" id="dcTime">11:11</span>
+                <span class="dc-ampm" id="dcAmpm">PM</span>
+              </div>
+              <div class="dc-day" id="dcDay">Wednesday, June 15th</div>
+              <svg
+                class="dc-ic dc-moon"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"
+                />
+                <path
+                  d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.156 1.156 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.156 1.156 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732L13.863.1z"
+                />
+              </svg>
+              <svg
+                class="dc-ic dc-sun"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"
+                />
+              </svg>
+            </div>
+            <div class="dial">
+              <div class="face">
+                <p class="v-index">II</p>
+                <p class="h-index">II</p>
+                <svg class="face-arcs" viewBox="0 0 180 180" aria-hidden="true">
+                  <g id="dialArcs"></g>
+                </svg>
+                <div class="hour" id="handHour"></div>
+                <div class="minute" id="handMin"></div>
+                <div class="second" id="handSec"></div>
+              </div>
             </div>
           </div>
 
+          <!-- ② 翻转计时（时 : 分 : 秒 . 十分位，JS 生成 7 格） -->
+          <div class="flip-clock" id="flipClock"></div>
+
+          <!-- ③ 沙漏（50 分钟提醒器）+ START + 电量 -->
+          <div class="status-row">
+            <svg
+              class="hourglass"
+              id="hourglass"
+              viewBox="0 0 56 56"
+              role="img"
+              aria-label="50 分钟沙漏"
+            >
+              <clipPath id="sand-mound-top">
+                <path
+                  d="M 14.613 13.087 C 15.814 12.059 19.3 8.039 20.3 6.539 C 21.5 4.789 21.5 2.039 21.5 2.039 L 3 2.039 C 3 2.039 3 4.789 4.2 6.539 C 5.2 8.039 8.686 12.059 9.887 13.087 C 11 14.039 12.25 14.039 12.25 14.039 C 12.25 14.039 13.5 14.039 14.613 13.087 Z"
+                  class="loader__sand-mound-top"
+                ></path>
+              </clipPath>
+              <clipPath id="sand-mound-bottom">
+                <path
+                  d="M 14.613 20.452 C 15.814 21.48 19.3 25.5 20.3 27 C 21.5 28.75 21.5 31.5 21.5 31.5 L 3 31.5 C 3 31.5 3 28.75 4.2 27 C 5.2 25.5 8.686 21.48 9.887 20.452 C 11 19.5 12.25 19.5 12.25 19.5 C 12.25 19.5 13.5 19.5 14.613 20.452 Z"
+                  class="loader__sand-mound-bottom"
+                ></path>
+              </clipPath>
+              <g transform="translate(2,2)">
+                <g
+                  transform="rotate(-90,26,26)"
+                  stroke-linecap="round"
+                  stroke-dashoffset="153.94"
+                  stroke-dasharray="153.94 153.94"
+                  stroke="hsl(0,0%,100%)"
+                  fill="none"
+                >
+                  <circle
+                    transform="rotate(0,26,26)"
+                    r="24.5"
+                    cy="26"
+                    cx="26"
+                    stroke-width="2.5"
+                    class="loader__motion-thick"
+                  ></circle>
+                  <circle
+                    transform="rotate(90,26,26)"
+                    r="24.5"
+                    cy="26"
+                    cx="26"
+                    stroke-width="1.75"
+                    class="loader__motion-medium"
+                  ></circle>
+                  <circle
+                    transform="rotate(180,26,26)"
+                    r="24.5"
+                    cy="26"
+                    cx="26"
+                    stroke-width="1"
+                    class="loader__motion-thin"
+                  ></circle>
+                </g>
+                <g transform="translate(13.75,9.25)" class="loader__model">
+                  <path
+                    d="M 1.5 2 L 23 2 C 23 2 22.5 8.5 19 12 C 16 15.5 13.5 13.5 13.5 16.75 C 13.5 20 16 18 19 21.5 C 22.5 25 23 31.5 23 31.5 L 1.5 31.5 C 1.5 31.5 2 25 5.5 21.5 C 8.5 18 11 20 11 16.75 C 11 13.5 8.5 15.5 5.5 12 C 2 8.5 1.5 2 1.5 2 Z"
+                    fill="#000"
+                  ></path>
+
+                  <g stroke-linecap="round" stroke="hsl(35,90%,90%)">
+                    <line
+                      y2="20.75"
+                      x2="12"
+                      y1="15.75"
+                      x1="12"
+                      stroke-dasharray="0.25 33.75"
+                      stroke-width="1"
+                      class="loader__sand-grain-left"
+                    ></line>
+                    <line
+                      y2="21.75"
+                      x2="12.5"
+                      y1="16.75"
+                      x1="12.5"
+                      stroke-dasharray="0.25 33.75"
+                      stroke-width="1"
+                      class="loader__sand-grain-right"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12.25"
+                      y1="18"
+                      x1="12.25"
+                      stroke-dasharray="0.5 107.5"
+                      stroke-width="1"
+                      class="loader__sand-drop"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12.25"
+                      y1="14.75"
+                      x1="12.25"
+                      stroke-dasharray="54 54"
+                      stroke-width="1.5"
+                      class="loader__sand-fill"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12"
+                      y1="16"
+                      x1="12"
+                      stroke-dasharray="1 107"
+                      stroke-width="1"
+                      stroke="hsl(35,90%,83%)"
+                      class="loader__sand-line-left"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12.5"
+                      y1="16"
+                      x1="12.5"
+                      stroke-dasharray="12 96"
+                      stroke-width="1"
+                      stroke="hsl(35,90%,83%)"
+                      class="loader__sand-line-right"
+                    ></line>
+
+                    <g stroke-width="0" fill="hsl(35,90%,90%)">
+                      <path
+                        d="M 12.25 15 L 15.392 13.486 C 21.737 11.168 22.5 2 22.5 2 L 2 2.013 C 2 2.013 2.753 11.046 9.009 13.438 L 12.25 15 Z"
+                        clip-path="url(#sand-mound-top)"
+                      ></path>
+                      <path
+                        d="M 12.25 18.5 L 15.392 20.014 C 21.737 22.332 22.5 31.5 22.5 31.5 L 2 31.487 C 2 31.487 2.753 22.454 9.009 20.062 Z"
+                        clip-path="url(#sand-mound-bottom)"
+                      ></path>
+                    </g>
+
+                    <g stroke-width="2" stroke-linecap="round" opacity="0.7" fill="none">
+                      <path
+                        d="M 19.437 3.421 C 19.437 3.421 19.671 6.454 17.914 8.846 C 16.157 11.238 14.5 11.5 14.5 11.5"
+                        stroke="hsl(0,0%,100%)"
+                        class="loader__glare-top"
+                      ></path>
+                      <path
+                        transform="rotate(180,12.25,16.75)"
+                        d="M 19.437 3.421 C 19.437 3.421 19.671 6.454 17.914 8.846 C 16.157 11.238 14.5 11.5 14.5 11.5"
+                        stroke="hsla(0,0%,100%,0)"
+                        class="loader__glare-bottom"
+                      ></path>
+                    </g>
+
+                    <!-- 上下盖（原组件在此；不继承沙粒组的沙色描边，纯黑：#000 + #333 高光） -->
+                    <rect height="2" width="24.5" fill="#000" stroke="none"></rect>
+                    <rect
+                      height="1"
+                      width="19.5"
+                      y="0.5"
+                      x="2.5"
+                      ry="0.5"
+                      rx="0.5"
+                      fill="#333"
+                      stroke="none"
+                    ></rect>
+                    <rect height="2" width="24.5" y="31.5" fill="#000" stroke="none"></rect>
+                    <rect
+                      height="1"
+                      width="19.5"
+                      y="32"
+                      x="2.5"
+                      ry="0.5"
+                      rx="0.5"
+                      fill="#333"
+                      stroke="none"
+                    ></rect>
+                  </g>
+                </g>
+              </g>
+            </svg>
+            <span class="start-label" id="startLabel">
+              <span class="sl-base">START</span>
+              <span class="sl-fill">START</span>
+            </span>
+            <div class="battery" id="battery">
+              <div class="bat-shell"><div class="bat-fill" id="batFill"></div></div>
+              <div class="bat-nub"></div>
+              <span class="bat-pct" id="batPct">62%</span>
+            </div>
+          </div>
+
+          <!-- ④ 打卡 pill（上班/下班） -->
           <button class="pill-cast" id="pillCast" onclick="openConfirm()">
             <svg
-              width="15"
-              height="15"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -100,7 +308,8 @@
             </svg>
             <span id="pillText">上班</span>
           </button>
-          <!-- 三段式控制（借鉴 uiverse laksh_7112 radio-input：玻璃质感 + 抬起/按下投影）：
+
+          <!-- ⑤ 三段式控制（借鉴 uiverse laksh_7112 radio-input：玻璃质感 + 抬起/按下投影）：
                工作/休息 = 互斥选中；重置 = 瞬时（按下回弹，不保持选中） -->
           <div class="seg-control" id="segRun">
             <label class="seg">
@@ -300,7 +509,7 @@
           <h4 class="board-title">设置</h4>
           <div class="set-row">
             <span class="n">提醒阈值（分钟）</span
-            ><input type="number" value="50" min="1" max="240" />
+            ><input type="number" id="setThreshold" value="50" min="1" max="240" />
           </div>
           <div class="set-row">
             <span class="n">提醒声音</span>
@@ -394,34 +603,56 @@
       f.querySelector("feDisplacementMap").setAttribute("scale", 12);
 
       // ===== APP 状态机（客户端演示模拟）=====
-      const S = { duty: true, running: true, startTs: Date.now(), accum: 335 * 60000 };
       const $ = (id) => document.getElementById(id);
+      const S = {
+        duty: true,
+        running: true,
+        startTs: Date.now(),
+        accum: 335 * 60000,
+        clockInTs: Date.now() - 335 * 60000, // 上班时刻（演示：335 分钟前）
+        autoOutH: 8, // 自动下班时长（小时）
+        thresholdMin: 50, // 提醒阈值（分钟）——沙漏周期跟随它
+        batFrozen: null, // 下班后冻结的电量
+      };
       const elapsed = () => (S.running ? S.accum + (Date.now() - S.startTs) : S.accum);
+      const clamp01 = (n) => Math.min(1, Math.max(0, n));
 
-      function fmt(ms) {
-        const t = Math.floor(ms / 100);
-        const d = t % 10,
-          s = Math.floor(t / 10) % 60,
-          m = Math.floor(t / 600) % 60,
-          h = Math.floor(t / 36000);
-        const p = (n) => String(n).padStart(2, "0");
-        return `${p(h)}:${p(m)}:${p(s)}.${d}`;
-      }
+      // 区间弧：12h 表盘（0° = 12 点、顺时针，圆心 90,90 —— 180 表盘坐标）
+      const DIAL_C = 90;
+      const angleOf = (ts) => {
+        const d = new Date(ts);
+        return (((d.getHours() % 12) * 60 + d.getMinutes() + d.getSeconds() / 60) / 720) * 360;
+      };
+      const polar = (r, deg) => {
+        const a = ((deg - 90) * Math.PI) / 180;
+        return [DIAL_C + r * Math.cos(a), DIAL_C + r * Math.sin(a)];
+      };
+      const arcPath = (r, a0, a1) => {
+        const delta = (((a1 - a0) % 360) + 360) % 360;
+        if (delta < 0.5) return "";
+        const [x0, y0] = polar(r, a0);
+        const [x1, y1] = polar(r, a0 + delta);
+        const large = delta > 180 ? 1 : 0;
+        return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+      };
+
+      // 当日工作/休息段（演示 mock，单位 = 距上班的分钟数）
+      const EV_MOCK = [
+        [0, 46, "work"],
+        [46, 64, "rest"],
+        [64, 110, "work"],
+        [110, 128, "rest"],
+        [128, 173, "work"],
+        [173, 228, "rest"],
+        [228, 335, "work"],
+      ];
+
       function render() {
-        const ms = elapsed();
-        $("digits").textContent = fmt(ms);
-        $("digits").classList.toggle("idle", !S.duty);
-        $("ringDash").style.display = S.duty ? "none" : "";
-        $("ringFill").style.display = S.duty ? "" : "none";
-        const C = 490,
-          frac = Math.min(1, ms / 1000 / 28800);
-        $("ringFill").style.strokeDashoffset = C * (1 - frac);
-        $("ringNote").textContent = !S.duty
-          ? "未上班 · 打卡后开始计时"
-          : S.running
-            ? "在岗计时中 · 8h 进度"
-            : "已暂停";
         $("pillText").textContent = S.duty ? "下班" : "上班";
+        renderFlip(elapsed());
+        renderBattery();
+        renderHourglass();
+        $("startLabel").classList.toggle("working", S.running);
         // 三段式控制：工作/休息互斥选中随运行状态；重置为瞬时按钮；未上班全禁用
         const runMode = !S.duty ? "" : S.running ? "work" : "rest";
         $("segRun").classList.toggle("off", !S.duty);
@@ -432,6 +663,273 @@
         }
       }
       setInterval(render, 100);
+
+      // ===== 翻转计时（时:分:秒.十分位，JS 驱动）=====
+      const flipEls = [];
+      (function buildFlip() {
+        const box = $("flipClock");
+        const layout = ["d", "d", ":", "d", "d", ":", "d", "d", ".", "s"];
+        for (const tk of layout) {
+          if (tk === "d" || tk === "s") {
+            const el = document.createElement("div");
+            el.className = "flip" + (tk === "s" ? " small" : "");
+            el.dataset.v = "0";
+            el.innerHTML =
+              '<div class="half top"><span>0</span></div><div class="half bottom"><span>0</span></div>';
+            box.appendChild(el);
+            flipEls.push(el);
+          } else {
+            const sep = document.createElement("span");
+            sep.className = "flip-sep";
+            sep.textContent = tk;
+            box.appendChild(sep);
+          }
+        }
+      })();
+
+      /** 单格翻页：静态两面归旧值 → 上半翻板落下（旧）→ 下半翻板转起（新），播完归位 */
+      function setFlip(el, v) {
+        const old = el.dataset.v;
+        if (old === v) return;
+        el.dataset.v = v;
+        const top = el.querySelector(".half.top");
+        const bottom = el.querySelector(".half.bottom");
+        el.querySelectorAll(".flap").forEach((n) => n.remove());
+        top.firstElementChild.textContent = old;
+        bottom.firstElementChild.textContent = old;
+        if (reducedMotion.matches) {
+          top.firstElementChild.textContent = v;
+          bottom.firstElementChild.textContent = v;
+          return;
+        }
+        const f1 = document.createElement("div");
+        f1.className = "half top flap flap-top";
+        f1.innerHTML = `<span>${old}</span>`;
+        const f2 = document.createElement("div");
+        f2.className = "half bottom flap flap-bottom";
+        f2.innerHTML = `<span>${v}</span>`;
+        el.append(f1, f2);
+        f1.addEventListener("animationend", () => {
+          top.firstElementChild.textContent = v;
+          f1.remove();
+        });
+        f2.addEventListener("animationend", () => {
+          bottom.firstElementChild.textContent = v;
+          f2.remove();
+        });
+      }
+
+      /** 把毫秒写入 7 格翻转（时 时 : 分 分 : 秒 秒 . 十分位） */
+      function renderFlip(ms) {
+        const t = Math.floor(ms / 100);
+        const d = t % 10;
+        const sec = Math.floor(t / 10) % 60;
+        const min = Math.floor(t / 600) % 60;
+        const hr = Math.floor(t / 36000);
+        const digits = [
+          Math.floor(hr / 10) % 10,
+          hr % 10,
+          Math.floor(min / 10) % 10,
+          min % 10,
+          Math.floor(sec / 10) % 10,
+          sec % 10,
+          d,
+        ];
+        digits.forEach((v, i) => setFlip(flipEls[i], String(v)));
+      }
+
+      // ===== 区间时钟：指针 + 弧（节流到秒）=====
+      let dialAt = 0;
+      function renderDial() {
+        const d = new Date();
+        const hAng = ((d.getHours() % 12) + d.getMinutes() / 60) * 30;
+        const mAng = (d.getMinutes() + d.getSeconds() / 60) * 6;
+        const sAng = d.getSeconds() * 6;
+        $("handHour").style.transform = `rotate(${hAng.toFixed(2)}deg)`;
+        $("handMin").style.transform = `rotate(${mAng.toFixed(2)}deg)`;
+        $("handSec").style.transform = `rotate(${sAng}deg)`;
+        const R = 72;
+        const autoOut = S.autoOutH * 3600000;
+        const a0 = angleOf(S.clockInTs);
+        let svg = `<path class="dial-track" d="${arcPath(R, a0, a0 + (S.autoOutH / 12) * 360)}" />`;
+        const elapsedMin = elapsed() / 60000;
+        const nowTs = S.clockInTs + elapsed(); // 已上色的区间只到"当前"为止
+        const segs = EV_MOCK.map(([o0, o1, st]) => [
+          S.clockInTs + o0 * 60000,
+          S.clockInTs + o1 * 60000,
+          st,
+        ]);
+        const lastEnd = EV_MOCK[EV_MOCK.length - 1][1];
+        if (elapsedMin > lastEnd) {
+          segs.push([
+            S.clockInTs + lastEnd * 60000,
+            S.clockInTs + elapsedMin * 60000,
+            S.running ? "work" : "rest",
+          ]);
+        }
+        const endTs = S.clockInTs + autoOut;
+        for (const [t0, t1, st] of segs) {
+          const s0 = Math.max(t0, S.clockInTs);
+          const s1 = Math.min(t1, endTs, nowTs);
+          if (s1 <= s0) continue;
+          const sa = angleOf(s0);
+          const delta = ((s1 - s0) / (12 * 3600000)) * 360;
+          svg += `<path class="dial-arc ${st}" d="${arcPath(R, sa, sa + delta)}" />`;
+        }
+        $("dialArcs").innerHTML = svg;
+      }
+
+      // ===== 电量（按自动下班时长由满到空；下班后冻结）=====
+      function renderBattery() {
+        const ratio =
+          !S.duty && S.batFrozen != null
+            ? S.batFrozen
+            : clamp01(1 - elapsed() / (S.autoOutH * 3600000));
+        const pct = Math.round(ratio * 100);
+        $("batFill").style.width = `${pct}%`;
+        $("batPct").textContent = `${pct}%`;
+        // 原组件阈值色：≥45% greenyellow / 20–45% yellow / <20% red
+        const bat = $("battery");
+        bat.classList.toggle("mid", ratio >= 0.2 && ratio < 0.45);
+        bat.classList.toggle("low", ratio < 0.2);
+      }
+
+      // ===== 沙漏（提醒阈值计时器）：周期 = 设置里的 thresholdMin（分钟）
+      // 规则：① 新的一段工作 → 翻半圈回满 + 按阈值匀速漏（漏完即止，不自行重启/翻转）
+      //       ② 暂停且还有沙 → 翻半圈 + 从当前水位快速漏完
+      //       ③ 已漏完 → 不翻转、不重启，停在"上空下满"（此时点休息也不翻） =====
+      const HG_FLIP = 0.6; // 与 CSS --hg-flip 一致（秒）
+      const HG_DRAIN = 0.8; // 暂停快速漏完时长（秒）
+      const HG_MODEL_T = "translate(13.75px, 9.25px)";
+      const hgMs = () => S.thresholdMin * 60000; // 沙漏周期（跟随提醒阈值）
+      let hgKey = "";
+      let hgFlowTimer = 0;
+      // 水位记录（0=上满下空，1=上空下满）：用于暂停时"从当前水位"继续快漏
+      let hgP0 = 0;
+      let hgT0 = Date.now();
+      let hgDur = hgMs();
+      const hgPNow = () => Math.min(1, hgP0 + (Date.now() - hgT0) / hgDur);
+
+      /** 翻半圈（-180° → 0°）并重启沙动画（.run） */
+      function hgFlipRestart(hg, model) {
+        model.style.transition = "none";
+        model.style.transform = `${HG_MODEL_T} rotate(-180deg)`;
+        void model.getBoundingClientRect(); // 强制布局：提交 -180° 这一帧（SVG 无 offsetWidth）
+        hg.classList.add("run"); // 沙/环从此刻重启动画（延迟见 --hg-delay）
+        model.style.transition = "";
+        model.style.transform = "";
+      }
+
+      function renderHourglass() {
+        const done = hgPNow() >= 1; // 沙已漏完
+        const key = `${S.running}|${S.thresholdMin}|${done}`;
+        if (key === hgKey) return;
+        hgKey = key;
+        const hg = $("hourglass");
+        const model = hg.querySelector(".loader__model");
+        const pCur = hgPNow(); // 当前水位
+        window.clearTimeout(hgFlowTimer); // 沙流等翻转完再出现（暂停/漏完则立即停）
+        hg.classList.remove("flowing");
+        hg.classList.remove("run");
+
+        if (S.running && !done) {
+          // ① 新的一段工作：翻正回满，按阈值匀速漏
+          hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
+          hg.style.setProperty("--hg-delay", `${HG_FLIP}s`);
+          hgP0 = 0;
+          hgDur = hgMs();
+          hgT0 = Date.now();
+          hgFlipRestart(hg, model);
+          hgFlowTimer = window.setTimeout(() => hg.classList.add("flowing"), HG_FLIP * 1000);
+        } else if (!S.running && !done) {
+          // ② 暂停且还有沙：翻半圈 + 从当前水位快速漏完（翻转后上仓装的正是"已漏走的 pCur"）
+          hg.style.setProperty("--hg-dur", `${HG_DRAIN}s`);
+          hg.style.setProperty("--hg-delay", `${-(1 - pCur) * HG_DRAIN}s`);
+          hgP0 = 1 - pCur;
+          hgDur = HG_DRAIN * 1000;
+          hgT0 = Date.now();
+          hgFlipRestart(hg, model);
+        } else {
+          // ③ 已漏完：不翻转，负一个周期的延迟让动画直接停在终态（上空下满）
+          hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
+          hg.style.setProperty("--hg-delay", `${-hgMs() / 1000}s`);
+          hgP0 = 1;
+          hgDur = 1;
+          hgT0 = Date.now();
+          void hg.getBoundingClientRect(); // 重排后再挂 .run，让动画以负延迟直接落到终态
+          hg.classList.add("run");
+        }
+      }
+
+      // ===== 提醒阈值接线：改设置 → 沙漏周期跟随（强制翻转重启）+ 文案同步 =====
+      const setThreshold = $("setThreshold");
+      /** 只同步文案（初始化时用，避免早于 reducedMotion 触发 render） */
+      function syncRemindText() {
+        $("remindText").textContent = `已连续工作 ${S.thresholdMin} 分钟，休息一下吧`;
+      }
+      setThreshold.addEventListener("change", () => {
+        const v = Math.min(240, Math.max(1, Number(setThreshold.value) || 50));
+        setThreshold.value = String(v);
+        S.thresholdMin = v;
+        syncRemindText();
+        hgKey = ""; // 周期变了：下一帧强制翻转 + 重置水位
+        render();
+      });
+      syncRemindText();
+
+      // ===== 日期卡（每分钟节流）：12h 时刻 + AM/PM；下行 英文星期全称 + 英文日期 =====
+      let dateAt = 0;
+      const WEEK_EN = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
+      const MONTH_EN = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+      const ordinal = (n) => {
+        const s = ["th", "st", "nd", "rd"];
+        const v = n % 100;
+        return n + (s[(v - 20) % 10] || s[v] || s[0]);
+      };
+      function renderDate() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, "0");
+        const h24 = d.getHours();
+        $("dcTime").textContent = `${h24 % 12 || 12}:${p(d.getMinutes())}`;
+        $("dcAmpm").textContent = h24 < 12 ? "AM" : "PM";
+        $("dcDay").textContent =
+          `${WEEK_EN[d.getDay()]}, ${MONTH_EN[d.getMonth()]} ${ordinal(d.getDate())}`;
+        $("dcCard").classList.toggle("day", h24 >= 6 && h24 < 18); // 白天显示太阳、夜间显示月亮
+      }
+      renderDate();
+      renderDial();
+      setInterval(() => {
+        const now = Date.now();
+        if (now - dateAt > 60000) {
+          dateAt = now;
+          renderDate();
+        }
+        if (now - dialAt > 1000) {
+          dialAt = now;
+          renderDial();
+        }
+      }, 1000);
 
       function applyState() {
         if (S.duty && S.running) {
@@ -448,6 +946,7 @@
         r.addEventListener("change", () => {
           const v = r.value;
           if (v === "off") {
+            S.batFrozen = clamp01(1 - elapsed() / (S.autoOutH * 3600000));
             S.duty = false;
             S.running = false;
             S.accum = 0;
@@ -457,11 +956,15 @@
             S.running = true;
             S.startTs = Date.now();
             S.accum = 0;
+            S.clockInTs = Date.now();
+            S.batFrozen = null;
           }
           if (v === "pause") {
             S.duty = true;
             S.running = false;
             S.accum = 335 * 60000;
+            S.clockInTs = Date.now() - 335 * 60000;
+            S.batFrozen = null;
           }
           // 打卡动作内部数据（pill/按钮/环）随 render 刷新
           S._force = true;
@@ -537,7 +1040,10 @@
           S.running = true;
           S.startTs = Date.now();
           S.accum = 0;
+          S.clockInTs = Date.now(); // 上班时刻
+          S.batFrozen = null;
         } else {
+          S.batFrozen = clamp01(1 - elapsed() / (S.autoOutH * 3600000)); // 冻结结束那一刻电量
           S.duty = false;
           S.running = false;
           S.accum = 0;
