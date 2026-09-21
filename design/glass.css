@@ -686,20 +686,39 @@ button {
 
 /* ============================================================
    沙漏（参考 uiverse nima-mollazadeh）：50 分钟提醒器
-   工作 = 匀速漏沙 50min；到点/暂停 = 翻转 + 重启（暂停快速漏完）
+   工作 = 匀速漏沙至阈值；漏完即停不翻转；暂停 = 翻转 + 从当前水位快漏
    ============================================================ */
 .hourglass {
   --hg-dur: 3000s; /* 50 分钟 */
   --hg-flip: 0.6s; /* 翻转时长；落沙等翻转完再开始 */
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 42.5px; /* 34 × 125%（用户定案；行距与 START/电量不变） */
+  height: 42.5px;
+  margin-right: -4px; /* 沙漏 ↔ START 间距 10 → 6（用户定案），其余间距不变 */
+  /* 整体阴影改由 SVG 内的剪影副本承担（见 .loader__shadow），此处不再挂 filter */
   display: block;
+}
+/* 沙漏整体投影：本体 + 上下盖的剪影垫底（渲染后 1px 距离 / 3px 模糊；
+   SVG 用户单位 = 像素 × 56 ÷ 42.5，blur 取 σ≈1.5px 对齐 CSS 3px 模糊半径） */
+.hourglass .loader__shadow {
+  fill: rgba(18, 38, 64, 0.45);
+  filter: blur(2px);
+  transform: translate(1.32px, 1.32px);
+}
+.hourglass .loader__shadow * {
+  stroke: none; /* 剪影只取形状，不带本体的白色描边 */
 }
 .hourglass .loader__model {
   transform: translate(13.75px, 9.25px) rotate(0deg);
   transform-origin: 12.25px 16.75px;
   transition: transform var(--hg-flip) cubic-bezier(0.83, 0, 0.17, 1);
+}
+/* 玻璃本体（除上下盖）：与玻璃板同配方——薄纱填充 + 白色描边高光（沙与盖不变）
+   纱用 30%（比玻璃板的 15% 厚一档）：中和垫在底层的剪影投影透上来的观感 */
+.hourglass .loader__body {
+  fill: rgba(245, 250, 255, 0.3);
+  stroke: rgba(255, 255, 255, 0.62);
+  stroke-width: 1.25;
 }
 /* 落沙流：独立短循环（不受 50 分钟拖慢），仅工作态流动；点阵 = 一串"沙粒"。
    出现时机由 JS 在翻转结束后挂 .flowing 控制（翻转期间不出现） */

@@ -165,12 +165,21 @@
                   ></circle>
                 </g>
                 <g transform="translate(13.75,9.25)" class="loader__model">
+                  <!-- 整体投影：本体 + 上下盖的剪影，垫在最底层。
+                       本体已是透明玻璃（alpha 0.15），drop-shadow 按 alpha 取影 → 投不出来，
+                       故用剪影副本当影子（渲染后 1px 距离 / 3px 模糊） -->
+                  <g class="loader__shadow">
+                    <use href="#hgBody"></use>
+                    <rect height="2" width="24.5"></rect>
+                    <rect height="2" width="24.5" y="31.5"></rect>
+                  </g>
                   <path
+                    id="hgBody"
                     d="M 1.5 2 L 23 2 C 23 2 22.5 8.5 19 12 C 16 15.5 13.5 13.5 13.5 16.75 C 13.5 20 16 18 19 21.5 C 22.5 25 23 31.5 23 31.5 L 1.5 31.5 C 1.5 31.5 2 25 5.5 21.5 C 8.5 18 11 20 11 16.75 C 11 13.5 8.5 15.5 5.5 12 C 2 8.5 1.5 2 1.5 2 Z"
-                    fill="#000"
+                    class="loader__body"
                   ></path>
 
-                  <g stroke-linecap="round" stroke="hsl(35,90%,90%)">
+                  <g stroke-linecap="round" stroke="hsl(35,90%,78%)">
                     <line
                       y2="20.75"
                       x2="12"
@@ -228,7 +237,7 @@
                       class="loader__sand-line-right"
                     ></line>
 
-                    <g stroke-width="0" fill="hsl(35,90%,90%)">
+                    <g stroke-width="0" fill="hsl(35,90%,78%)">
                       <path
                         d="M 12.25 15 L 15.392 13.486 C 21.737 11.168 22.5 2 22.5 2 L 2 2.013 C 2 2.013 2.753 11.046 9.009 13.438 L 12.25 15 Z"
                         clip-path="url(#sand-mound-top)"
@@ -752,20 +761,16 @@
         const autoOut = S.autoOutH * 3600000;
         const a0 = angleOf(S.clockInTs);
         let svg = `<path class="dial-track" d="${arcPath(R, a0, a0 + (S.autoOutH / 12) * 360)}" />`;
-        const elapsedMin = elapsed() / 60000;
-        const nowTs = S.clockInTs + elapsed(); // 已上色的区间只到"当前"为止
+        const nowTs = Date.now(); // 记录只画到"当前时刻"：与班内计时无关（重置计时不会抹掉已画记录）
         const segs = EV_MOCK.map(([o0, o1, st]) => [
           S.clockInTs + o0 * 60000,
           S.clockInTs + o1 * 60000,
           st,
         ]);
-        const lastEnd = EV_MOCK[EV_MOCK.length - 1][1];
-        if (elapsedMin > lastEnd) {
-          segs.push([
-            S.clockInTs + lastEnd * 60000,
-            S.clockInTs + elapsedMin * 60000,
-            S.running ? "work" : "rest",
-          ]);
+        const lastEndTs = S.clockInTs + EV_MOCK[EV_MOCK.length - 1][1] * 60000;
+        if (nowTs > lastEndTs) {
+          // mock 之后的一段（演示：按当前运行态续画到此刻）
+          segs.push([lastEndTs, nowTs, S.running ? "work" : "rest"]);
         }
         const endTs = S.clockInTs + autoOut;
         for (const [t0, t1, st] of segs) {
@@ -795,15 +800,18 @@
       }
 
       // ===== 沙漏（提醒阈值计时器）：周期 = 设置里的 thresholdMin（分钟）
-      // 规则：① 新的一段工作 → 翻半圈回满 + 按阈值匀速漏（漏完即止，不自行重启/翻转）
-      //       ② 暂停且还有沙 → 翻半圈 + 从当前水位快速漏完
-      //       ③ 已漏完 → 不翻转、不重启，停在"上空下满"（此时点休息也不翻） =====
+      // 规则：① 按下"工作"（含暂停后恢复）或改了阈值 → 翻半圈回满 + 按阈值匀速漏
+      //       ② 按下"休息"且还有沙 → 翻半圈 + 从当前水位快速漏完
+      //       ③ 正在工作但已漏完 → 不翻转不重启，停在"上空下满"（此时点休息也不翻）
+      //       ④ 其余（暂停中、暂停后已漏完）→ 保持现状 =====
       const HG_FLIP = 0.6; // 与 CSS --hg-flip 一致（秒）
       const HG_DRAIN = 0.8; // 暂停快速漏完时长（秒）
       const HG_MODEL_T = "translate(13.75px, 9.25px)";
       const hgMs = () => S.thresholdMin * 60000; // 沙漏周期（跟随提醒阈值）
       let hgKey = "";
       let hgFlowTimer = 0;
+      let hgPrevRun = false; // 上一帧的工作态：识别"刚按下工作/休息"
+      let hgThres = S.thresholdMin; // 上一帧的阈值：识别"设置里改过阈值"
       // 水位记录（0=上满下空，1=上空下满）：用于暂停时"从当前水位"继续快漏
       let hgP0 = 0;
       let hgT0 = Date.now();
@@ -820,6 +828,13 @@
         model.style.transform = "";
       }
 
+      /** 清掉当前动画态（沙流 + 沙层），供各分支按新状态重挂 */
+      function hgClearRun(hg) {
+        window.clearTimeout(hgFlowTimer);
+        hg.classList.remove("flowing");
+        hg.classList.remove("run");
+      }
+
       function renderHourglass() {
         const done = hgPNow() >= 1; // 沙已漏完
         const key = `${S.running}|${S.thresholdMin}|${done}`;
@@ -828,12 +843,14 @@
         const hg = $("hourglass");
         const model = hg.querySelector(".loader__model");
         const pCur = hgPNow(); // 当前水位
-        window.clearTimeout(hgFlowTimer); // 沙流等翻转完再出现（暂停/漏完则立即停）
-        hg.classList.remove("flowing");
-        hg.classList.remove("run");
+        const started = S.running && !hgPrevRun; // 刚按下"工作"（含暂停后恢复）
+        const thresChanged = S.thresholdMin !== hgThres; // 设置里改了阈值
+        hgPrevRun = S.running;
+        hgThres = S.thresholdMin;
 
-        if (S.running && !done) {
+        if ((started || thresChanged) && S.running) {
           // ① 新的一段工作：翻正回满，按阈值匀速漏
+          hgClearRun(hg);
           hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
           hg.style.setProperty("--hg-delay", `${HG_FLIP}s`);
           hgP0 = 0;
@@ -841,16 +858,23 @@
           hgT0 = Date.now();
           hgFlipRestart(hg, model);
           hgFlowTimer = window.setTimeout(() => hg.classList.add("flowing"), HG_FLIP * 1000);
+        } else if (thresChanged) {
+          // 阈值变了但当前暂停：只重置内部水位，画面留待下次"工作"统一翻转
+          hgP0 = 0;
+          hgDur = hgMs();
+          hgT0 = Date.now();
         } else if (!S.running && !done) {
           // ② 暂停且还有沙：翻半圈 + 从当前水位快速漏完（翻转后上仓装的正是"已漏走的 pCur"）
+          hgClearRun(hg);
           hg.style.setProperty("--hg-dur", `${HG_DRAIN}s`);
           hg.style.setProperty("--hg-delay", `${-(1 - pCur) * HG_DRAIN}s`);
           hgP0 = 1 - pCur;
           hgDur = HG_DRAIN * 1000;
           hgT0 = Date.now();
           hgFlipRestart(hg, model);
-        } else {
-          // ③ 已漏完：不翻转，负一个周期的延迟让动画直接停在终态（上空下满）
+        } else if (S.running && done) {
+          // ③ 工作漏完：不翻转，负一个周期的延迟让动画直接停在终态（上空下满）
+          hgClearRun(hg);
           hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
           hg.style.setProperty("--hg-delay", `${-hgMs() / 1000}s`);
           hgP0 = 1;
@@ -859,6 +883,7 @@
           void hg.getBoundingClientRect(); // 重排后再挂 .run，让动画以负延迟直接落到终态
           hg.classList.add("run");
         }
+        // ④ 其余（暂停中、暂停后已漏完）：保持现状不动
       }
 
       // ===== 提醒阈值接线：改设置 → 沙漏周期跟随（强制翻转重启）+ 文案同步 =====
