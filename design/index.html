@@ -1,308 +1,879 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CapsulePulse · design 原型</title>
-<link rel="stylesheet" href="glass.css">
-<style>
-  /* 页面级补充（引擎在 glass.css） */
-  .banner{margin:8px 2px 6px}
-  .stage .pill-cast{margin-top:2px}
-  .statline{font-size:11px; color:var(--ink-2); text-align:center}
-</style>
-</head>
-<body>
-
-  <!-- ============ 位移折射滤镜（窗口专用，25% 定稿强度） ============ -->
-  <svg width="0" height="0" style="position:absolute">
-    <defs>
-      <linearGradient id="gradRing" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#6d28d9"/>
-      </linearGradient>
-    </defs>
-    <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
-      <feImage x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m"/>
-      <feDisplacementMap in="SourceGraphic" in2="m" scale="12" xChannelSelector="R" yChannelSelector="G"/>
-    </filter>
-  </svg>
-
-  <!-- ============ APP 窗口（380×560） ============ -->
-  <div class="window" id="win">
-    <div class="fx mottle"></div>
-    <div class="fx grain"></div>
-    <div class="fx sweep"></div>
-
-    <div class="content">
-      <header class="topbar">
-        <h1>CapsulePulse</h1>
-        <button class="gear" title="设置" onclick="openSettings()">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
-        </button>
-      </header>
-
-      <!-- 文案条（提醒 / 自动下班） -->
-      <div class="banner remind" id="bn-remind"><span class="dot"></span>已连续工作 50 分钟，休息一下吧</div>
-      <div class="banner auto" id="bn-auto"><span class="dot"></span>已到自动下班时间（上班 + 8h），已回填记账</div>
-
-      <!-- 计时页 -->
-      <section class="stage" id="page-timer">
-        <div class="ringwrap">
-          <svg width="212" height="212" viewBox="0 0 212 212">
-            <circle class="ring-bg" cx="106" cy="106" r="92"/>
-            <circle class="ring-dash" id="ringDash" cx="106" cy="106" r="92"/>
-            <circle class="ring-fill" id="ringFill" cx="106" cy="106" r="92"
-              stroke-dasharray="578" stroke-dashoffset="578"/>
-          </svg>
-          <div class="ring-center">
-            <div class="digits idle" id="digits">00:00:00.0</div>
-            <div class="ring-note" id="ringNote">未上班 · 打卡后开始计时</div>
-          </div>
-        </div>
-
-        <button class="pill-cast" id="pillCast" onclick="openConfirm()">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><rect x="4" y="7" width="16" height="13" rx="2"/></svg>
-          <span id="pillText">上班</span>
-        </button>
-        <button class="gbtn" id="btnRun" disabled onclick="toggleRun()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5Z"/></svg>
-          <span id="btnRunText">开始</span>
-        </button>
-      </section>
-
-      <!-- 统计页（PL008 五卡 · 静态演示数据） -->
-      <section class="stats" id="page-stats" style="display:none">
-        <div class="gcard daynav">
-          <button class="arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg></button>
-          <span class="day">9月16日 · 周二 · 在岗中</span>
-          <button class="arrow" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></button>
-        </div>
-
-        <div class="gcard">
-          <h3>时间图谱</h3>
-          <div class="chart">
-            <div class="seg-work" style="width:13.7%"></div><div class="seg-rest" style="width:5.4%"></div>
-            <div class="seg-work" style="width:13.7%"></div><div class="seg-rest" style="width:5.4%"></div>
-            <div class="seg-work" style="width:13.4%"></div><div class="seg-rest" style="width:16.4%"></div>
-            <div class="seg-work" style="width:31.9%"></div>
-          </div>
-          <div class="chart-axis"><span>09:12</span><span>14:47 · 至今</span></div>
-        </div>
-
-        <div class="gcard">
-          <h3>今日三值</h3>
-          <div class="triple">
-            <div class="t t-duty"><b>5h35m</b><span>在岗</span></div>
-            <div class="t t-work"><b>4h04m</b><span>工作</span></div>
-            <div class="t"><b>1h31m</b><span>休息</span></div>
-          </div>
-        </div>
-
-        <div class="gcard">
-          <h3>最近 7 日（工作时长）</h3>
-          <div class="week">
-            <div class="d"><div class="bar" style="height:77%"></div><span class="w">一</span></div>
-            <div class="d"><div class="bar" style="height:88%"></div><span class="w">二</span></div>
-            <div class="d"><div class="bar" style="height:72%"></div><span class="w">三</span></div>
-            <div class="d"><div class="bar" style="height:100%"></div><span class="w">四</span></div>
-            <div class="d"><div class="bar" style="height:81%"></div><span class="w">五</span></div>
-            <div class="d"><div class="bar" style="height:3px"></div><span class="w">六</span></div>
-            <div class="d today"><div class="bar" style="height:49%"></div><span class="w">今</span></div>
-          </div>
-        </div>
-
-        <div class="gcard">
-          <h3>今日明细</h3>
-          <div class="detail">
-            <div class="dl"><span class="time">09:12–09:58</span><div class="blk work"></div><span class="dur">46分</span></div>
-            <div class="dl"><span class="time">09:58–10:16</span><div class="blk rest"></div><span class="dur">18分</span></div>
-            <div class="dl"><span class="time">10:16–11:02</span><div class="blk work"></div><span class="dur">46分</span></div>
-            <div class="dl"><span class="time">11:02–11:20</span><div class="blk rest"></div><span class="dur">18分</span></div>
-            <div class="dl"><span class="time">11:20–12:05</span><div class="blk work"></div><span class="dur">45分</span></div>
-            <div class="dl"><span class="time">12:05–13:00</span><div class="blk rest"></div><span class="dur">55分</span></div>
-            <div class="dl"><span class="time">13:00–</span><div class="blk work"></div><span class="dur">1h47分</span><span class="ongoing">至今</span></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- dock 导航 -->
-      <nav class="dock">
-        <button class="on" id="tab-timer" onclick="switchTab('timer')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9 2h6"/></svg>
-          计时
-        </button>
-        <button id="tab-stats" onclick="switchTab('stats')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
-          统计
-        </button>
-      </nav>
-    </div>
-
-    <!-- 打卡双向确认框 -->
-    <div class="overlay" id="confirm" style="display:none">
-      <div class="sheet">
-        <h4 id="cfTitle">确认上班打卡</h4>
-        <p id="cfText">开始记录今日在岗时长。</p>
-        <div class="acts">
-          <button onclick="closeConfirm()">取消</button>
-          <button class="ok" id="cfOk" onclick="confirmOk()">确认</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 设置面板 -->
-    <div class="overlay" id="settings" style="display:none">
-      <div class="sheet">
-        <h4>设置</h4>
-        <div class="set-row"><span class="n">提醒阈值（分钟）</span><input type="number" value="50" min="1" max="240"></div>
-        <div class="set-row"><span class="n">提醒声音</span><div class="switch on" onclick="this.classList.toggle('on')"><i></i></div></div>
-        <div class="set-row"><span class="n">系统通知</span><div class="switch on" onclick="this.classList.toggle('on')"><i></i></div></div>
-        <div class="set-row"><span class="n">自动下班</span><div class="switch on" onclick="this.classList.toggle('on')"><i></i></div></div>
-        <div class="set-row"><span class="n">自动下班（小时）</span><input type="number" value="8" min="1" max="72"></div>
-        <div class="acts"><button class="ok" onclick="closeSettings()">完成</button></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ============ 演示控制台（验证用，不属于 APP 设计） ============ -->
-  <div class="devkit">
-    <b>演示状态</b>
-    <label><input type="radio" name="dstate" value="off"> 未上班</label>
-    <label><input type="radio" name="dstate" value="run" checked> 计时中</label>
-    <label><input type="radio" name="dstate" value="pause"> 暂停</label>
-    <label><input type="checkbox" id="dk-remind"> 提醒条</label>
-    <label><input type="checkbox" id="dk-auto"> 自动下班条</label>
-    <label>磨砂 <input type="range" id="dk-blur" min="0" max="30" value="5" style="width:90px;accent-color:#a78bfa"> <button type="button" onclick="setBg(0)" style="color:#ffd9ec">咖啡店</button> <button type="button" onclick="setBg(1)" style="color:#ffe9c9">书店</button></label>
-    <div class="hint">窗口 380×560 = 真实窗宽；上方齿轮/圆钮/页签均可交互；验证通过后按 README 映射回 ui/。</div>
-  </div>
-
-<script>
-  // ===== 位移贴图（kube.io 管线：圆角矩形 SDF → 法线 → R/X、G/Y 编码，128 中性）=====
-  function makeMap(w, h, radius, bezel, strength) {
-    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    const ctx = cv.getContext("2d"); const img = ctx.createImageData(w, h);
-    const hw = w / 2, hh = h / 2, r = Math.min(radius, hw, hh);
-    const sdf = (x, y) => {
-      const dx = Math.abs(x - hw) - (hw - r), dy = Math.abs(y - hh) - (hh - r);
-      return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - r;
-    };
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4, d = sdf(x + .5, y + .5);
-      let R = 128, G = 128;
-      if (d > -bezel && d < 1.5) {
-        const nx = sdf(x + 1, y) - sdf(x - 1, y), ny = sdf(x, y + 1) - sdf(x, y - 1);
-        const len = Math.hypot(nx, ny) || 1;
-        const t = Math.min(1, (d + bezel) / bezel), mag = 127 * Math.sin(t * Math.PI / 2);
-        R = 128 + (nx / len) * mag; G = 128 + (ny / len) * mag;
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CapsulePulse · design 原型</title>
+    <link rel="stylesheet" href="glass.css" />
+    <style>
+      /* 页面级补充（引擎在 glass.css） */
+      .banner {
+        margin: 8px 2px 6px;
       }
-      img.data[i] = R; img.data[i + 1] = G; img.data[i + 2] = 128; img.data[i + 3] = 255;
-    }
-    ctx.putImageData(img, 0, 0); return cv.toDataURL();
-  }
-  // 定稿折射 25%：基准 scale 48 × 0.25 = 12
-  const f = document.getElementById("rf-window");
-  f.querySelector("feImage").setAttribute("href", makeMap(380, 560, 8, 16, 12));
-  f.querySelector("feDisplacementMap").setAttribute("scale", 12);
+      .stage .pill-cast {
+        margin-top: 2px;
+      }
+      .statline {
+        font-size: 11px;
+        color: var(--ink-2);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ============ 位移折射滤镜（窗口专用，25% 定稿强度） ============ -->
+    <svg width="0" height="0" style="position: absolute">
+      <defs>
+        <linearGradient id="gradRing" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#8fc9f2" />
+          <stop offset="1" stop-color="#2b7fc4" />
+        </linearGradient>
+      </defs>
+      <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
+        <feImage x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m" />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="m"
+          scale="12"
+          xChannelSelector="R"
+          yChannelSelector="G"
+        />
+      </filter>
+    </svg>
 
-  // ===== APP 状态机（客户端演示模拟）=====
-  const S = { duty: true, running: true, startTs: Date.now(), accum: 335 * 60000 };
-  const $ = (id) => document.getElementById(id);
-  const elapsed = () => S.running ? S.accum + (Date.now() - S.startTs) : S.accum;
+    <!-- ============ APP 窗口（300×400，与参考项目同尺寸） ============ -->
+    <div class="window" id="win">
+      <div class="fx mottle"></div>
+      <div class="fx grain"></div>
+      <div class="fx sweep"></div>
 
-  function fmt(ms) {
-    const t = Math.floor(ms / 100);
-    const d = t % 10, s = Math.floor(t / 10) % 60, m = Math.floor(t / 600) % 60, h = Math.floor(t / 36000);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${p(h)}:${p(m)}:${p(s)}.${d}`;
-  }
-  function render() {
-    const ms = elapsed();
-    $("digits").textContent = fmt(ms);
-    $("digits").classList.toggle("idle", !S.duty);
-    $("ringDash").style.display = S.duty ? "none" : "";
-    $("ringFill").style.display = S.duty ? "" : "none";
-    const C = 578, frac = Math.min(1, ms / 1000 / 28800);
-    $("ringFill").style.strokeDashoffset = C * (1 - frac);
-    $("ringNote").textContent = !S.duty ? "未上班 · 打卡后开始计时"
-      : S.running ? "在岗计时中 · 8h 进度" : "已暂停";
-    $("pillText").textContent = S.duty ? "下班" : "上班";
-    $("btnRun").disabled = !S.duty;
-    $("btnRunText").textContent = S.running ? "暂停" : (S.accum > 0 || !S.duty ? (S.accum > 0 ? "继续" : "开始") : "开始");
-  }
-  setInterval(render, 100);
+      <div class="content">
+        <header class="topbar">
+          <h1 class="title">
+            CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas>
+          </h1>
+        </header>
 
-  function applyState() {
-    if (S.duty && S.running) { /* 保持 */ }
-    if (!S.duty) { S.running = false; S.accum = 0; }
-    render();
-  }
-  // 演示状态切换
-  document.querySelectorAll('input[name="dstate"]').forEach((r) =>
-    r.addEventListener("change", () => {
-      const v = r.value;
-      if (v === "off") { S.duty = false; S.running = false; S.accum = 0; }
-      if (v === "run") { S.duty = true; S.running = true; S.startTs = Date.now(); S.accum = 0; }
-      if (v === "pause") { S.duty = true; S.running = false; S.accum = 335 * 60000; }
-      // 打卡动作内部数据（pill/按钮/环）随 render 刷新
-      S._force = true; render();
-      // pill 与按钮文案由 render 依据 duty/running 计算 ✓
-    }),
-  );
-  // 打卡与按钮动作
-  $("pillCast").addEventListener("click", () => { if (!S.duty) openConfirm("in"); else openConfirm("out"); });
-  $("btnRun").addEventListener("click", () => {
-    if (!S.duty) return;
-    if (S.running) { S.running = false; S.accum += Date.now() - S.startTs; }
-    else { S.running = true; S.startTs = Date.now(); }
-    syncDevkit(); render();
-  });
-  function syncDevkit() {
-    const v = !S.duty ? "off" : S.running ? "run" : "pause";
-    const r = document.querySelector(`input[name="dstate"][value="${v}"]`);
-    if (r) r.checked = true;
-  }
-  // 文案条开关
-  $("dk-remind").addEventListener("change", (e) => $("bn-remind").classList.toggle("show", e.target.checked));
-  $("dk-auto").addEventListener("change", (e) => $("bn-auto").classList.toggle("show", e.target.checked));
+        <!-- 文案条（提醒 / 自动下班） -->
+        <div class="banner remind" id="bn-remind">
+          <span class="dot"></span>已连续工作 50 分钟，休息一下吧
+        </div>
+        <div class="banner auto" id="bn-auto">
+          <span class="dot"></span>已到自动下班时间（上班 + 8h），已回填记账
+        </div>
 
-  // ===== 页签 =====
-  function switchTab(t) {
-    $("page-timer").style.display = t === "timer" ? "flex" : "none";
-    $("page-stats").style.display = t === "stats" ? "flex" : "none";
-    $("tab-timer").classList.toggle("on", t === "timer");
-    $("tab-stats").classList.toggle("on", t === "stats");
-  }
+        <!-- 计时页 -->
+        <section class="stage" id="page-timer">
+          <div class="ringwrap">
+            <svg width="180" height="180" viewBox="0 0 180 180">
+              <circle class="ring-bg" cx="90" cy="90" r="78" />
+              <circle class="ring-dash" id="ringDash" cx="90" cy="90" r="78" />
+              <circle
+                class="ring-fill"
+                id="ringFill"
+                cx="90"
+                cy="90"
+                r="78"
+                stroke-dasharray="490"
+                stroke-dashoffset="490"
+              />
+            </svg>
+            <div class="ring-center">
+              <div class="digits idle" id="digits">00:00:00.0</div>
+              <div class="ring-note" id="ringNote">未上班 · 打卡后开始计时</div>
+            </div>
+          </div>
 
-  // ===== 确认框 =====
-  let confirmDir = "in";
-  function openConfirm(dir) {
-    confirmDir = dir || (S.duty ? "out" : "in");
-    $("cfTitle").textContent = confirmDir === "in" ? "确认上班打卡" : "确认下班打卡";
-    $("cfText").textContent = confirmDir === "in"
-      ? "开始记录今日在岗时长；班内计时 = 工作、空隙 = 休息。"
-      : "班内计时将收段落库，并结算今日在岗 / 工作 / 休息三值。";
-    $("confirm").style.display = "flex";
-  }
-  function closeConfirm() { $("confirm").style.display = "none"; }
-  function confirmOk() {
-    closeConfirm();
-    if (confirmDir === "in") { S.duty = true; S.running = true; S.startTs = Date.now(); S.accum = 0; }
-    else { S.duty = false; S.running = false; S.accum = 0; }
-    syncDevkit(); render();
-  }
-  // ===== 设置 =====
-  function openSettings() { $("settings").style.display = "flex"; }
-  function closeSettings() { $("settings").style.display = "none"; }
+          <button class="pill-cast" id="pillCast" onclick="openConfirm()">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <rect x="4" y="7" width="16" height="13" rx="2" />
+            </svg>
+            <span id="pillText">上班</span>
+          </button>
+          <!-- 三段式控制（借鉴 uiverse laksh_7112 radio-input：玻璃质感 + 抬起/按下投影）：
+               工作/休息 = 互斥选中；重置 = 瞬时（按下回弹，不保持选中） -->
+          <div class="seg-control" id="segRun">
+            <label class="seg">
+              <input type="radio" name="runseg" value="work" />
+              <span class="text">工作</span>
+            </label>
+            <label class="seg">
+              <input type="radio" name="runseg" value="rest" />
+              <span class="text">休息</span>
+            </label>
+            <button class="seg seg-reset" id="segReset" type="button">
+              <span class="text">重置</span>
+            </button>
+          </div>
+        </section>
+      </div>
 
-  // 磨砂对比滑杆（--blur 联动引擎）
-  const dkBlur = document.getElementById("dk-blur");
-  dkBlur.addEventListener("input", () => document.documentElement.style.setProperty("--blur", dkBlur.value + "px"));
-  // 背景切换（测试不同背景下的磨砂与玻璃质感）
-  const BGS = ["url(assets/lab-bg.jpg)", "url(assets/bg-bookstore.jpg)"];
-  function setBg(i){ document.documentElement.style.setProperty("--bg-photo", BGS[i]); }
-  // 初始（默认演示：计时中）
-  applyStateCall();
-  function applyStateCall() { render(); syncDevkit(); }
-</script>
-</body>
+      <!-- 统计板（借鉴 CapsuleTODO archive）：玻璃板里是统计信息，从统计钮飞出 -->
+      <div id="stats-board">
+        <div class="board-glass sheet">
+          <h4 class="board-title">统计</h4>
+          <section class="stats">
+            <div class="gcard daynav">
+              <button class="arrow">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="m15 5-7 7 7 7" />
+                </svg>
+              </button>
+              <span class="day">9月16日 · 周二 · 在岗中</span>
+              <button class="arrow" disabled>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="m9 5 7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="gcard">
+              <h3>时间图谱</h3>
+              <div class="chart">
+                <div class="seg-work" style="width: 13.7%"></div>
+                <div class="seg-rest" style="width: 5.4%"></div>
+                <div class="seg-work" style="width: 13.7%"></div>
+                <div class="seg-rest" style="width: 5.4%"></div>
+                <div class="seg-work" style="width: 13.4%"></div>
+                <div class="seg-rest" style="width: 16.4%"></div>
+                <div class="seg-work" style="width: 31.9%"></div>
+              </div>
+              <div class="chart-axis"><span>09:12</span><span>14:47 · 至今</span></div>
+            </div>
+
+            <div class="gcard">
+              <h3>今日三值</h3>
+              <div class="triple">
+                <div class="t t-duty"><b>5h35m</b><span>在岗</span></div>
+                <div class="t t-work"><b>4h04m</b><span>工作</span></div>
+                <div class="t"><b>1h31m</b><span>休息</span></div>
+              </div>
+            </div>
+
+            <div class="gcard">
+              <h3>最近 7 日（工作时长）</h3>
+              <div class="week">
+                <div class="d">
+                  <div class="bar" style="height: 77%"></div>
+                  <span class="w">一</span>
+                </div>
+                <div class="d">
+                  <div class="bar" style="height: 88%"></div>
+                  <span class="w">二</span>
+                </div>
+                <div class="d">
+                  <div class="bar" style="height: 72%"></div>
+                  <span class="w">三</span>
+                </div>
+                <div class="d">
+                  <div class="bar" style="height: 100%"></div>
+                  <span class="w">四</span>
+                </div>
+                <div class="d">
+                  <div class="bar" style="height: 81%"></div>
+                  <span class="w">五</span>
+                </div>
+                <div class="d">
+                  <div class="bar" style="height: 3px"></div>
+                  <span class="w">六</span>
+                </div>
+                <div class="d today">
+                  <div class="bar" style="height: 49%"></div>
+                  <span class="w">今</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="gcard">
+              <h3>今日明细</h3>
+              <div class="detail">
+                <div class="dl">
+                  <span class="time">09:12–09:58</span>
+                  <div class="blk work"></div>
+                  <span class="dur">46分</span>
+                </div>
+                <div class="dl">
+                  <span class="time">09:58–10:16</span>
+                  <div class="blk rest"></div>
+                  <span class="dur">18分</span>
+                </div>
+                <div class="dl">
+                  <span class="time">10:16–11:02</span>
+                  <div class="blk work"></div>
+                  <span class="dur">46分</span>
+                </div>
+                <div class="dl">
+                  <span class="time">11:02–11:20</span>
+                  <div class="blk rest"></div>
+                  <span class="dur">18分</span>
+                </div>
+                <div class="dl">
+                  <span class="time">11:20–12:05</span>
+                  <div class="blk work"></div>
+                  <span class="dur">45分</span>
+                </div>
+                <div class="dl">
+                  <span class="time">12:05–13:00</span>
+                  <div class="blk rest"></div>
+                  <span class="dur">55分</span>
+                </div>
+                <div class="dl">
+                  <span class="time">13:00–</span>
+                  <div class="blk work"></div>
+                  <span class="dur">1h47分</span><span class="ongoing">至今</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- 侧角按钮（左统计 · 右设置，对称落位；借鉴 CapsuleTODO archive 触点） -->
+      <button
+        class="sideButton statsButton"
+        id="stats-btn"
+        aria-label="统计"
+        onclick="toggleStats()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 13h4v7H4zM10 8h4v12h-4zM16 4h4v16h-4z" />
+        </svg>
+        <span class="tooltip">统计</span>
+      </button>
+      <button
+        class="sideButton settingsButton"
+        id="gear"
+        aria-label="设置"
+        onclick="toggleSettings()"
+      >
+        <svg viewBox="0 -960 960 960" aria-hidden="true">
+          <path
+            d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"
+          />
+        </svg>
+        <span class="tooltip">设置</span>
+      </button>
+
+      <!-- 打卡双向确认框 -->
+      <div class="overlay" id="confirm" style="display: none">
+        <div class="sheet">
+          <h4 id="cfTitle">确认上班打卡</h4>
+          <p id="cfText">开始记录今日在岗时长。</p>
+          <div class="acts">
+            <button onclick="closeConfirm()">取消</button>
+            <button class="ok" id="cfOk" onclick="confirmOk()">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置板（借鉴 CapsuleTODO）：玻璃板从齿轮中心缩放飞出，覆于内容之上 -->
+      <div id="settings-board">
+        <div class="board-glass sheet">
+          <h4 class="board-title">设置</h4>
+          <div class="set-row">
+            <span class="n">提醒阈值（分钟）</span
+            ><input type="number" value="50" min="1" max="240" />
+          </div>
+          <div class="set-row">
+            <span class="n">提醒声音</span>
+            <div class="switch on" onclick="this.classList.toggle('on')"><i></i></div>
+          </div>
+          <div class="set-row">
+            <span class="n">系统通知</span>
+            <div class="switch on" onclick="this.classList.toggle('on')"><i></i></div>
+          </div>
+          <div class="set-row">
+            <span class="n">自动下班</span>
+            <div class="switch on" onclick="this.classList.toggle('on')"><i></i></div>
+          </div>
+          <div class="set-row">
+            <span class="n">自动下班（小时）</span
+            ><input type="number" value="8" min="1" max="72" />
+          </div>
+          <div class="acts"><button class="ok" onclick="closeSettings()">完成</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 演示控制台（验证用，不属于 APP 设计） ============ -->
+    <div class="devkit">
+      <b>演示状态</b>
+      <label><input type="radio" name="dstate" value="off" /> 未上班</label>
+      <label><input type="radio" name="dstate" value="run" checked /> 计时中</label>
+      <label><input type="radio" name="dstate" value="pause" /> 暂停</label>
+      <label><input type="checkbox" id="dk-remind" /> 提醒条</label>
+      <label><input type="checkbox" id="dk-auto" /> 自动下班条</label>
+      <label
+        >磨砂
+        <input
+          type="range"
+          id="dk-blur"
+          min="0"
+          max="30"
+          value="5"
+          style="width: 90px; accent-color: #4aa8e8"
+        />
+        <button type="button" onclick="setBg(0)" style="color: #ffd9ec">咖啡店</button>
+        <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
+      >
+      <div class="hint">
+        窗口 300×400 = 参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按 README 映射回 ui/。
+      </div>
+    </div>
+
+    <script>
+      // ===== 位移贴图（kube.io 管线：圆角矩形 SDF → 法线 → R/X、G/Y 编码，128 中性）=====
+      function makeMap(w, h, radius, bezel, strength) {
+        const cv = document.createElement("canvas");
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext("2d");
+        const img = ctx.createImageData(w, h);
+        const hw = w / 2,
+          hh = h / 2,
+          r = Math.min(radius, hw, hh);
+        const sdf = (x, y) => {
+          const dx = Math.abs(x - hw) - (hw - r),
+            dy = Math.abs(y - hh) - (hh - r);
+          return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - r;
+        };
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4,
+              d = sdf(x + 0.5, y + 0.5);
+            let R = 128,
+              G = 128;
+            if (d > -bezel && d < 1.5) {
+              const nx = sdf(x + 1, y) - sdf(x - 1, y),
+                ny = sdf(x, y + 1) - sdf(x, y - 1);
+              const len = Math.hypot(nx, ny) || 1;
+              const t = Math.min(1, (d + bezel) / bezel),
+                mag = 127 * Math.sin((t * Math.PI) / 2);
+              R = 128 + (nx / len) * mag;
+              G = 128 + (ny / len) * mag;
+            }
+            img.data[i] = R;
+            img.data[i + 1] = G;
+            img.data[i + 2] = 128;
+            img.data[i + 3] = 255;
+          }
+        ctx.putImageData(img, 0, 0);
+        return cv.toDataURL();
+      }
+      // 定稿折射 25%：基准 scale 48 × 0.25 = 12
+      const f = document.getElementById("rf-window");
+      f.querySelector("feImage").setAttribute("href", makeMap(300, 400, 8, 16, 12));
+      f.querySelector("feDisplacementMap").setAttribute("scale", 12);
+
+      // ===== APP 状态机（客户端演示模拟）=====
+      const S = { duty: true, running: true, startTs: Date.now(), accum: 335 * 60000 };
+      const $ = (id) => document.getElementById(id);
+      const elapsed = () => (S.running ? S.accum + (Date.now() - S.startTs) : S.accum);
+
+      function fmt(ms) {
+        const t = Math.floor(ms / 100);
+        const d = t % 10,
+          s = Math.floor(t / 10) % 60,
+          m = Math.floor(t / 600) % 60,
+          h = Math.floor(t / 36000);
+        const p = (n) => String(n).padStart(2, "0");
+        return `${p(h)}:${p(m)}:${p(s)}.${d}`;
+      }
+      function render() {
+        const ms = elapsed();
+        $("digits").textContent = fmt(ms);
+        $("digits").classList.toggle("idle", !S.duty);
+        $("ringDash").style.display = S.duty ? "none" : "";
+        $("ringFill").style.display = S.duty ? "" : "none";
+        const C = 490,
+          frac = Math.min(1, ms / 1000 / 28800);
+        $("ringFill").style.strokeDashoffset = C * (1 - frac);
+        $("ringNote").textContent = !S.duty
+          ? "未上班 · 打卡后开始计时"
+          : S.running
+            ? "在岗计时中 · 8h 进度"
+            : "已暂停";
+        $("pillText").textContent = S.duty ? "下班" : "上班";
+        // 三段式控制：工作/休息互斥选中随运行状态；重置为瞬时按钮；未上班全禁用
+        const runMode = !S.duty ? "" : S.running ? "work" : "rest";
+        $("segRun").classList.toggle("off", !S.duty);
+        $("segReset").disabled = !S.duty;
+        for (const r of $("segRun").querySelectorAll("input")) {
+          r.disabled = !S.duty;
+          r.checked = r.value === runMode;
+        }
+      }
+      setInterval(render, 100);
+
+      function applyState() {
+        if (S.duty && S.running) {
+          /* 保持 */
+        }
+        if (!S.duty) {
+          S.running = false;
+          S.accum = 0;
+        }
+        render();
+      }
+      // 演示状态切换
+      document.querySelectorAll('input[name="dstate"]').forEach((r) =>
+        r.addEventListener("change", () => {
+          const v = r.value;
+          if (v === "off") {
+            S.duty = false;
+            S.running = false;
+            S.accum = 0;
+          }
+          if (v === "run") {
+            S.duty = true;
+            S.running = true;
+            S.startTs = Date.now();
+            S.accum = 0;
+          }
+          if (v === "pause") {
+            S.duty = true;
+            S.running = false;
+            S.accum = 335 * 60000;
+          }
+          // 打卡动作内部数据（pill/按钮/环）随 render 刷新
+          S._force = true;
+          render();
+          // pill 与按钮文案由 render 依据 duty/running 计算 ✓
+        }),
+      );
+      // 打卡与按钮动作
+      $("pillCast").addEventListener("click", () => {
+        if (!S.duty) openConfirm("in");
+        else openConfirm("out");
+      });
+      // 三段式控制动作：工作（恢复计时）/ 休息（收段暂停）/ 重置（计时归零，瞬时）
+      $("segRun")
+        .querySelectorAll("input")
+        .forEach((r) =>
+          r.addEventListener("change", () => {
+            if (!S.duty) return;
+            if (r.value === "work") {
+              if (!S.running) {
+                S.running = true;
+                S.startTs = Date.now(); // 累计保留，续计
+              }
+            } else if (r.value === "rest") {
+              if (S.running) {
+                S.running = false;
+                S.accum += Date.now() - S.startTs; // 收段
+              }
+            }
+            syncDevkit();
+            render();
+          }),
+        );
+      // 重置：计时归零；若在工作则同时切到休息（瞬时按钮，不保持选中、归零后不进入工作）
+      $("segReset").addEventListener("click", () => {
+        if (!S.duty) return;
+        S.running = false;
+        S.accum = 0;
+        syncDevkit();
+        render();
+      });
+      function syncDevkit() {
+        const v = !S.duty ? "off" : S.running ? "run" : "pause";
+        const r = document.querySelector(`input[name="dstate"][value="${v}"]`);
+        if (r) r.checked = true;
+      }
+      // 文案条开关
+      $("dk-remind").addEventListener("change", (e) =>
+        $("bn-remind").classList.toggle("show", e.target.checked),
+      );
+      $("dk-auto").addEventListener("change", (e) =>
+        $("bn-auto").classList.toggle("show", e.target.checked),
+      );
+
+      // ===== 确认框 =====
+      let confirmDir = "in";
+      function openConfirm(dir) {
+        confirmDir = dir || (S.duty ? "out" : "in");
+        $("cfTitle").textContent = confirmDir === "in" ? "确认上班打卡" : "确认下班打卡";
+        $("cfText").textContent =
+          confirmDir === "in"
+            ? "开始记录今日在岗时长；班内计时 = 工作、空隙 = 休息。"
+            : "班内计时将收段落库，并结算今日在岗 / 工作 / 休息三值。";
+        $("confirm").style.display = "flex";
+      }
+      function closeConfirm() {
+        $("confirm").style.display = "none";
+      }
+      function confirmOk() {
+        closeConfirm();
+        if (confirmDir === "in") {
+          S.duty = true;
+          S.running = true;
+          S.startTs = Date.now();
+          S.accum = 0;
+        } else {
+          S.duty = false;
+          S.running = false;
+          S.accum = 0;
+        }
+        syncDevkit();
+        render();
+      }
+      // ===== 玻璃板（借鉴 CapsuleTODO）：按钮原点缩放飞出、两板互斥、点板外收板 =====
+      const settingsBoard = $("settings-board");
+      const statsBoard = $("stats-board");
+      const gearBtn = $("gear");
+      const statsBtn = $("stats-btn");
+      const BOARD_TOP = 54;
+      const BOARD_LEFT = 12;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+      /** 把按钮中心换算成板内坐标写入 transform-origin（开板即从该按钮处飞出） */
+      function flyBoard(board, btn) {
+        const cr = $("win").getBoundingClientRect();
+        const br = btn.getBoundingClientRect();
+        board.style.setProperty(
+          "--origin-x",
+          `${Math.round(br.left + br.width / 2 - cr.left - BOARD_LEFT)}px`,
+        );
+        board.style.setProperty(
+          "--origin-y",
+          `${Math.round(br.top + br.height / 2 - cr.top - BOARD_TOP)}px`,
+        );
+      }
+
+      function setSettings(open) {
+        if (open) {
+          if (statsBoard.classList.contains("open")) setStats(false); // 两板互斥
+          flyBoard(settingsBoard, gearBtn);
+        }
+        settingsBoard.classList.toggle("open", open);
+        gearBtn.classList.toggle("open", open); // 开板保色、收板褪色
+      }
+      function toggleSettings() {
+        setSettings(!settingsBoard.classList.contains("open"));
+      }
+      function closeSettings() {
+        setSettings(false);
+      }
+
+      function setStats(open) {
+        if (open) {
+          if (settingsBoard.classList.contains("open")) setSettings(false); // 两板互斥
+          flyBoard(statsBoard, statsBtn);
+        }
+        statsBoard.classList.toggle("open", open);
+        statsBtn.classList.toggle("open", open);
+      }
+
+      // 统计钮：按压回弹由 CSS :active 承担（见 glass.css），此处只管板的开合
+      function toggleStats() {
+        setStats(!statsBoard.classList.contains("open"));
+      }
+
+      // 点板外任意位置收板（板内点击与按钮自身的开合不在此列）
+      document.addEventListener("click", (e) => {
+        if (!e.target.isConnected) return;
+        if (
+          settingsBoard.classList.contains("open") &&
+          !e.target.closest("#settings-board") &&
+          !e.target.closest("#gear")
+        ) {
+          setSettings(false);
+        }
+        if (
+          statsBoard.classList.contains("open") &&
+          !e.target.closest("#stats-board") &&
+          !e.target.closest("#stats-btn")
+        ) {
+          setStats(false);
+        }
+      });
+
+      // 磨砂对比滑杆（--blur 联动引擎）
+      const dkBlur = document.getElementById("dk-blur");
+      dkBlur.addEventListener("input", () =>
+        document.documentElement.style.setProperty("--blur", dkBlur.value + "px"),
+      );
+      // 背景切换（测试不同背景下的磨砂与玻璃质感）
+      const BGS = ["url(assets/lab-bg.jpg)", "url(assets/bg-bookstore.jpg)"];
+      function setBg(i) {
+        document.documentElement.style.setProperty("--bg-photo", BGS[i]);
+      }
+      // 初始（默认演示：计时中）
+      applyStateCall();
+      function applyStateCall() {
+        render();
+        syncDevkit();
+      }
+
+      // ===== 标题粒子化（借鉴 CapsuleTODO / Da0Mine text-particleization，MIT）：
+      // 画布接管标题视觉；光标进入窗口即排斥、离开后弹簧归位，静止自动停帧省 GPU；
+      // reduced-motion 下不初始化，保留静态文字 =====
+      function initTitleParticles() {
+        const h1 = document.querySelector(".title");
+        if (!h1 || reducedMotion.matches) return;
+        const canvas = h1.querySelector(".title-canvas");
+        const ctx = canvas.getContext("2d");
+        const card = $("win");
+        h1.classList.add("title--particles"); // 仅粒子形态：原文字透明让位
+        const TEXT = "CapsulePulse";
+        const GAP = 2; // 采样步长（离屏像素）
+        const REPEL_RADIUS = 55;
+        const REPEL_FORCE = 0.45;
+        const SPRING = 0.06;
+        const FRICTION = 0.85;
+        const MAX_OFFSET = 15;
+        const SETTLE_DIST = 0.5;
+        const FRAME_CAP = 240;
+        const MARGIN_X = 30;
+        const MARGIN_TOP = 20; // 与 .title-canvas top:-20px 联动
+        const MARGIN_BOTTOM = 30;
+        const GLOWS = [
+          { x: 0, y: 10, blur: 15, spread: 3 },
+          { x: 0, y: 4, blur: 6, spread: 4 },
+        ];
+        const SHADOW_THICK = 1.5;
+        const sCan = document.createElement("canvas"); // 影层离屏
+        const sctx = sCan.getContext("2d");
+        let particles = [];
+        let dpr = 1;
+        let raf = 0;
+        let rect = null;
+        let mouse = { x: -9999, y: -9999 };
+        let frames = 0;
+        let zone = null;
+        let shadow = { x: 1.7, y: 1.7, blur: 8, alpha: 0.35 };
+        let glowColor = "rgba(74, 168, 232, 0.35)";
+        const accent = () =>
+          (
+            getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#4aa8e8"
+          ).trim();
+
+        // 离屏 2x 采样：文字 alpha 网格扫描 → 粒子（home = 字形坐标）
+        function build() {
+          frames = 0;
+          rect = h1.getBoundingClientRect();
+          const cr = card.getBoundingClientRect();
+          zone = { left: cr.left, right: cr.right, top: cr.top, bottom: cr.bottom };
+          dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const cw = rect.width + MARGIN_X * 2;
+          const ch = rect.height + MARGIN_TOP + MARGIN_BOTTOM;
+          canvas.width = Math.round(cw * dpr);
+          canvas.height = Math.round(ch * dpr);
+          canvas.style.width = `${cw}px`;
+          canvas.style.height = `${ch}px`;
+          sCan.width = canvas.width;
+          sCan.height = canvas.height;
+          const cs = getComputedStyle(document.documentElement);
+          const raw = cs.getPropertyValue("--panel-shadow");
+          const dims = raw.match(/([\d.]+)px\s+([\d.]+)px\s+([\d.]+)px/);
+          const a = raw.match(/,\s*([\d.]+)\)/);
+          shadow = dims
+            ? {
+                x: Number(dims[1]),
+                y: Number(dims[2]),
+                blur: Number(dims[3]),
+                alpha: a ? Number(a[1]) : 0.35,
+              }
+            : { x: 1.7, y: 1.7, blur: 8, alpha: 0.35 };
+          glowColor = cs.getPropertyValue("--input-focus-glow").trim() || glowColor;
+          const style = getComputedStyle(h1);
+          const cssFont = parseFloat(style.fontSize) || 15;
+          const cssWeight = style.fontWeight || "700";
+          const sampleFont = cssFont * 2; // 2 倍采样：渲染减半呈现，密度翻倍
+          const font = `${cssWeight} ${sampleFont}px "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif`;
+          const off = document.createElement("canvas");
+          const octx = off.getContext("2d", { willReadFrequently: true });
+          octx.font = font;
+          const tw = octx.measureText(TEXT).width;
+          off.width = Math.ceil(tw + 8);
+          off.height = Math.ceil(sampleFont * 1.5);
+          octx.font = font; // 重设尺寸会重置上下文，需再赋一次
+          octx.textBaseline = "middle";
+          octx.fillStyle = "#fff";
+          octx.fillText(TEXT, 4, off.height / 2);
+          const data = octx.getImageData(0, 0, off.width, off.height).data;
+          const scale = rect.width / tw; // 粒子字形精确铺满标题宽
+          const midY = MARGIN_TOP + rect.height / 2;
+          const dots = new Set();
+          for (let y = 0; y < off.height; y += GAP)
+            for (let x = 0; x < off.width; x += GAP)
+              if (data[(y * off.width + x) * 4 + 3] > 128) dots.add(`${x},${y}`);
+          particles = [];
+          for (let y = 0; y < off.height; y += GAP) {
+            for (let x = 0; x < off.width; x += GAP) {
+              if (!dots.has(`${x},${y}`)) continue;
+              // 到字形边缘距离（CSS px）：辉光负 spread 只采深点
+              let ed = 5 * GAP * scale;
+              outer: for (let ring = 1; ring <= 5; ring++) {
+                for (let ny = y - ring * GAP; ny <= y + ring * GAP; ny += GAP) {
+                  for (let nx = x - ring * GAP; nx <= x + ring * GAP; nx += GAP) {
+                    const onRing =
+                      Math.abs(nx - x) === ring * GAP || Math.abs(ny - y) === ring * GAP;
+                    if (onRing && !dots.has(`${nx},${ny}`)) {
+                      ed = ring * GAP * scale;
+                      break outer;
+                    }
+                  }
+                }
+              }
+              const hx = MARGIN_X + (x - 4) * scale;
+              const hy = midY + (y - off.height / 2) * scale;
+              // 开场：随机撒在标题周边，靠弹簧汇聚成字
+              particles.push({
+                hx,
+                hy,
+                x: hx + (Math.random() - 0.5) * 80,
+                y: hy + (Math.random() - 0.5) * 40,
+                vx: 0,
+                vy: 0,
+                ed,
+              });
+            }
+          }
+        }
+
+        function frame() {
+          frames++;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, canvas.width, canvas.height); // 真清屏：玻璃上不留拖尾
+          let maxHome = 0;
+          for (const p of particles) {
+            const dx = p.x - mouse.x;
+            const dy = p.y - mouse.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < REPEL_RADIUS && dist > 0.01) {
+              const f = ((REPEL_RADIUS - dist) / REPEL_RADIUS) * REPEL_FORCE;
+              p.vx += (dx / dist) * f;
+              p.vy += (dy / dist) * f;
+            }
+            p.vx = (p.vx + (p.hx - p.x) * SPRING) * FRICTION;
+            p.vy = (p.vy + (p.hy - p.y) * SPRING) * FRICTION;
+            p.x += p.vx;
+            p.y += p.vy;
+            const ddx = p.x - p.hx;
+            const ddy = p.y - p.hy;
+            const homeDist = Math.hypot(ddx, ddy);
+            if (frames > 120 && homeDist > MAX_OFFSET) {
+              p.x = p.hx + (ddx / homeDist) * MAX_OFFSET;
+              p.y = p.hy + (ddy / homeDist) * MAX_OFFSET;
+            }
+            if (homeDist > maxHome) maxHome = homeDist;
+          }
+          paint();
+          const far = mouse.x < -999;
+          if (far && (maxHome < SETTLE_DIST || frames > FRAME_CAP)) {
+            for (const p of particles) {
+              p.x = p.hx;
+              p.y = p.hy;
+              p.vx = 0;
+              p.vy = 0;
+            }
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            paint();
+            raf = 0;
+            return;
+          }
+          raf = requestAnimationFrame(frame);
+        }
+
+        // 影层统一管线：同坐标暗点落进离屏 → 整层一次模糊 → 叠到主画布
+        function paintLayer(color, ox, oy, thick, blur, alpha, spread) {
+          sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          sctx.clearRect(0, 0, canvas.width, canvas.height);
+          sctx.fillStyle = color;
+          for (const p of particles) {
+            if (p.ed < spread) continue;
+            const r = 0.5 + Math.min(1, Math.hypot(p.vx, p.vy) / 3) * 0.4 + thick;
+            sctx.beginPath();
+            sctx.arc(p.x + ox, p.y + oy, r, 0, 6.2832);
+            sctx.fill();
+          }
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.filter = `blur(${blur * dpr}px)`;
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(sCan, 0, 0);
+          ctx.restore();
+        }
+
+        // 影层 + 粒子本体一次画齐：辉光两层 → 玻璃落影 → 粒子
+        function paint() {
+          for (const g of GLOWS) paintLayer(glowColor, g.x, g.y, 0, g.blur, 1, g.spread);
+          paintLayer("#000", shadow.x, shadow.y, SHADOW_THICK, shadow.blur, shadow.alpha, 0);
+          ctx.fillStyle = accent();
+          for (const p of particles) {
+            const disp = Math.min(1, Math.hypot(p.vx, p.vy) / 3);
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 0.5 + disp * 0.4, 0, 6.2832); // 粒子基础半径 0.5
+            ctx.fill();
+          }
+        }
+
+        function wake() {
+          if (!raf) raf = requestAnimationFrame(frame);
+        }
+
+        // 交互监听在 window：光标落在窗口矩形内即唤醒并施加排斥，越界视作远离
+        const track = (clientX, clientY) => {
+          if (!rect || !zone) return;
+          const cx = clientX - rect.left + MARGIN_X;
+          const cy = clientY - rect.top + MARGIN_TOP;
+          const near =
+            clientX >= zone.left &&
+            clientX <= zone.right &&
+            clientY >= zone.top &&
+            clientY <= zone.bottom;
+          if (!near) {
+            mouse.x = -9999;
+            mouse.y = -9999;
+            frames = 0; // 出区弹回按新周期计帧
+            wake();
+            return;
+          }
+          mouse.x = cx;
+          mouse.y = cy;
+          wake();
+        };
+        window.addEventListener("mousemove", (e) => track(e.clientX, e.clientY), { passive: true });
+        window.addEventListener("resize", () => {
+          build();
+          wake();
+        });
+
+        build();
+        wake(); // 开场汇聚动画
+      }
+      initTitleParticles();
+    </script>
+  </body>
 </html>
