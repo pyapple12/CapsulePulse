@@ -20,6 +20,8 @@
   --work: #ff6b4a; /* 工作段（时钟弧）橙红 */
   --rest: #34d399; /* 休息段（时钟弧）绿 */
 
+  /* —— 时间图谱节点彗星：发射参数在 index.html 的 COMET 常量（speed / spacing）—— */
+
   /* —— 定稿配方令牌（试验场读数直换）—— */
   --veil-a: 0.15; /* 纱浓度 15% */
   --grain-o: 0.1; /* 颗粒 10 */
@@ -280,9 +282,10 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start; /* 改为显式锚定：位置只由 padding-top 决定（不再用 transform 位移） */
   gap: 16px; /* 各行统一间距（用户定案） */
   min-height: 0;
+  padding-top: 21px; /* 五行顶距 = 原居中上余量 11 + 下移 10（用户定案） */
 }
 
 /* ============================================================
@@ -531,7 +534,7 @@ button {
   justify-content: center;
   gap: 3px;
   height: 52px;
-  margin-top: 4px; /* 第一行 ↔ 第二行 单独 20px（stage gap 16 + 4，用户定案） */
+  margin-top: 10px; /* 第一行 ↔ 第二行 = stage gap 16 + 10 = 26px（原 20，第二行再下移 6，用户定案） */
 }
 .flip-sep {
   font-size: 22px;
@@ -653,6 +656,7 @@ button {
   justify-content: center;
   gap: 10px;
   width: 100%;
+  margin-top: -6px; /* 抵消第二行多出的 6px：只有第二行下移，第三行及以下位置不变 */
 }
 /* START 状态字：待机 = 主题色描边；工作 = 原组件动画色填充 + 辉光；无交互 */
 .start-label {
@@ -1134,19 +1138,117 @@ button {
 .arrow:disabled {
   opacity: 0.35;
 }
-/* 时间图谱 */
-.chart {
-  display: flex;
-  height: 22px;
-  border-radius: 8px;
+/* 时间图谱：上班→自动下班 D 的分段进度条 + 里程碑节点（R 进休 / W 复工 / D 自动下班） */
+.graph {
+  position: relative;
+  height: 24px;
+}
+.graph-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35); /* 空槽（当前时刻之后的未推进段） */
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.3);
 }
-.chart .seg-work {
-  background: linear-gradient(180deg, #8fc9f2, #2b7fc4);
+.graph-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  /* 不用 width 过渡：width 动画会走合成层光栅化，与 track 裁剪边界错位漏出 1px 暗线；
+     直接按 100ms 步进写入（单步 < 0.1px）视觉同样平滑 */
 }
-.chart .seg-rest {
-  background: rgba(255, 255, 255, 0.55);
+.graph-seg.work {
+  background: linear-gradient(180deg, #ff9d82, var(--work));
+}
+.graph-seg.rest {
+  background: linear-gradient(180deg, #6ee7b7, var(--rest));
+}
+/* 【节点彗星·逐条发射·当前生效 2026-09-26，用户定案发射模型】白纹一条条独立发射：
+   从进入节点中心出生，匀速走到 D 中心消失；发射频率固定（每走 --comet-spacing px 发一条，
+   参数在 index.html 的 COMET 常量），同屏条数随「进入节点 → D」的距离自适应。
+   .graph-comet = 发射走廊（容器，左缘=进入节点中心、右缘=D 中心，JS 定位）；
+   .comet-stripe = 每条独立的白纹，机器表达 = 每条一次 linear 位移动画、播完自移除 */
+.graph-comet {
+  position: absolute;
+  top: 6px;
+  height: 12px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.comet-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    transparent 0 9px,
+    rgba(255, 255, 255, 0.22) 9px 14px,
+    transparent 14px
+  );
+  animation: cometWalk linear forwards;
+}
+/* 单条白纹的一生：从走廊左外 -24px 出生，匀速走到右缘外消失（--walk = 走廊宽，JS 写入） */
+@keyframes cometWalk {
+  from {
+    transform: translateX(-24px);
+  }
+  to {
+    transform: translateX(var(--walk, 116px));
+  }
+}
+.graph-cp {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.graph-node {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  overflow: visible;
+}
+.graph-node.end {
+  transform: translate(-100%, -50%); /* D 固定在最右端，避免半个圆溢出卡片 */
+}
+.graph-node circle {
+  fill: rgba(120, 132, 146, 0.5);
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1;
+  transition: fill 0.3s ease;
+}
+.graph-node text {
+  font-family: var(--font-stack);
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central; /* 字体盒居中（大写字母墨迹因此恒低 0.5px，由 index.html 的 dy=-0.5 校正） */
+  fill: rgba(255, 255, 255, 0.72); /* 未到达：暗字母 */
+  transition: fill 0.3s ease;
+}
+.graph-node.lit text {
+  fill: #fff;
+}
+.graph-node.lit.work circle {
+  fill: var(--work);
+}
+.graph-node.lit.rest circle {
+  fill: var(--rest);
+}
+.graph-node.lit.end circle {
+  fill: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .comet-stripe {
+    display: none;
+  }
 }
 .chart-axis {
   display: flex;
@@ -1181,7 +1283,10 @@ button {
   color: var(--accent);
 }
 .triple .t-work b {
-  color: var(--mint);
+  color: var(--work);
+}
+.triple .t-rest b {
+  color: var(--rest);
 }
 /* 周视图 */
 .week {
@@ -1234,16 +1339,24 @@ button {
   color: var(--ink-2);
   width: 86px;
 }
-.dl .blk {
+.dl .track {
   flex: 1;
   height: 8px;
   border-radius: 4px;
+  background: rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+}
+.dl .blk {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  min-width: 3px;
 }
 .dl .blk.work {
-  background: linear-gradient(90deg, #8fc9f2, #2b7fc4);
+  background: linear-gradient(90deg, #ff9d82, var(--work));
 }
 .dl .blk.rest {
-  background: rgba(255, 255, 255, 0.6);
+  background: linear-gradient(90deg, #6ee7b7, var(--rest));
 }
 .dl .dur {
   font-variant-numeric: tabular-nums;
@@ -1433,6 +1546,38 @@ button {
   flex-basis: 100%;
   opacity: 0.65;
   font-size: 11px;
+}
+
+/* ============================================================
+   玻璃滚动浮钮（借鉴 CapsuleTODO design/assets/css/glass-bar.css）：
+   玻璃板内滚动统一隐藏原生滑杆，换 4×16 透明玻璃浮钮——轨道不拦截内容点击、
+   浮钮可拖拽；锚在板层（不进滚动体，否则随内容滚走），仅内容真溢出时出现
+   ============================================================ */
+.glass-scroll {
+  scrollbar-width: none; /* 隐藏原生滑杆（Firefox） */
+}
+.glass-scroll::-webkit-scrollbar {
+  display: none; /* 隐藏原生滑杆（Chromium） */
+}
+.glass-bar {
+  position: absolute;
+  width: 4px;
+  z-index: 2;
+  pointer-events: none; /* 轨道不拦截内容点击 */
+}
+.glass-thumb {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 16px; /* 浮钮高：轨道行程 = 可视高 − 此值（JS 同源） */
+  border-radius: 2px;
+  /* 取主题蓝薄纱：Pulse 的玻璃板是浅色（72% 白底），照搬参考项目的白纱会白上叠白而隐形 */
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.glass-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 62%, transparent);
 }
 
 /* 动效退避（PL009 纪律）：系统"减弱动态效果"时齿轮旋转 / tooltip / 玻璃板缩放 /

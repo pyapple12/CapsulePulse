@@ -10,8 +10,9 @@
       .banner {
         margin: 8px 2px 6px;
       }
+      /* 打卡 pill 纵向落位：原 2px，改 -1px（pill + 三段控制一起上移 3px，用户定案） */
       .stage .pill-cast {
-        margin-top: 2px;
+        margin-top: -1px;
       }
       .statline {
         font-size: 11px;
@@ -339,7 +340,6 @@
       <!-- 统计板（借鉴 CapsuleTODO archive）：玻璃板里是统计信息，从统计钮飞出 -->
       <div id="stats-board">
         <div class="board-glass sheet">
-          <h4 class="board-title">统计</h4>
           <section class="stats">
             <div class="gcard daynav">
               <button class="arrow">
@@ -375,16 +375,11 @@
 
             <div class="gcard">
               <h3>时间图谱</h3>
-              <div class="chart">
-                <div class="seg-work" style="width: 13.7%"></div>
-                <div class="seg-rest" style="width: 5.4%"></div>
-                <div class="seg-work" style="width: 13.7%"></div>
-                <div class="seg-rest" style="width: 5.4%"></div>
-                <div class="seg-work" style="width: 13.4%"></div>
-                <div class="seg-rest" style="width: 16.4%"></div>
-                <div class="seg-work" style="width: 31.9%"></div>
+              <div class="graph">
+                <div class="graph-track" id="graphTrack"></div>
+                <div class="graph-cp" id="graphCp"></div>
               </div>
-              <div class="chart-axis"><span>09:12</span><span>14:47 · 至今</span></div>
+              <div class="chart-axis"><span id="axisStart"></span><span id="axisEnd"></span></div>
             </div>
 
             <div class="gcard">
@@ -392,7 +387,7 @@
               <div class="triple">
                 <div class="t t-duty"><b>5h35m</b><span>在岗</span></div>
                 <div class="t t-work"><b>4h04m</b><span>工作</span></div>
-                <div class="t"><b>1h31m</b><span>休息</span></div>
+                <div class="t t-rest"><b>1h31m</b><span>休息</span></div>
               </div>
             </div>
 
@@ -435,38 +430,40 @@
               <div class="detail">
                 <div class="dl">
                   <span class="time">09:12–09:58</span>
-                  <div class="blk work"></div>
+                  <span class="track"><span class="blk work" data-secs="2760"></span></span>
                   <span class="dur">46分</span>
                 </div>
                 <div class="dl">
                   <span class="time">09:58–10:16</span>
-                  <div class="blk rest"></div>
+                  <span class="track"><span class="blk rest" data-secs="1080"></span></span>
                   <span class="dur">18分</span>
                 </div>
                 <div class="dl">
                   <span class="time">10:16–11:02</span>
-                  <div class="blk work"></div>
+                  <span class="track"><span class="blk work" data-secs="2760"></span></span>
                   <span class="dur">46分</span>
                 </div>
                 <div class="dl">
                   <span class="time">11:02–11:20</span>
-                  <div class="blk rest"></div>
+                  <span class="track"><span class="blk rest" data-secs="1080"></span></span>
                   <span class="dur">18分</span>
                 </div>
                 <div class="dl">
                   <span class="time">11:20–12:05</span>
-                  <div class="blk work"></div>
+                  <span class="track"><span class="blk work" data-secs="2700"></span></span>
                   <span class="dur">45分</span>
                 </div>
                 <div class="dl">
                   <span class="time">12:05–13:00</span>
-                  <div class="blk rest"></div>
+                  <span class="track"><span class="blk rest" data-secs="3300"></span></span>
                   <span class="dur">55分</span>
                 </div>
                 <div class="dl">
                   <span class="time">13:00–</span>
-                  <div class="blk work"></div>
-                  <span class="dur">1h47分</span><span class="ongoing">至今</span>
+                  <span class="track"
+                    ><span class="blk work" data-secs="6420" data-ongoing></span
+                  ></span>
+                  <span class="dur">107分</span><span class="ongoing">至今</span>
                 </div>
               </div>
             </div>
@@ -563,7 +560,8 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        窗口 300×400 = 参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按 README 映射回 ui/。
+        原型版本 ui2.0 V0.005。窗口 300×400 = 参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按
+        README 映射回 ui/。
       </div>
     </div>
 
@@ -670,6 +668,7 @@
           r.disabled = !S.duty;
           r.checked = r.value === runMode;
         }
+        renderGraph();
       }
       setInterval(render, 100);
 
@@ -782,6 +781,176 @@
           svg += `<path class="dial-arc ${st}" d="${arcPath(R, sa, sa + delta)}" />`;
         }
         $("dialArcs").innerHTML = svg;
+      }
+
+      // ===== 时间图谱：上班→自动下班 D 的分段进度条 + 里程碑节点（R 进休 / W 复工 / D）=====
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const graphPad = (n) => String(n).padStart(2, "0");
+      const graphHhmm = (ts) => {
+        const d = new Date(ts);
+        return `${graphPad(d.getHours())}:${graphPad(d.getMinutes())}`;
+      };
+      /** 渲染时间图谱：段按状态染色（工作橙红 / 休息绿）推进到当前时刻，之后留空槽；
+       *  节点由状态转换生成（进休 R 绿 / 复工 W 橙红）+ 固定 D（自动下班，最右端），到达即点亮 */
+      function renderGraph() {
+        const track = $("graphTrack");
+        const cp = $("graphCp");
+        if (!track || !cp) return;
+        const clockIn = S.clockInTs;
+        const spanMs = S.autoOutH * 3600000;
+        const nowTs = Date.now();
+        const endTs = clockIn + spanMs;
+        const pct = (ts) => ((ts - clockIn) / spanMs) * 100;
+        // 段与表盘同源：mock 段 + mock 之后的当前段（同状态则并入，保持「最新节点之后一条」完整）
+        const segs = EV_MOCK.map(([o0, o1, st]) => [
+          clockIn + o0 * 60000,
+          clockIn + o1 * 60000,
+          st,
+        ]);
+        const cur = S.running ? "work" : "rest";
+        const tail = segs[segs.length - 1];
+        if (nowTs > tail[1]) {
+          if (tail[2] === cur) {
+            tail[1] = nowTs;
+          } else {
+            segs.push([tail[1], nowTs, cur]);
+          }
+        }
+        const bars = [];
+        const nodes = [];
+        segs.forEach(([t0, t1, st], i) => {
+          const s1 = Math.min(t1, nowTs, endTs);
+          if (s1 <= t0) return;
+          bars.push({
+            st,
+            left: pct(t0),
+            w: pct(s1) - pct(t0),
+            active: nowTs < endTs && s1 === nowTs,
+          });
+          if (i > 0 && st !== segs[i - 1][2]) {
+            nodes.push({ ts: t0, ch: st === "rest" ? "R" : "W", kind: st });
+          }
+        });
+        nodes.push({ ts: endTs, ch: "D", kind: "end" });
+        // 复用元素：track 自身保留（不打断流光），仅改子元素属性
+        while (track.children.length > bars.length) track.lastChild.remove();
+        while (track.children.length < bars.length)
+          track.appendChild(document.createElement("div"));
+        bars.forEach((b, i) => {
+          const el = track.children[i];
+          el.className = `graph-seg ${b.st}${b.active ? " active" : ""}`;
+          el.style.left = `${b.left.toFixed(2)}%`;
+          el.style.width = `${b.w.toFixed(2)}%`;
+        });
+        while (cp.children.length > nodes.length) cp.lastChild.remove();
+        while (cp.children.length < nodes.length) {
+          // SVG 节点：circle + text；central 对齐的是字体盒而非墨迹，大写字母墨迹恒低 0.5px，dy=-0.5 校正回光学居中
+          const el = document.createElementNS(SVG_NS, "svg");
+          el.setAttribute("viewBox", "0 0 12 12");
+          el.innerHTML =
+            '<circle cx="6" cy="6" r="5.4" /><text x="6" y="6" dy="-0.5" text-anchor="middle" dominant-baseline="central" />';
+          cp.appendChild(el);
+        }
+        nodes.forEach((n, i) => {
+          const el = cp.children[i];
+          el.setAttribute("class", `graph-node ${n.kind}${n.ts <= nowTs ? " lit" : ""}`);
+          el.style.left = `${pct(n.ts).toFixed(2)}%`;
+          el.querySelector("text").textContent = n.ch;
+        });
+        // 节点彗星覆盖层：左缘 = 进入节点中心，右缘 = D 节点中心（白纹从节点中心出生、到 D 消失），
+        // 首次创建时回拨纪元；发射由渲染帧哨兵与网格唤醒驱动（动画钟追赶式，见 launchComet）
+        const graph = track.parentElement;
+        let comet = graph.querySelector(".graph-comet");
+        if (!comet) {
+          comet = document.createElement("div");
+          comet.className = "graph-comet";
+          graph.insertBefore(comet, track.nextSibling); // 段之上、节点层之下
+          // 纪元回拨两个寿命：流无始无终，首帧即满员稳态（F5 后立刻开板也看不到「从头发射」）
+          const walk0 = comet.clientWidth || 116; // 创建瞬间宽度未定，按标称 116px 回拨
+          cometEpoch =
+            document.timeline.currentTime - ((2 * (walk0 + 24)) / COMET.speed) * 1000;
+          // 渲染帧哨兵（rAF 链）：帧距 > 250ms 判定挂起/遮挡——稀疏帧里发射的白纹 startTime
+          // 会被量化到帧点、相位失真，故挂起期间不发射，恢复首帧强制重建；
+          // cometLastFrame 初始 -Infinity，首个渲染帧即重建出满员稳态
+          requestAnimationFrame(function frame(t) {
+            if (t - cometLastFrame > 250) cometNeedsRebuild = true;
+            cometLastFrame = t;
+            if (cometNeedsRebuild) {
+              cometNeedsRebuild = false;
+              launchComet(true);
+            }
+            requestAnimationFrame(frame);
+          });
+          // 唤醒点对齐发射网格（自校正 setTimeout，不用会累积漂移的固定 setInterval）；
+          // 延时按动画钟折算——挂起期间唤醒随之冻结，与网格同钟，不会产生错位追赶
+          (function wake() {
+            const period = (COMET.spacing / COMET.speed) * 1000;
+            const animNow = document.timeline.currentTime;
+            const next =
+              cometEpoch +
+              (Math.floor((animNow - cometEpoch) / period) + 1) * period;
+            setTimeout(() => {
+              launchComet();
+              wake();
+            }, Math.max(0, next - animNow));
+          })();
+        }
+        const launchPct = pct(segs[segs.length - 1][0]); // 进入节点 = 当前段起点
+        comet.style.left = `${launchPct.toFixed(2)}%`; // 左缘 = 进入节点中心：白纹从徽章中心出生
+        comet.style.width = `${(100 - launchPct).toFixed(2)}%`; // 右缘 = D 节点中心：白纹在此消失
+        $("axisStart").textContent = `上班 ${graphHhmm(clockIn)}`;
+        $("axisEnd").textContent = `下班 ${graphHhmm(endTs)} · D`;
+      }
+
+      // ===== 节点彗星发射器（动画钟追赶式）：发射网格 = cometEpoch 起每 period 一格，
+      // 记账钟 = document.timeline（CSS 动画的驱动钟）——渲染挂起（遮挡/最小化/托盘）时
+      // 动画钟冻结、网格随之冻结，不存在「错过」的槽位，恢复后流从冻结处无缝续播，
+      // 账面位置与屏幕永远一致（墙钟 performance.now 会与动画钟分叉，禁用于此） =====
+      const COMET = { speed: 18, spacing: 14 };
+      let cometEpoch = 0; // 发射纪元（document.timeline 毫秒），覆盖层首建时回拨两个寿命定格
+      let cometLastFrame = -Infinity; // 最近一渲染帧的动画钟时刻（-Infinity = 尚无帧证据）
+      let cometNeedsRebuild = false; // 挂起/遮挡恢复后待重建标记（由 rAF 哨兵置位）
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      /** 生成一条白纹：born 为发射网格时刻，age>0 时以负 animation-delay 从对应相位接入
+          （与 CSS 动画同一时间线，起始位置天然自洽），走到 D 后自移除 */
+      function spawnStripe(comet, born, age, walk) {
+        const s = document.createElement("div");
+        s.className = "comet-stripe";
+        s.dataset.born = born;
+        s.style.setProperty("--walk", `${Math.round(walk)}px`);
+        s.style.animationDuration = `${Math.round(((walk + 24) / COMET.speed) * 1000)}ms`;
+        if (age > 0) s.style.animationDelay = `${-Math.round(age)}ms`;
+        comet.appendChild(s);
+        s.addEventListener("animationend", () => s.remove());
+      }
+      /** 追赶式发射器：帧新鲜时按寿命扫尾并对照网格补缺；帧陈旧（挂起/遮挡中）不发射——
+          稀疏帧会把新纹的 startTime 量化到帧点造成相位失真。
+          force = 重建模式：清掉全部白纹重播（挂起恢复后的首帧由 rAF 哨兵调用） */
+      function launchComet(force) {
+        if (reducedMotion.matches) return;
+        const comet = document.querySelector(".graph-comet");
+        if (!comet) return;
+        const walk = comet.clientWidth;
+        if (walk <= 0) return;
+        const now = document.timeline.currentTime; // 与 CSS 动画同钟，账实永不分叉
+        const period = (COMET.spacing / COMET.speed) * 1000;
+        const life = ((walk + 24) / COMET.speed) * 1000; // 单条生命周期 ms（含 24px 出生潜行段）
+        if (force) {
+          for (const s of [...comet.children]) s.remove();
+        } else {
+          if (now - cometLastFrame > 250) return; // 帧陈旧：此刻发射必失真，等帧哨兵重建
+          for (const s of [...comet.children]) {
+            if (now - parseFloat(s.dataset.born) >= life) s.remove();
+          }
+        }
+        const mNow = Math.floor((now - cometEpoch) / period); // 最近一个网格槽位
+        for (let m = mNow; m >= 0; m--) {
+          const born = cometEpoch + m * period;
+          const age = now - born;
+          if (age >= life) break; // 更早的槽位全部超出寿命
+          if (comet.querySelector(`[data-born="${born}"]`)) continue;
+          spawnStripe(comet, born, age, walk);
+        }
       }
 
       // ===== 电量（按自动下班时长由满到空；下班后冻结）=====
@@ -944,6 +1113,7 @@
       }
       renderDate();
       renderDial();
+      renderGraph();
       setInterval(() => {
         const now = Date.now();
         if (now - dateAt > 60000) {
@@ -1083,7 +1253,6 @@
       const statsBtn = $("stats-btn");
       const BOARD_TOP = 54;
       const BOARD_LEFT = 12;
-      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
       /** 把按钮中心换算成板内坐标写入 transform-origin（开板即从该按钮处飞出） */
       function flyBoard(board, btn) {
@@ -1127,6 +1296,46 @@
       function toggleStats() {
         setStats(!statsBoard.classList.contains("open"));
       }
+
+      // ===== 玻璃滚动浮钮（借鉴 CapsuleTODO design/assets/js/glass-bar.js）：统计板内容
+      // 溢出时在右侧缝隙出现 4×16 透明玻璃浮钮，随滚动比例移动、可拖拽。轨道几何取"锚层"
+      // 矩形（滚动体铺满锚层，且锚层不受开板 scale 揭示动画影响 → 中途取值也是终态）=====
+      /**
+       * 给滚动体挂一枚玻璃浮钮（原生滑杆同时隐藏）。
+       * # 参数
+       * - `scroller` 滚动容器；`anchor` 浮钮锚层（不随内容滚、几何稳定）
+       * - `right` 浮钮距锚层右缘的像素（落在玻璃内距带的缝隙里）
+       */
+      function makeGlassBar(scroller, anchor, right = 6) {
+        const THUMB_H = 16; // 与 .glass-thumb 高度同源
+        scroller.classList.add("glass-scroll");
+        const bar = document.createElement("div");
+        bar.className = "glass-bar";
+        bar.hidden = true;
+        const thumb = document.createElement("i");
+        thumb.className = "glass-thumb";
+        bar.appendChild(thumb);
+        anchor.appendChild(bar);
+        const sync = () => {
+          const ar = anchor.getBoundingClientRect();
+          const cs = getComputedStyle(scroller);
+          const padT = parseFloat(cs.paddingTop) || 0;
+          const padB = parseFloat(cs.paddingBottom) || 0;
+          bar.style.top = `${padT}px`;
+          bar.style.height = `${ar.height - padT - padB}px`;
+          bar.style.right = `${right}px`;
+          const range = scroller.scrollHeight - scroller.clientHeight;
+          const scrollable = range > 1; // 不溢出就不出现浮钮
+          bar.hidden = !scrollable;
+          if (!scrollable) return;
+          const trackH = ar.height - padT - padB - THUMB_H;
+          thumb.style.top = `${Math.round((scroller.scrollTop / range) * trackH)}px`;
+        };
+        scroller.addEventListener("scroll", sync, { passive: true });
+        new ResizeObserver(sync).observe(anchor); // 窗口尺寸变化时重算轨道
+        sync();
+      }
+      makeGlassBar(statsBoard.querySelector(".board-glass"), statsBoard);
 
       // 点板外任意位置收板（板内点击与按钮自身的开合不在此列）
       document.addEventListener("click", (e) => {
@@ -1404,6 +1613,20 @@
         build();
         wake(); // 开场汇聚动画
       }
+      /** 今日明细条：以当日最长「已落定段」为基准按比例写入宽度；进行中段不参与基准
+       *  （其自身按同一基准显示，超出满宽则裁为 100%），落定后才纳入基准计算 */
+      function renderDetailBars() {
+        const bars = [...document.querySelectorAll(".detail .dl .blk")];
+        const settled = bars.filter((b) => !("ongoing" in b.dataset));
+        const max = settled.reduce((m, b) => Math.max(m, +b.dataset.secs || 0), 0);
+        if (!max) return;
+        for (const b of bars) {
+          const ratio = ((+b.dataset.secs || 0) / max) * 100;
+          b.style.width = `${Math.min(ratio, 100).toFixed(1)}%`;
+        }
+      }
+
+      renderDetailBars();
       initTitleParticles();
     </script>
   </body>
