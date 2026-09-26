@@ -19,6 +19,12 @@
   /* —— 计时区令牌（重构）—— */
   --work: #ff6b4a; /* 工作段（时钟弧）橙红 */
   --rest: #34d399; /* 休息段（时钟弧）绿 */
+  /* —— 统计卡布局间距令牌（单一来源，改一处全局生效）—— */
+  --card-pad-y: 9px; /* 卡上下内边距（药丸条上间隙 = 左右 12px 的补偿值：9 + 行内 3 = 12） */
+  --card-pad-x: 12px; /* 卡左右内边距 */
+  --gap-caption: 1px; /* 进度条 → 时间轴：标注关系，紧 */
+  --gap-title-graph: 16px; /* 日期行（在岗中）→ 进度条：内容到内容的距离 = 板内边距（用户定案） */
+  --gap-block: 8px; /* 块与块：时间轴 → 三值、统计卡与卡，共用一值 */
 
   /* —— 时间图谱节点彗星：发射参数在 index.html 的 COMET 常量（speed / spacing）—— */
 
@@ -1091,12 +1097,12 @@ button {
 .stats {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--gap-block);
 }
 .gcard {
   border-radius: 14px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.2);
+  padding: var(--card-pad-y) var(--card-pad-x);
+  background: rgba(255, 255, 255, 0.1); /* 卡玻璃 0.1 白透（用户定案，叠在 0.25 底玻璃上） */
   backdrop-filter: blur(8px) saturate(1.4);
   -webkit-backdrop-filter: blur(8px) saturate(1.4);
   box-shadow:
@@ -1117,14 +1123,15 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 0 var(--card-pad-x); /* 与虚拟框同缩进：日期行与进度条左缘对齐 */
 }
 .daynav .day {
   font-size: 13px;
   font-weight: 700;
 }
 .arrow {
-  width: 26px;
-  height: 26px;
+  width: 13px; /* 直径 = 日期字号（用户定案：在岗中 13px，钮即 13px） */
+  height: 13px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -1141,13 +1148,13 @@ button {
 /* 时间图谱：上班→自动下班 D 的分段进度条 + 里程碑节点（R 进休 / W 复工 / D 自动下班） */
 .graph {
   position: relative;
-  height: 24px;
+  height: 12px; /* 行高 = 药丸高：与相邻玻璃卡的间距即视觉间距（无行内死区） */
 }
 .graph-track {
   position: absolute;
   left: 0;
   right: 0;
-  top: 6px;
+  top: 0;
   height: 12px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.35); /* 空槽（当前时刻之后的未推进段） */
@@ -1167,6 +1174,9 @@ button {
 .graph-seg.rest {
   background: linear-gradient(180deg, #6ee7b7, var(--rest));
 }
+.graph-seg.duty {
+  background: linear-gradient(180deg, #7cc0ec, var(--accent)); /* 当前进度 → D 的在岗蓝占位 */
+}
 /* 【节点彗星·逐条发射·当前生效 2026-09-26，用户定案发射模型】白纹一条条独立发射：
    从进入节点中心出生，匀速走到 D 中心消失；发射频率固定（每走 --comet-spacing px 发一条，
    参数在 index.html 的 COMET 常量），同屏条数随「进入节点 → D」的距离自适应。
@@ -1174,7 +1184,7 @@ button {
    .comet-stripe = 每条独立的白纹，机器表达 = 每条一次 linear 位移动画、播完自移除 */
 .graph-comet {
   position: absolute;
-  top: 6px;
+  top: 0; /* 与药丸条同带（行高即药丸高），白纹贴着药丸飞行 */
   height: 12px;
   overflow: hidden;
   pointer-events: none;
@@ -1253,40 +1263,141 @@ button {
 .chart-axis {
   display: flex;
   justify-content: space-between;
-  font-size: 10.5px;
+  font-size: 8px; /* 原 10.5px 的 75%，取整（用户定案） */
   color: var(--ink-2);
-  margin-top: 5px;
+  margin-top: var(--gap-caption);
 }
 /* 三值 chips */
-.triple {
+/* 图谱区虚拟框：进度条/时间轴直接挂统计板上，仅用与玻璃卡同宽的缩进维持内容宽度 */
+.graph-block {
+  padding: 0 var(--card-pad-x);
+  /* 日期行 → 进度条的专属调节入口：flex gap 已供 --gap-block，margin 补差值，
+     令牌值 = 视觉总距离（设 0 即回到纯卡间距） */
+  margin-top: calc(var(--gap-title-graph) - var(--gap-block));
+}
+/* 三值：三块独立正方形玻璃卡（继承 .gcard 真玻璃配方） */
+.triple-row {
   display: flex;
-  gap: 8px;
+  gap: var(--gap-block);
 }
-.triple .t {
+/* 三值卡 = Uiverse 卡片模式的玻璃化缩小版（用户定案）：
+   徽章图标 + 标题 + 较昨日升降 + 大数字 + 占比进度条（分母 = 工作 + 休息）；
+   阴影照搬 Uiverse，白底换成现有玻璃（0.1 白 + blur），长宽比照搬（320×176 ≈ 20/11）；
+   在岗卡无进度条；三卡三色（accent / work / rest） */
+.t-card {
   flex: 1;
-  border-radius: 12px;
-  padding: 7px 0 6px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.45);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.85);
+  min-width: 0; /* 压掉头部内容的最小宽度撑卡：严格回到 flex 均分的 76px */
+  aspect-ratio: 12 / 11; /* 长宽比照搬参考截图（≈1.09，近方形），非之前的 20/11 扁条 */
+  border-radius: 10px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -2px rgba(0, 0, 0, 0.05); /* 阴影照搬 Uiverse 卡 */
 }
-.triple .t b {
+.tc-head {
+  display: flex;
+  align-items: center;
+  gap: 2px; /* 收紧：保证头部行在 60px 内容宽内放得下，百分比右缘能贴齐内容右缘 */
+}
+/* 徽章 = 圆底 + 图标一枚自包含 SVG（方案 A，用户定案）：同一坐标系一次光栅化，
+   内部相对位置与缩放比无关，永不错位；光学偏移烘焙在 HTML 的 g transform 里 */
+.tc-icon {
+  flex: none;
+  width: 16px; /* = 圆直径 14 + 边缘呼吸 1px×2（viewBox 同步 16），偶数不破坏取整对称 */
+  height: 16px;
+  color: #fff; /* 图标描边色（currentColor） */
+}
+.tc-icon svg {
   display: block;
-  font-size: 13.5px;
+}
+.tc-title {
+  display: flex;
+  align-items: center;
+}
+.tc-title svg {
+  display: block;
+}
+.tc-title text {
+  font-family: var(--font-stack);
+  font-size: 9.5px;
+  font-weight: 600;
+  fill: var(--ink-2);
+}
+.tc-percent {
+  margin-left: auto; /* 百分比右缘 = 进度条右缘（同内容右缘，用户定案） */
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px; /* 与徽章同高（同为偶数），盒子中心线重合 */
   font-variant-numeric: tabular-nums;
 }
-.triple .t span {
-  font-size: 10.5px;
-  color: var(--ink-2);
+.tc-percent svg {
+  width: 6px;
+  height: 6px;
 }
-.triple .t-duty b {
+.t-card b {
+  display: block;
+  margin: auto 0; /* 数字是主角：垂直居中于标题行与进度条之间（参考图内部空间比） */
+  font-size: 18px; /* 用户定案 */
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  -webkit-text-stroke: 0.1px #000; /* 黑色外描边 0.1px（用户定案） */
+  text-align: left;
+}
+.tc-range {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #e5e7eb; /* 进度槽灰照搬 Uiverse */
+}
+.tc-range .fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+}
+.t-duty .tc-icon circle {
+  fill: var(--accent);
+}
+.t-duty .tc-percent {
   color: var(--accent);
 }
-.triple .t-work b {
+.t-duty b {
+  color: var(--accent);
+  text-shadow: 1px 1px 2px color-mix(in srgb, var(--accent) 55%, #000);
+}
+.t-work b {
+  color: var(--work);
+  text-shadow: 1px 1px 2px color-mix(in srgb, var(--work) 55%, #000);
+}
+.t-rest b {
+  color: var(--rest);
+  text-shadow: 1px 1px 2px color-mix(in srgb, var(--rest) 55%, #000);
+}
+.t-work .tc-icon circle {
+  fill: var(--work);
+}
+.t-work .tc-percent {
   color: var(--work);
 }
-.triple .t-rest b {
+.t-work .tc-range .fill {
+  background: var(--work);
+}
+.t-rest .tc-icon circle {
+  fill: var(--rest);
+}
+.t-rest .tc-percent {
   color: var(--rest);
+}
+.t-rest .tc-range .fill {
+  background: var(--rest);
 }
 /* 周视图 */
 .week {
@@ -1386,9 +1497,7 @@ button {
   width: calc(100% - 36px);
   border-radius: 18px;
   padding: 16px;
-  background: rgba(248, 252, 255, 0.72);
-  backdrop-filter: blur(18px) saturate(1.6);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  background: rgba(248, 252, 255, 0.25); /* 底玻璃 0.25 白透（用户定案）；雾化由内容自雾化承担 */
   box-shadow:
     inset 0 0 0 1.5px rgba(255, 255, 255, 0.9),
     inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
@@ -1488,6 +1597,16 @@ button {
   bottom: 12px;
   visibility: hidden;
   transition: visibility 0s linear 0.38s;
+}
+
+/* 统计板打开时直接雾化被盖的计时区内容：backdrop-filter 对合成层兄弟内容
+   （翻页卡 transform 动画、canvas 表盘）采样不可靠，改为内容自雾化 +
+   板上白纱组合出真毛玻璃；过渡与统计板飞出/收回同步；标题（topbar）豁免 */
+#win .content > :not(.topbar) {
+  transition: filter 0.35s ease;
+}
+#win.board-open .content > :not(.topbar) {
+  filter: blur(4px); /* 3 → 4（用户定案） */
 }
 #settings-board.open,
 #stats-board.open {

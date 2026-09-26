@@ -341,11 +341,11 @@
       <div id="stats-board">
         <div class="board-glass sheet">
           <section class="stats">
-            <div class="gcard daynav">
+            <div class="daynav">
               <button class="arrow">
                 <svg
-                  width="14"
-                  height="14"
+                  width="7"
+                  height="7"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -359,8 +359,8 @@
               <span class="day">9月16日 · 周二 · 在岗中</span>
               <button class="arrow" disabled>
                 <svg
-                  width="14"
-                  height="14"
+                  width="7"
+                  height="7"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -373,8 +373,7 @@
               </button>
             </div>
 
-            <div class="gcard">
-              <h3>时间图谱</h3>
+            <div class="graph-block">
               <div class="graph">
                 <div class="graph-track" id="graphTrack"></div>
                 <div class="graph-cp" id="graphCp"></div>
@@ -382,12 +381,135 @@
               <div class="chart-axis"><span id="axisStart"></span><span id="axisEnd"></span></div>
             </div>
 
-            <div class="gcard">
-              <h3>今日三值</h3>
-              <div class="triple">
-                <div class="t t-duty"><b>5h35m</b><span>在岗</span></div>
-                <div class="t t-work"><b>4h04m</b><span>工作</span></div>
-                <div class="t t-rest"><b>1h31m</b><span>休息</span></div>
+            <div class="triple-row">
+              <div class="gcard t-card t-duty">
+                <div class="tc-head">
+                  <span class="tc-icon">
+                    <svg viewBox="-8 -8 16 16" width="16" height="16">
+                      <circle r="7" />
+                      <g
+                        transform="translate(0 0) scale(0.3333) translate(-12 -12)"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </g>
+                    </svg>
+                  </span>
+                  <span class="tc-title"
+                    ><svg viewBox="0 0 20 14" width="20" height="14">
+                      <text x="10" y="7" dy="0.0" text-anchor="middle" dominant-baseline="central">
+                        在岗
+                      </text>
+                    </svg></span
+                  >
+                  <span class="tc-percent"
+                    ><svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m18 15-6-6-6 6" />
+                    </svg>
+                    1%</span
+                  >
+                </div>
+                <b>5h35m</b>
+              </div>
+              <div class="gcard t-card t-work">
+                <div class="tc-head">
+                  <span class="tc-icon">
+                    <svg viewBox="-8 -8 16 16" width="16" height="16">
+                      <circle r="7" />
+                      <g
+                        transform="translate(0 0) scale(0.3333) translate(-12 -12)"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                        <rect width="20" height="14" x="2" y="6" rx="2" />
+                      </g>
+                    </svg>
+                  </span>
+                  <span class="tc-title"
+                    ><svg viewBox="0 0 20 14" width="20" height="14">
+                      <text x="10" y="7" dy="0" text-anchor="middle" dominant-baseline="central">
+                        工作
+                      </text>
+                    </svg></span
+                  >
+                  <span class="tc-percent"
+                    ><svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m18 15-6-6-6 6" />
+                    </svg>
+                    5%</span
+                  >
+                </div>
+                <b>4h04m</b>
+                <div class="tc-range"><i class="fill" style="width: 73%"></i></div>
+              </div>
+              <div class="gcard t-card t-rest">
+                <div class="tc-head">
+                  <span class="tc-icon">
+                    <svg viewBox="-8 -8 16 16" width="16" height="16">
+                      <circle r="7" />
+                      <g
+                        transform="translate(0.3 0) scale(0.3333) translate(-12 -12)"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M10 2v2" />
+                        <path d="M14 2v2" />
+                        <path
+                          d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"
+                        />
+                        <path d="M6 2v2" />
+                      </g>
+                    </svg>
+                  </span>
+                  <span class="tc-title"
+                    ><svg viewBox="0 0 20 14" width="20" height="14">
+                      <text x="10" y="7" dy="0" text-anchor="middle" dominant-baseline="central">
+                        休息
+                      </text>
+                    </svg></span
+                  >
+                  <span class="tc-percent"
+                    ><svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                    6%</span
+                  >
+                </div>
+                <b>1h31m</b>
+                <div class="tc-range"><i class="fill" style="width: 27%"></i></div>
               </div>
             </div>
 
@@ -560,8 +682,8 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.005。窗口 300×400 = 参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按
-        README 映射回 ui/。
+        原型版本 ui2.0 V0.006。窗口 300×400 =
+        参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
 
@@ -831,6 +953,11 @@
             nodes.push({ ts: t0, ch: st === "rest" ? "R" : "W", kind: st });
           }
         });
+        // 未行驶段：当前进度 → D 铺在岗蓝（班内尚未发生的占位，非真实已发生段）
+        if (nowTs < endTs) {
+          const left = pct(nowTs);
+          bars.push({ st: "duty", left, w: 100 - left, active: false });
+        }
         nodes.push({ ts: endTs, ch: "D", kind: "end" });
         // 复用元素：track 自身保留（不打断流光），仅改子元素属性
         while (track.children.length > bars.length) track.lastChild.remove();
@@ -867,8 +994,7 @@
           graph.insertBefore(comet, track.nextSibling); // 段之上、节点层之下
           // 纪元回拨两个寿命：流无始无终，首帧即满员稳态（F5 后立刻开板也看不到「从头发射」）
           const walk0 = comet.clientWidth || 116; // 创建瞬间宽度未定，按标称 116px 回拨
-          cometEpoch =
-            document.timeline.currentTime - ((2 * (walk0 + 24)) / COMET.speed) * 1000;
+          cometEpoch = document.timeline.currentTime - ((2 * (walk0 + 24)) / COMET.speed) * 1000;
           // 渲染帧哨兵（rAF 链）：帧距 > 250ms 判定挂起/遮挡——稀疏帧里发射的白纹 startTime
           // 会被量化到帧点、相位失真，故挂起期间不发射，恢复首帧强制重建；
           // cometLastFrame 初始 -Infinity，首个渲染帧即重建出满员稳态
@@ -886,20 +1012,21 @@
           (function wake() {
             const period = (COMET.spacing / COMET.speed) * 1000;
             const animNow = document.timeline.currentTime;
-            const next =
-              cometEpoch +
-              (Math.floor((animNow - cometEpoch) / period) + 1) * period;
-            setTimeout(() => {
-              launchComet();
-              wake();
-            }, Math.max(0, next - animNow));
+            const next = cometEpoch + (Math.floor((animNow - cometEpoch) / period) + 1) * period;
+            setTimeout(
+              () => {
+                launchComet();
+                wake();
+              },
+              Math.max(0, next - animNow),
+            );
           })();
         }
         const launchPct = pct(segs[segs.length - 1][0]); // 进入节点 = 当前段起点
         comet.style.left = `${launchPct.toFixed(2)}%`; // 左缘 = 进入节点中心：白纹从徽章中心出生
         comet.style.width = `${(100 - launchPct).toFixed(2)}%`; // 右缘 = D 节点中心：白纹在此消失
         $("axisStart").textContent = `上班 ${graphHhmm(clockIn)}`;
-        $("axisEnd").textContent = `下班 ${graphHhmm(endTs)} · D`;
+        $("axisEnd").textContent = `下班 ${graphHhmm(endTs)}`;
       }
 
       // ===== 节点彗星发射器（动画钟追赶式）：发射网格 = cometEpoch 起每 period 一格，
@@ -1275,6 +1402,7 @@
         }
         settingsBoard.classList.toggle("open", open);
         gearBtn.classList.toggle("open", open); // 开板保色、收板褪色
+        $("win").classList.toggle("board-open", open); // 同步雾化被盖的计时区内容
       }
       function toggleSettings() {
         setSettings(!settingsBoard.classList.contains("open"));
@@ -1290,6 +1418,7 @@
         }
         statsBoard.classList.toggle("open", open);
         statsBtn.classList.toggle("open", open);
+        $("win").classList.toggle("board-open", open); // 同步雾化被盖的计时区内容
       }
 
       // 统计钮：按压回弹由 CSS :active 承担（见 glass.css），此处只管板的开合
