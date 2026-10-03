@@ -63,3 +63,7 @@ Thumbs.db
 
 ## Git worktrees
 .worktrees/
+
+## 参考库（外部项目克隆，不入仓库）
+.reference/
+.zcodeignore
