@@ -5,21 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CapsulePulse · design 原型</title>
     <link rel="stylesheet" href="glass.css" />
-    <style>
-      /* 页面级补充（引擎在 glass.css） */
-      .banner {
-        margin: 8px 2px 6px;
-      }
-      /* 打卡 pill 纵向落位：原 2px，改 -1px（pill + 三段控制一起上移 3px，用户定案） */
-      .stage .pill-cast {
-        margin-top: -1px;
-      }
-      .statline {
-        font-size: 11px;
-        color: var(--ink-2);
-        text-align: center;
-      }
-    </style>
+    <link rel="stylesheet" href="assets/css/topbar.css" />
+    <link rel="stylesheet" href="assets/css/timer.css" />
+    <link rel="stylesheet" href="assets/css/hourglass.css" />
+    <link rel="stylesheet" href="assets/css/controls.css" />
+    <link rel="stylesheet" href="assets/css/stats.css" />
+    <link rel="stylesheet" href="assets/css/graph.css" />
+    <link rel="stylesheet" href="assets/css/boards.css" />
+    <link rel="stylesheet" href="assets/css/devkit.css" />
   </head>
   <body>
     <!-- ============ 位移折射滤镜（窗口专用，25% 定稿强度） ============ -->
@@ -343,7 +336,7 @@
           <div class="flip-inner">
             <section class="stats sheet flip-face front">
               <div class="daynav">
-                <button class="arrow">
+                <button class="arrow" id="arrow-prev">
                   <svg
                     width="7"
                     height="7"
@@ -357,8 +350,8 @@
                     <path d="m15 5-7 7 7 7" />
                   </svg>
                 </button>
-                <span class="day">9月16日 · 周二 · 在岗中</span>
-                <button class="arrow" disabled>
+                <span class="day" id="day-label">9月16日 · 周二 · 在岗中</span>
+                <button class="arrow" id="arrow-next" disabled>
                   <svg
                     width="7"
                     height="7"
@@ -428,7 +421,7 @@
                       1%</span
                     >
                   </div>
-                  <b>5h35m</b>
+                  <b id="num-duty"></b>
                   <span class="tc-hint">今日明细</span>
                 </div>
                 <div class="gcard t-card t-work">
@@ -470,7 +463,7 @@
                       5%</span
                     >
                   </div>
-                  <b>4h04m</b>
+                  <b id="num-work"></b>
                   <div class="tc-range"><i class="fill" style="width: 73%"></i></div>
                 </div>
                 <div class="gcard t-card t-rest">
@@ -516,7 +509,7 @@
                       6%</span
                     >
                   </div>
-                  <b>1h31m</b>
+                  <b id="num-rest"></b>
                   <div class="tc-range"><i class="fill" style="width: 27%"></i></div>
                 </div>
               </div>
@@ -525,12 +518,13 @@
                 <div class="wc-head">
                   <span class="wc-left">
                     <span class="wc-label">日均</span>
-                    <b class="wc-num">3小时39分钟</b>
+                    <b class="wc-num" id="wc-avg-num"></b>
                   </span>
                   <span class="wc-delta">
                     <span class="l">与上周相比</span>
-                    <span class="v up">
+                    <span class="v" id="wc-delta">
                       <svg
+                        id="wc-delta-arrow"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
@@ -540,55 +534,15 @@
                       >
                         <path d="m18 15-6-6-6 6" />
                       </svg>
-                      浮动 22%
+                      <span id="wc-delta-text"></span>
                     </span>
                   </span>
                 </div>
                 <div class="wc-chart">
                   <div class="wc-plot">
-                    <div class="wc-avg" style="bottom: 60%"></div>
+                    <div class="wc-avg" id="wc-avg-line"></div>
                     <div class="wc-cols">
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 100%">
-                          <i class="seg rest" style="height: 24.6%"></i
-                          ><i class="seg work" style="height: 75.4%"></i>
-                        </div>
-                      </div>
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 98.4%">
-                          <i class="seg rest" style="height: 33.3%"></i
-                          ><i class="seg work" style="height: 66.7%"></i>
-                        </div>
-                      </div>
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 100%">
-                          <i class="seg rest" style="height: 18%"></i
-                          ><i class="seg work" style="height: 82%"></i>
-                        </div>
-                      </div>
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 95.6%">
-                          <i class="seg rest" style="height: 40%"></i
-                          ><i class="seg work" style="height: 60%"></i>
-                        </div>
-                      </div>
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 98.1%">
-                          <i class="seg rest" style="height: 26.5%"></i
-                          ><i class="seg work" style="height: 73.5%"></i>
-                        </div>
-                      </div>
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 8.2%">
-                          <i class="seg rest" style="height: 100%"></i>
-                        </div>
-                      </div>
-                      <div class="wc-col">
-                        <div class="wc-bar" style="height: 91.5%">
-                          <i class="seg rest" style="height: 27.2%"></i
-                          ><i class="seg work" style="height: 72.8%"></i>
-                        </div>
-                      </div>
+                      <!-- 七日堆叠柱由 renderWeekMock() 依 WEEK_MOCK 数据生成 -->
                     </div>
                   </div>
                   <div class="wc-days">
@@ -602,43 +556,7 @@
             <section class="detail-face sheet flip-face back">
               <h3>今日明细</h3>
               <div class="detail">
-                <div class="dl">
-                  <span class="time">09:12–09:58</span>
-                  <span class="track"><span class="blk work" data-secs="2760"></span></span>
-                  <span class="dur">46分</span>
-                </div>
-                <div class="dl">
-                  <span class="time">09:58–10:16</span>
-                  <span class="track"><span class="blk rest" data-secs="1080"></span></span>
-                  <span class="dur">18分</span>
-                </div>
-                <div class="dl">
-                  <span class="time">10:16–11:02</span>
-                  <span class="track"><span class="blk work" data-secs="2760"></span></span>
-                  <span class="dur">46分</span>
-                </div>
-                <div class="dl">
-                  <span class="time">11:02–11:20</span>
-                  <span class="track"><span class="blk rest" data-secs="1080"></span></span>
-                  <span class="dur">18分</span>
-                </div>
-                <div class="dl">
-                  <span class="time">11:20–12:05</span>
-                  <span class="track"><span class="blk work" data-secs="2700"></span></span>
-                  <span class="dur">45分</span>
-                </div>
-                <div class="dl">
-                  <span class="time">12:05–13:00</span>
-                  <span class="track"><span class="blk rest" data-secs="3300"></span></span>
-                  <span class="dur">55分</span>
-                </div>
-                <div class="dl">
-                  <span class="time">13:00–</span>
-                  <span class="track"
-                    ><span class="blk work" data-secs="6420" data-ongoing></span
-                  ></span>
-                  <span class="dur">107分</span><span class="ongoing">至今</span>
-                </div>
+                <!-- 今日明细行由 renderDetailMock() 依 EV_MOCK + 上班时刻生成 -->
               </div>
               <button class="flip-back" id="detail-back" type="button">返回统计</button>
             </section>
@@ -735,7 +653,7 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.007。窗口 300×400 =
+        原型版本 ui2.0 V0.008。窗口 300×400 =
         参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
@@ -795,6 +713,7 @@
         autoOutH: 8, // 自动下班时长（小时）
         thresholdMin: 50, // 提醒阈值（分钟）——沙漏周期跟随它
         batFrozen: null, // 下班后冻结的电量
+        viewDay: 0, // 统计面查看日偏移：0 = 今天，-1 = 昨天…（左右箭头切换）
       };
       const elapsed = () => (S.running ? S.accum + (Date.now() - S.startTs) : S.accum);
       const clamp01 = (n) => Math.min(1, Math.max(0, n));
@@ -829,6 +748,173 @@
         [228, 335, "work"],
       ];
 
+      // ===== 周模拟数据（接近真实状态）：本周前 6 天工作/休息分钟 + 上周日均工作。
+      // 今天（第七天）由 EV_MOCK 实时累计，三值/堆叠柱/日均/浮动/明细全由此派生 =====
+      const WEEK_PREV = [
+        { day: "一", work: 276, rest: 84 }, // 4h36m + 1h24m
+        { day: "二", work: 243, rest: 117 }, // 4h03m + 1h57m
+        { day: "三", work: 302, rest: 66 }, // 5h02m + 1h06m
+        { day: "四", work: 208, rest: 142 }, // 3h28m + 2h22m
+        { day: "五", work: 265, rest: 96 }, // 4h25m + 1h36m
+        { day: "六", work: 36, rest: 58 }, // 休息日：36m + 58m
+      ];
+      const LAST_WEEK_AVG_WORK = 196; // 上周日均工作（分钟）
+
+      /** 当日各段（分钟轴）：offset 0 = 今天实时（进行中段延伸到当前）；负数 = 过去日，由总计合成演示分段 */
+      function todaySegsMin(offset = 0) {
+        const nowMin = (Date.now() - S.clockInTs) / 60000;
+        if (offset < 0) {
+          const totals = WEEK_PREV[WEEK_PREV.length + offset];
+          const seed = WEEK_PREV.length + offset;
+          // 确定式合成：从上班时刻（0 分）连续铺满当日总时长——工作拆三段（45/33/22%）、
+          // 休息拆两段（60/40%）首尾相接不留缝，末段吸收取整余量保总量；班末余量留白
+          let t = 0;
+          const segs = [];
+          const plan = [
+            ["work", 0.45],
+            ["rest", 0.6],
+            ["work", 0.33],
+            ["rest", 0.4],
+            ["work", 0.22],
+          ];
+          const used = { work: 0, rest: 0 };
+          plan.forEach(([type, ratio], idx) => {
+            const isLast = idx === plan.length - 1;
+            const mins = isLast
+              ? totals[type] - used[type] // 末段兜底：合成总量与当日总计严格相等
+              : Math.round(totals[type] * ratio);
+            used[type] += mins;
+            if (mins <= 0) return;
+            segs.push({ type, start: t, end: t + mins });
+            t += mins; // 连续相接：段间不留空档
+          });
+          return segs;
+        }
+        return EV_MOCK.map(([o0, o1, type], i) => {
+          const isLast = i === EV_MOCK.length - 1;
+          // 末段在计时中 = 进行中：与 renderGraph 的尾段延长语义一致，延伸到当前时刻
+          const end = isLast && S.running ? nowMin : Math.min(o1, nowMin);
+          return { type, start: o0, end };
+        });
+      }
+      /** 分钟 → "XhYYm"（三值数字） */
+      const fmtHM = (m) => `${Math.floor(m / 60)}h${String(Math.round(m) % 60).padStart(2, "0")}m`;
+      /** 分钟 → "X小时Y分钟"（日均数字） */
+      const fmtCN = (m) => `${Math.floor(m / 60)}小时${Math.round(m) % 60}分钟`;
+
+      /** 三值数字：跟随当前查看日（今天 = EV_MOCK 实时累计，过去 = 该日总计） */
+      function renderTriple() {
+        const segs = todaySegsMin(S.viewDay || 0);
+        const sum = (t) =>
+          segs.filter((s) => s.type === t).reduce((a, s) => a + (s.end - s.start), 0);
+        $("num-duty").textContent = fmtHM(sum("work") + sum("rest"));
+        $("num-work").textContent = fmtHM(sum("work"));
+        $("num-rest").textContent = fmtHM(sum("rest"));
+      }
+
+      /** 日期行：查看日日期 + 星期 + 状态；左右箭头按数据边界禁用 */
+      function renderDayLabel() {
+        const offset = S.viewDay || 0;
+        const d = new Date(); // 锚定真实日历今天（上班跨午夜时不受上班时刻影响）
+        d.setDate(d.getDate() + offset);
+        const week = "日一二三四五六"[d.getDay()];
+        const status =
+          offset === 0 ? (S.running ? "在岗中" : S.duty ? "休息中" : "未上班") : "已下班";
+        $("day-label").textContent =
+          `${d.getMonth() + 1}月${d.getDate()}日 · 周${week} · ${status}`;
+        $("arrow-prev").disabled = offset <= -WEEK_PREV.length;
+        $("arrow-next").disabled = offset >= 0;
+      }
+
+      /** 周卡（屏幕使用时间风格）：日均 / 浮动徽章 / 七日堆叠柱 全由数据派生（三值由 renderTriple 负责） */
+      function renderWeekMock() {
+        const segs = todaySegsMin();
+        const todayWork = segs
+          .filter((s) => s.type === "work")
+          .reduce((a, s) => a + (s.end - s.start), 0);
+        const todayRest = segs
+          .filter((s) => s.type === "rest")
+          .reduce((a, s) => a + (s.end - s.start), 0);
+        const days = [...WEEK_PREV, { day: "今", work: todayWork, rest: todayRest }];
+        const viewIdx = days.length - 1 + (S.viewDay || 0);
+        const maxTotal = Math.max(...days.map((d) => d.work + d.rest));
+        const avgWork = days.reduce((a, d) => a + d.work, 0) / days.length;
+        const cols = days
+          .map((d, i) => {
+            const total = d.work + d.rest;
+            const hPct = ((total / maxTotal) * 100).toFixed(1);
+            const wPct = total ? ((d.work / total) * 100).toFixed(1) : "0";
+            const rPct = total ? (100 - Number(wPct)).toFixed(1) : "0";
+            const segsHtml =
+              (Number(rPct) > 0 ? `<i class="seg rest" style="height: ${rPct}%"></i>` : "") +
+              (Number(wPct) > 0 ? `<i class="seg work" style="height: ${wPct}%"></i>` : "");
+            const sel = i === viewIdx ? " sel" : "";
+            return `<div class="wc-col${sel}"><div class="wc-bar" style="height: ${hPct}%">${segsHtml}</div></div>`;
+          })
+          .join("");
+        const colsEl = document.querySelector(".wc-cols");
+        const sig = `${days.length}|${Math.round(todayWork)}|${S.viewDay || 0}`; // 含查看日：切日必须重画选中柱
+        if (colsEl.dataset.sig !== sig) {
+          colsEl.innerHTML = cols;
+          colsEl.dataset.sig = sig;
+        }
+        $("wc-avg-line").style.bottom = `${((avgWork / maxTotal) * 100).toFixed(1)}%`;
+        $("wc-avg-num").textContent = fmtCN(avgWork);
+        const deltaPct = Math.round(((avgWork - LAST_WEEK_AVG_WORK) / LAST_WEEK_AVG_WORK) * 100);
+        const up = deltaPct >= 0;
+        const v = $("wc-delta");
+        v.classList.toggle("up", up);
+        v.classList.toggle("down", !up);
+        $("wc-delta-arrow").innerHTML = up
+          ? '<path d="m18 15-6-6-6 6" />'
+          : '<path d="m6 9 6 6 6-6" />';
+        $("wc-delta-text").textContent = `浮动 ${Math.abs(deltaPct)}%`;
+      }
+
+      // 日期行左右箭头：往左看过去数据，右边界 = 今天
+      $("arrow-prev").addEventListener("click", () => {
+        S.viewDay = Math.max(S.viewDay - 1, -WEEK_PREV.length);
+        render();
+      });
+      $("arrow-next").addEventListener("click", () => {
+        S.viewDay = Math.min(S.viewDay + 1, 0);
+        render();
+      });
+
+      /** 今日明细行：由 EV_MOCK + 上班时刻生成（末段进行中带「至今」），随后按最长段归一宽度 */
+      function renderDetailMock() {
+        const segs = todaySegsMin();
+        const nowMin = (Date.now() - S.clockInTs) / 60000;
+        const fmtT = (min) => {
+          const d = new Date(S.clockInTs + min * 60000);
+          return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        };
+        const data = segs.map((s, i) => {
+          const ongoing = i === segs.length - 1 && s.end >= nowMin;
+          const endMin = Math.min(s.end, nowMin);
+          const secs = Math.max(0, Math.round((endMin - s.start) * 60));
+          return { type: s.type, start: s.start, end: s.end, ongoing, secs };
+        });
+        const last = data[data.length - 1];
+        const sig = `${data.length}|${last ? last.secs : 0}|${last ? last.ongoing : false}`; // 内容级签名：进行中段时长增长也会触发重建
+        const el = document.querySelector(".detail");
+        if (el.dataset.sig !== sig) {
+          el.dataset.sig = sig;
+          el.innerHTML = data
+            .map((d) => {
+              const mins = Math.round(d.secs / 60);
+              const t1 = d.ongoing ? "" : `–${fmtT(d.end)}`;
+              return `<div class="dl">
+                  <span class="time">${fmtT(d.start)}${t1}</span>
+                  <span class="track"><span class="blk ${d.type}" data-secs="${d.secs}"${d.ongoing ? " data-ongoing" : ""}></span></span>
+                  <span class="dur">${mins}分</span>${d.ongoing ? '<span class="ongoing">至今</span>' : ""}
+                </div>`;
+            })
+            .join("");
+        }
+        renderDetailBars();
+      }
+
       function render() {
         $("pillText").textContent = S.duty ? "下班" : "上班";
         renderFlip(elapsed());
@@ -843,6 +929,10 @@
           r.disabled = !S.duty;
           r.checked = r.value === runMode;
         }
+        renderWeekMock();
+        renderTriple();
+        renderDayLabel();
+        renderDetailMock();
         renderGraph();
       }
       setInterval(render, 100);
@@ -971,25 +1061,31 @@
         const track = $("graphTrack");
         const cp = $("graphCp");
         if (!track || !cp) return;
-        const clockIn = S.clockInTs;
+        const offset = S.viewDay || 0;
+        const clockIn = S.clockInTs + offset * 86400000; // 查看日的上班时刻
         const spanMs = S.autoOutH * 3600000;
-        const nowTs = Date.now();
+        const nowTs = offset === 0 ? Date.now() : clockIn + spanMs; // 过去日 = 整班已结束
         const endTs = clockIn + spanMs;
         const pct = (ts) => ((ts - clockIn) / spanMs) * 100;
-        // 段与表盘同源：mock 段 + mock 之后的当前段（同状态则并入，保持「最新节点之后一条」完整）
-        const segs = EV_MOCK.map(([o0, o1, st]) => [
-          clockIn + o0 * 60000,
-          clockIn + o1 * 60000,
-          st,
-        ]);
-        const cur = S.running ? "work" : "rest";
-        const tail = segs[segs.length - 1];
-        if (nowTs > tail[1]) {
-          if (tail[2] === cur) {
-            tail[1] = nowTs;
-          } else {
-            segs.push([tail[1], nowTs, cur]);
+        // 段与表盘同源：今天 = mock 段 + 进行中尾段；过去日 = 合成演示分段（整体已落定）
+        let segs;
+        if (offset === 0) {
+          segs = EV_MOCK.map(([o0, o1, st]) => [clockIn + o0 * 60000, clockIn + o1 * 60000, st]);
+          const cur = S.running ? "work" : "rest";
+          const tail = segs[segs.length - 1];
+          if (nowTs > tail[1]) {
+            if (tail[2] === cur) {
+              tail[1] = nowTs;
+            } else {
+              segs.push([tail[1], nowTs, cur]);
+            }
           }
+        } else {
+          segs = todaySegsMin(offset).map(({ start, end, type }) => [
+            clockIn + start * 60000,
+            clockIn + end * 60000,
+            type,
+          ]);
         }
         const bars = [];
         const nodes = [];
@@ -1815,7 +1911,6 @@
         }
       }
 
-      renderDetailBars();
       initTitleParticles();
     </script>
   </body>

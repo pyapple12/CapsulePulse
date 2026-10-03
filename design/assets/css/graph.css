@@ -1,0 +1,123 @@
+/* 时间图谱：分段进度条 + R/W/D 节点 + 节点彗星发射流 */
+/* 时间图谱：上班→自动下班 D 的分段进度条 + 里程碑节点（R 进休 / W 复工 / D 自动下班） */
+.graph {
+  position: relative;
+  height: 12px; /* 行高 = 药丸高：与相邻玻璃卡的间距即视觉间距（无行内死区） */
+}
+.graph-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35); /* 空槽（当前时刻之后的未推进段） */
+  overflow: hidden;
+}
+.graph-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  /* 不用 width 过渡：width 动画会走合成层光栅化，与 track 裁剪边界错位漏出 1px 暗线；
+     直接按 100ms 步进写入（单步 < 0.1px）视觉同样平滑 */
+}
+.graph-seg.work {
+  background: linear-gradient(180deg, #ff9d82, var(--work));
+}
+.graph-seg.rest {
+  background: linear-gradient(180deg, #6ee7b7, var(--rest));
+}
+.graph-seg.duty {
+  background: linear-gradient(180deg, #7cc0ec, var(--accent)); /* 当前进度 → D 的在岗蓝占位 */
+}
+/* 【节点彗星·逐条发射·当前生效 2026-09-26，用户定案发射模型】白纹一条条独立发射：
+   从进入节点中心出生，匀速走到 D 中心消失；发射频率固定（每走 --comet-spacing px 发一条，
+   参数在 index.html 的 COMET 常量），同屏条数随「进入节点 → D」的距离自适应。
+   .graph-comet = 发射走廊（容器，左缘=进入节点中心、右缘=D 中心，JS 定位）；
+   .comet-stripe = 每条独立的白纹，机器表达 = 每条一次 linear 位移动画、播完自移除 */
+.graph-comet {
+  position: absolute;
+  top: 0; /* 与药丸条同带（行高即药丸高），白纹贴着药丸飞行 */
+  height: 12px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.comet-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    transparent 0 9px,
+    rgba(255, 255, 255, 0.22) 9px 14px,
+    transparent 14px
+  );
+  animation: cometWalk linear forwards;
+}
+/* 单条白纹的一生：从走廊左外 -24px 出生，匀速走到右缘外消失（--walk = 走廊宽，JS 写入） */
+@keyframes cometWalk {
+  from {
+    transform: translateX(-24px);
+  }
+  to {
+    transform: translateX(var(--walk, 116px));
+  }
+}
+.graph-cp {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.graph-node {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  overflow: visible;
+}
+.graph-node.end {
+  transform: translate(-100%, -50%); /* D 固定在最右端，避免半个圆溢出卡片 */
+}
+.graph-node circle {
+  fill: rgba(120, 132, 146, 0.5);
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1;
+  transition: fill 0.3s ease;
+}
+.graph-node text {
+  font-family: var(--font-stack);
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central; /* 字体盒居中（大写字母墨迹因此恒低 0.5px，由 index.html 的 dy=-0.5 校正） */
+  fill: rgba(255, 255, 255, 0.72); /* 未到达：暗字母 */
+  transition: fill 0.3s ease;
+}
+.graph-node.lit text {
+  fill: #fff;
+}
+.graph-node.lit.work circle {
+  fill: var(--work);
+}
+.graph-node.lit.rest circle {
+  fill: var(--rest);
+}
+.graph-node.lit.end circle {
+  fill: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .comet-stripe {
+    display: none;
+  }
+}
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px; /* 原 10.5px 的 75%，取整（用户定案） */
+  color: var(--ink-2);
+  margin-top: var(--gap-caption);
+}

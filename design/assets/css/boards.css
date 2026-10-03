@@ -1,0 +1,217 @@
+/* 板骨架：设置/统计板定位与飞入、翻面系统、sheet 玻璃、浮层确认框 */
+/* ============================================================
+   浮层：打卡确认框 + 设置面板
+   ============================================================ */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 45, 80, 0.22);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+.sheet {
+  width: calc(100% - 36px);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(248, 252, 255, 0.25); /* 底玻璃 0.25 白透（用户定案）；雾化由内容自雾化承担 */
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.9),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
+    0 22px 44px rgba(12, 40, 78, 0.32);
+  font-family: var(--font-stack);
+}
+.sheet h4 {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.sheet p {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.sheet .acts {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+/* 弹层动作按钮：几何由统一按钮基类提供（实底主题色 + 辉光），此处只定尺寸 */
+.sheet .acts button {
+  flex: 1;
+  height: 44px;
+  font-size: 14px;
+}
+/* 设置面板行 */
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(40, 90, 150, 0.08);
+}
+.set-row:last-of-type {
+  border-bottom: none;
+}
+.set-row .n {
+  font-size: 13px;
+  font-weight: 500;
+}
+.set-row input[type="number"] {
+  width: 60px;
+  height: 30px;
+  border-radius: 9px;
+  border: none;
+  text-align: center;
+  font-family: inherit;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+}
+.set-row input[type="number"]:focus {
+  outline: 1.5px solid var(--accent);
+}
+.switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(40, 90, 150, 0.18);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch.on {
+  background: var(--accent);
+}
+.switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+.switch.on i {
+  left: 23px;
+}
+
+/* ============================================================
+   玻璃板（借鉴 CapsuleTODO 归档/设置板，配色换本项目）：
+   设置板自齿轮、统计板自统计钮缩放飞出，覆于内容之上。揭示动画只用 transform scale——
+   clip-path 会破坏 backdrop 采样（Chromium 渲染层边界）。
+   内层复用 .sheet 皮肤（h4 / set-row / acts 一行不重写），此处只作布局与缩放覆盖 */
+/* 翻转页（用户定案：左右翻）：正面 = 统计，背面 = 今日明细；
+   玻璃面不带 backdrop-filter（3D 变换下 backdrop 采样不可靠），雾化由内容自雾化承担 */
+.flip-scene {
+  perspective: 1200px;
+}
+.flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#stats-board.flipped .flip-inner {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  position: absolute;
+  inset: 0;
+  width: 100%; /* 覆盖 .sheet 的 calc(100% - 36px)：翻转面保持改造前的全宽满高（36px 窄化是当年未被应用的死规则） */
+  height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow-y: auto;
+}
+.flip-face.back {
+  transform: rotateY(180deg);
+}
+.detail-face {
+  display: flex;
+  flex-direction: column;
+}
+.detail-face h3 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+.detail-face .detail {
+  flex: 1;
+}
+.flip-back {
+  flex: none;
+  margin-top: 12px;
+  padding: 8px 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  font-family: var(--font-stack);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1); /* 松手弹簧回位（与在岗卡同款） */
+}
+.flip-back:active {
+  /* 按压回弹：按下 0.08s 快缩一档 */
+  transform: scale(0.9);
+  transition: transform 0.08s ease;
+}
+
+#settings-board,
+#stats-board {
+  position: absolute;
+  z-index: 20;
+  top: 54px;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  visibility: hidden;
+  transition: visibility 0s linear 0.38s;
+}
+
+/* 统计板打开时直接雾化被盖的计时区内容：backdrop-filter 对合成层兄弟内容
+   （翻页卡 transform 动画、canvas 表盘）采样不可靠，改为内容自雾化 +
+   板上白纱组合出真毛玻璃；过渡与统计板飞出/收回同步；标题（topbar）豁免 */
+#win .content > :not(.topbar) {
+  transition: filter 0.35s ease;
+}
+#win.board-open .content > :not(.topbar) {
+  filter: blur(4px); /* 3 → 4（用户定案） */
+}
+#settings-board.open,
+#stats-board.open {
+  visibility: visible;
+  transition: none;
+}
+/* 板标题居中（用户定案） */
+.board-title {
+  text-align: center;
+  margin-bottom: 10px !important;
+}
+#settings-board .board-glass {
+  overflow-y: auto; /* 设置板无翻转面，滚动留在原层 */
+}
+.board-glass {
+  width: 100%;
+  height: 100%;
+  /* 滚动移至各翻转面（.flip-face）：perspective 父级不裁切，3D 翻转不穿帮 */
+  transform-origin: var(--origin-x, 92%) var(--origin-y, -20px);
+  transform: scale(0);
+  transition: transform 0.35s ease; /* 收板平缓缩回（回弹曲线会令 scale 越零镜像闪动） */
+}
+#settings-board.open .board-glass,
+#stats-board.open .board-glass {
+  transform: scale(1);
+  transition: transform 0.4s cubic-bezier(0.34, 1.4, 0.64, 1); /* 开板保留轻微回弹 */
+}
