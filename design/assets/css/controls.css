@@ -76,13 +76,6 @@
     2px 2px 4px rgba(42, 42, 42, 0.2),
     -2px -2px 4px rgba(255, 255, 255, 0.5);
 }
-.pill-cast .cv {
-  margin-left: 12px;
-  padding: 3px 12px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.28);
-  font-size: 13px;
-}
 
 /* 三段式控制（借鉴 uiverse laksh_7112 radio-input：换玻璃质感，保留抬起/按下投影）：
    未选中 = 抬起（带投影）→ 选中 = 按下（投影消失 + 内发光 + 主题色字） */
@@ -165,7 +158,7 @@
   display: none;
   align-items: center;
   gap: 8px;
-  margin: 0 0 10px;
+  margin: 8px 2px 6px; /* 纵向落位（原页面级微调块归并，用户定案） */
   padding: 9px 12px;
   border-radius: 14px;
   font-size: 12.5px;
@@ -193,10 +186,7 @@
   background: var(--mint-bright);
 }
 
-/* 页面级微调（原 index.html 内联块）：文案条与打卡 pill 的纵向落位 */
-.banner {
-  margin: 8px 2px 6px;
-}
+/* 页面级微调（原 index.html 内联块）：打卡 pill 的纵向落位 */
 .stage .pill-cast {
   margin-top: -1px; /* pill + 三段控制一起上移 3px（用户定案） */
 }

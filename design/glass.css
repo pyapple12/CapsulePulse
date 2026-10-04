@@ -7,13 +7,10 @@
 :root {
   /* —— 基础令牌（与 ui/App.vue 同源）—— */
   --accent: #4aa8e8; /* 主题色 = 淡天蓝（比天蓝略深；全站单一来源） */
-  --mint: #0f766e;
   --mint-bright: #34d399;
   --ink: #1d1d1f;
   --ink-2: rgba(29, 29, 31, 0.55);
   --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --r-card: 20px;
-  --r-pill: 999px;
   /* —— 控件交互令牌（UI 打磨：右上角齿轮设置钮 + tooltip + 飞出玻璃板）—— */
   --ctrl-hover: rgba(0, 0, 0, 0.25); /* 设置钮悬停/开板底 = 25% 黑（用户定案） */
   /* —— 计时区令牌（重构）—— */
@@ -34,12 +31,9 @@
   --mottle-o: 0.15; /* 云纹 15 */
   --sweep-o: 0.6; /* 光带 60% */
   --blur: 5px; /* 磨砂 5px（清玻璃方向） */
-  --refract-k: 0.25; /* 折射强度 25%（基准 scale × 0.25） */
   --shadow-o: 1; /* 阴影浓度 100% */
-  --shadow-r: 2; /* 阴影范围 200% */
   --edge-dir: 140deg; /* 阴影角度 140°（右下偏下） */
-  --bloom: 0.8; /* Bloom 80% */
-  /* 由角度推得的影子偏移与虚影模糊（140°、范围200%） */
+  /* 由角度与定稿读数（范围200%/Bloom80%）推得的影子偏移与虚影模糊 */
   --sx: 23.1px;
   --sy: 27.6px;
   --b1: 66px;

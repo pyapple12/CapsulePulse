@@ -398,10 +398,3 @@
   width: 100%;
   border-right-width: 3px;
 }
-
-/* 状态行小字（页面级微调，原 index.html 内联块） */
-.statline {
-  font-size: 11px;
-  color: var(--ink-2);
-  text-align: center;
-}

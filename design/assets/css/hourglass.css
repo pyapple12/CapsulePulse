@@ -106,24 +106,6 @@
     stroke-dashoffset: -24;
   }
 }
-@keyframes hg-sand-line-left {
-  from {
-    stroke-dashoffset: 53;
-  }
-
-  to {
-    stroke-dashoffset: -55;
-  }
-}
-@keyframes hg-sand-line-right {
-  from {
-    stroke-dashoffset: 14;
-  }
-
-  to {
-    stroke-dashoffset: -24.5;
-  }
-}
 @keyframes hg-mound-top {
   from {
     transform: translate(0, 0);

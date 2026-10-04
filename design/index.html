@@ -47,7 +47,8 @@
           <span class="dot"></span><span id="remindText">已连续工作 50 分钟，休息一下吧</span>
         </div>
         <div class="banner auto" id="bn-auto">
-          <span class="dot"></span>已到自动下班时间（上班 + 8h），已回填记账
+          <span class="dot"></span
+          ><span id="autoOutText">已到自动下班时间（上班 + 8h），已回填记账</span>
         </div>
 
         <!-- 计时页 -->
@@ -295,7 +296,7 @@
           </div>
 
           <!-- ④ 打卡 pill（上班/下班） -->
-          <button class="pill-cast" id="pillCast" onclick="openConfirm()">
+          <button class="pill-cast" id="pillCast">
             <svg
               width="14"
               height="14"
@@ -542,7 +543,7 @@
                   <div class="wc-plot">
                     <div class="wc-avg" id="wc-avg-line"></div>
                     <div class="wc-cols">
-                      <!-- 七日堆叠柱由 renderWeekMock() 依 WEEK_MOCK 数据生成 -->
+                      <!-- 七日堆叠柱由 renderWeekMock() 依 WEEK_PREV + 今日实时数据生成 -->
                     </div>
                   </div>
                   <div class="wc-days">
@@ -554,7 +555,7 @@
             </section>
 
             <section class="detail-face sheet flip-face back">
-              <h3>今日明细</h3>
+              <h3 id="detail-title">今日明细</h3>
               <div class="detail">
                 <!-- 今日明细行由 renderDetailMock() 依 EV_MOCK + 上班时刻生成 -->
               </div>
@@ -624,7 +625,7 @@
           </div>
           <div class="set-row">
             <span class="n">自动下班（小时）</span
-            ><input type="number" value="8" min="1" max="72" />
+            ><input type="number" id="setAutoOut" value="8" min="1" max="72" />
           </div>
           <div class="acts"><button class="ok" onclick="closeSettings()">完成</button></div>
         </div>
@@ -653,8 +654,8 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.008。窗口 300×400 =
-        参考项目同尺寸；上方齿轮/圆钮/页签均可交互；验证通过后按 README 映射回 ui/。
+        原型版本 ui2.0 V0.009。窗口 300×400 =
+        参考项目同尺寸；上方侧角钮与各控件均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
 
@@ -713,6 +714,7 @@
         autoOutH: 8, // 自动下班时长（小时）
         thresholdMin: 50, // 提醒阈值（分钟）——沙漏周期跟随它
         batFrozen: null, // 下班后冻结的电量
+        pausedAtMin: null, // 收段时刻的墙钟分钟（暂停/下班记录、上班/恢复清空）——今日段尾收口用
         viewDay: 0, // 统计面查看日偏移：0 = 今天，-1 = 昨天…（左右箭头切换）
       };
       const elapsed = () => (S.running ? S.accum + (Date.now() - S.startTs) : S.accum);
@@ -765,7 +767,6 @@
         const nowMin = (Date.now() - S.clockInTs) / 60000;
         if (offset < 0) {
           const totals = WEEK_PREV[WEEK_PREV.length + offset];
-          const seed = WEEK_PREV.length + offset;
           // 确定式合成：从上班时刻（0 分）连续铺满当日总时长——工作拆三段（45/33/22%）、
           // 休息拆两段（60/40%）首尾相接不留缝，末段吸收取整余量保总量；班末余量留白
           let t = 0;
@@ -790,12 +791,15 @@
           });
           return segs;
         }
+        // 段尾收口于计时态：计时中 = 当前墙钟分钟；暂停/下班 = 收段时刻（pausedAtMin），
+        // 不随墙钟继续增长；末段在计时中与 renderGraph 的尾段延长同义，延伸到当前时刻。
+        // clockIn 重置后 nowMin 未达段起点，末尾丢弃 end <= start 的空段防负值
+        const endCap = S.running ? nowMin : (S.pausedAtMin ?? nowMin);
         return EV_MOCK.map(([o0, o1, type], i) => {
           const isLast = i === EV_MOCK.length - 1;
-          // 末段在计时中 = 进行中：与 renderGraph 的尾段延长语义一致，延伸到当前时刻
-          const end = isLast && S.running ? nowMin : Math.min(o1, nowMin);
+          const end = Math.min(isLast && S.running ? Infinity : o1, endCap);
           return { type, start: o0, end };
-        });
+        }).filter((s) => s.end > s.start);
       }
       /** 分钟 → "XhYYm"（三值数字） */
       const fmtHM = (m) => `${Math.floor(m / 60)}h${String(Math.round(m) % 60).padStart(2, "0")}m`;
@@ -881,17 +885,24 @@
         render();
       });
 
-      /** 今日明细行：由 EV_MOCK + 上班时刻生成（末段进行中带「至今」），随后按最长段归一宽度 */
+      /** 明细行：随查看日（今天 = EV_MOCK + 上班时刻实时；过去日 = 合成段整体已落定），随后按最长段归一宽度 */
       function renderDetailMock() {
-        const segs = todaySegsMin();
+        const offset = S.viewDay || 0;
+        const segs = todaySegsMin(offset);
         const nowMin = (Date.now() - S.clockInTs) / 60000;
+        const dayClockIn = S.clockInTs + offset * 86400000; // 查看日上班锚点（与 renderGraph 同口径）
         const fmtT = (min) => {
-          const d = new Date(S.clockInTs + min * 60000);
+          const d = new Date(dayClockIn + min * 60000);
           return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
         };
+        const d = new Date(); // 背面标题随查看日（真实日历，与 renderDayLabel 同锚）
+        d.setDate(d.getDate() + offset);
+        $("detail-title").textContent =
+          offset === 0 ? "今日明细" : `${d.getMonth() + 1}月${d.getDate()}日明细`;
         const data = segs.map((s, i) => {
-          const ongoing = i === segs.length - 1 && s.end >= nowMin;
-          const endMin = Math.min(s.end, nowMin);
+          // 「至今」仅今天的进行中末段；过去日段整体落定且不截到当前时刻
+          const ongoing = offset === 0 && i === segs.length - 1 && s.end >= nowMin;
+          const endMin = offset === 0 ? Math.min(s.end, nowMin) : s.end;
           const secs = Math.max(0, Math.round((endMin - s.start) * 60));
           return { type: s.type, start: s.start, end: s.end, ongoing, secs };
         });
@@ -1347,6 +1358,21 @@
       });
       syncRemindText();
 
+      // ===== 自动下班小时数接线：改设置 → 表盘弧跨度/电量耗尽/图谱 D 点/文案全部随动 =====
+      const setAutoOut = $("setAutoOut");
+      /** 只同步文案（自动下班条显示当前 autoOutH） */
+      function syncAutoOutText() {
+        $("autoOutText").textContent = `已到自动下班时间（上班 + ${S.autoOutH}h），已回填记账`;
+      }
+      setAutoOut.addEventListener("change", () => {
+        const v = Math.min(72, Math.max(1, Number(setAutoOut.value) || 8));
+        setAutoOut.value = String(v);
+        S.autoOutH = v;
+        syncAutoOutText();
+        render();
+      });
+      syncAutoOutText();
+
       // ===== 日期卡（每分钟节流）：12h 时刻 + AM/PM；下行 英文星期全称 + 英文日期 =====
       let dateAt = 0;
       const WEEK_EN = [
@@ -1402,16 +1428,6 @@
         }
       }, 1000);
 
-      function applyState() {
-        if (S.duty && S.running) {
-          /* 保持 */
-        }
-        if (!S.duty) {
-          S.running = false;
-          S.accum = 0;
-        }
-        render();
-      }
       // 演示状态切换
       document.querySelectorAll('input[name="dstate"]').forEach((r) =>
         r.addEventListener("change", () => {
@@ -1421,6 +1437,7 @@
             S.duty = false;
             S.running = false;
             S.accum = 0;
+            S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段：段尾冻结在下班时刻
           }
           if (v === "run") {
             S.duty = true;
@@ -1429,6 +1446,7 @@
             S.accum = 0;
             S.clockInTs = Date.now();
             S.batFrozen = null;
+            S.pausedAtMin = null; // 新班开始：段尾重新跟随当前时刻
           }
           if (v === "pause") {
             S.duty = true;
@@ -1436,9 +1454,9 @@
             S.accum = 335 * 60000;
             S.clockInTs = Date.now() - 335 * 60000;
             S.batFrozen = null;
+            S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段（= 335，与 accum 对齐）
           }
           // 打卡动作内部数据（pill/按钮/环）随 render 刷新
-          S._force = true;
           render();
           // pill 与按钮文案由 render 依据 duty/running 计算 ✓
         }),
@@ -1458,11 +1476,13 @@
               if (!S.running) {
                 S.running = true;
                 S.startTs = Date.now(); // 累计保留，续计
+                S.pausedAtMin = null; // 恢复计时：段尾重新跟随当前时刻
               }
             } else if (r.value === "rest") {
               if (S.running) {
                 S.running = false;
                 S.accum += Date.now() - S.startTs; // 收段
+                S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 段尾冻结在收段时刻
               }
             }
             syncDevkit();
@@ -1474,6 +1494,7 @@
         if (!S.duty) return;
         S.running = false;
         S.accum = 0;
+        S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段：段尾冻结在重置时刻
         syncDevkit();
         render();
       });
@@ -1513,11 +1534,13 @@
           S.accum = 0;
           S.clockInTs = Date.now(); // 上班时刻
           S.batFrozen = null;
+          S.pausedAtMin = null; // 新班开始：段尾重新跟随当前时刻
         } else {
           S.batFrozen = clamp01(1 - elapsed() / (S.autoOutH * 3600000)); // 冻结结束那一刻电量
           S.duty = false;
           S.running = false;
           S.accum = 0;
+          S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段：段尾冻结在下班时刻
         }
         syncDevkit();
         render();
@@ -1583,17 +1606,18 @@
       }
 
       // ===== 玻璃滚动浮钮（借鉴 CapsuleTODO design/assets/js/glass-bar.js）：统计板内容
-      // 溢出时在右侧缝隙出现 4×16 透明玻璃浮钮，随滚动比例移动、可拖拽。轨道几何取"锚层"
-      // 矩形（滚动体铺满锚层，且锚层不受开板 scale 揭示动画影响 → 中途取值也是终态）=====
+      // 溢出时在右侧缝隙出现 4×16 透明玻璃浮钮，随滚动比例移动。滚动体 = 两个翻转面
+      // （.flip-face 自带 overflow-y:auto，V0.007 起滚动在面内），sync 按翻转态取当前显示面；
+      // 轨道几何取"锚层"矩形（锚层 = 板层本身，不参与 scale 揭示/翻转 → 中途取值也是终态）=====
       /**
-       * 给滚动体挂一枚玻璃浮钮（原生滑杆同时隐藏）。
+       * 给翻转统计板挂一枚玻璃浮钮（原生滑杆同时隐藏）。
        * # 参数
-       * - `scroller` 滚动容器；`anchor` 浮钮锚层（不随内容滚、几何稳定）
+       * - `faces` 候选滚动面（.flip-face 列表）；`anchor` 浮钮锚层（不进滚动体、几何稳定）
        * - `right` 浮钮距锚层右缘的像素（落在玻璃内距带的缝隙里）
        */
-      function makeGlassBar(scroller, anchor, right = 6) {
+      function makeGlassBar(faces, anchor, right = 6) {
         const THUMB_H = 16; // 与 .glass-thumb 高度同源
-        scroller.classList.add("glass-scroll");
+        for (const f of faces) f.classList.add("glass-scroll"); // 各面隐藏原生滑杆
         const bar = document.createElement("div");
         bar.className = "glass-bar";
         bar.hidden = true;
@@ -1601,7 +1625,12 @@
         thumb.className = "glass-thumb";
         bar.appendChild(thumb);
         anchor.appendChild(bar);
+        const activeFace = () =>
+          statsBoard.classList.contains("flipped")
+            ? anchor.querySelector(".flip-face.back")
+            : anchor.querySelector(".flip-face.front");
         const sync = () => {
+          const scroller = activeFace();
           const ar = anchor.getBoundingClientRect();
           const cs = getComputedStyle(scroller);
           const padT = parseFloat(cs.paddingTop) || 0;
@@ -1616,11 +1645,16 @@
           const trackH = ar.height - padT - padB - THUMB_H;
           thumb.style.top = `${Math.round((scroller.scrollTop / range) * trackH)}px`;
         };
-        scroller.addEventListener("scroll", sync, { passive: true });
+        for (const f of faces) f.addEventListener("scroll", sync, { passive: true });
         new ResizeObserver(sync).observe(anchor); // 窗口尺寸变化时重算轨道
+        // 翻面/开合不产生 scroll 事件：观察板层类变化（flipped/open），即时重取活动面
+        new MutationObserver(sync).observe(anchor, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
         sync();
       }
-      makeGlassBar(statsBoard.querySelector(".board-glass"), statsBoard);
+      makeGlassBar(statsBoard.querySelectorAll(".flip-face"), statsBoard);
 
       // 点板外任意位置收板（板内点击与按钮自身的开合不在此列）
       document.addEventListener("click", (e) => {
