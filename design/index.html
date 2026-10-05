@@ -583,9 +583,12 @@
                 <div class="wc-chart">
                   <div class="wc-plot">
                     <div class="wc-avg" id="wc-avg-line"></div>
-                    <div class="wc-cols">
-                      <!-- 七日堆叠柱由 renderWeekMock() 依 WEEK_PREV + 今日实时数据生成 -->
-                    </div>
+                    <!-- 七日堆叠柱 SVG 化（PL013.5 追加）：柱缘坐标 JS 取整，杜绝 flex 均分
+                         非整列宽的小数左缘（缺 1px 观感）；选中环 = 常驻 rect，闪现走 opacity -->
+                    <svg class="wc-svg" id="wcSvg" preserveAspectRatio="none">
+                      <g id="wcBars"></g>
+                      <path id="wcSelRing" />
+                    </svg>
                   </div>
                   <div class="wc-days">
                     <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span
@@ -695,7 +698,7 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.012。窗口 300×400 =
+        原型版本 ui2.0 V0.013。窗口 300×400 =
         参考项目同尺寸；上方侧角钮与各控件均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
@@ -905,6 +908,12 @@
         $("arrow-next").disabled = offset >= 0;
       }
 
+      /** 顶部圆角矩形轮廓（柱体与选中环共用：下面直角、上面圆角，用户定案），返回 path d */
+      function roundedTopRect(x, y, w, h, r) {
+        const rr = Math.min(r, h / 2, w / 2);
+        return `M${x},${(y + h).toFixed(1)} L${x},${(y + rr).toFixed(1)} Q${x},${y} ${(x + rr).toFixed(1)},${y} L${(x + w - rr).toFixed(1)},${y} Q${x + w},${y} ${(x + w).toFixed(1)},${(y + rr).toFixed(1)} L${(x + w).toFixed(1)},${(y + h).toFixed(1)} Z`;
+      }
+
       /** 周卡（屏幕使用时间风格）：日均 / 浮动徽章 / 七日堆叠柱 全由数据派生（三值由 renderTriple 负责） */
       function renderWeekMock() {
         const segs = todaySegsMin();
@@ -918,24 +927,61 @@
         const viewIdx = days.length - 1 + (S.viewDay || 0);
         const maxTotal = Math.max(...days.map((d) => d.work + d.rest));
         const avgWork = days.reduce((a, d) => a + d.work, 0) / days.length;
-        const cols = days
-          .map((d, i) => {
-            const total = d.work + d.rest;
-            const hPct = ((total / maxTotal) * 100).toFixed(1);
-            const wPct = total ? ((d.work / total) * 100).toFixed(1) : "0";
-            const rPct = total ? (100 - Number(wPct)).toFixed(1) : "0";
-            const segsHtml =
-              (Number(rPct) > 0 ? `<i class="seg rest" style="height: ${rPct}%"></i>` : "") +
-              (Number(wPct) > 0 ? `<i class="seg work" style="height: ${wPct}%"></i>` : "");
-            const sel = i === viewIdx ? " sel" : "";
-            return `<div class="wc-col${sel}"><div class="wc-bar" style="height: ${hPct}%">${segsHtml}</div></div>`;
-          })
-          .join("");
-        const colsEl = document.querySelector(".wc-cols");
+        // 七日堆叠柱 SVG 几何（PL013.5 追加）：viewBox = 实际像素宽×高，柱 x 取整杜绝小数左缘；
+        // 槽位 = W/7（可带小数，仅用于求柱心），柱宽固定 20，每柱两枚 rect（下 rest 上 work）
+        const svg = $("wcSvg");
+        const W = svg.clientWidth;
+        const H = svg.clientHeight;
+        if (svg.viewBox.baseVal.width !== W || svg.viewBox.baseVal.height !== H) {
+          svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+        }
+        const slot = W / 7;
+        // 上下各留 1.5px 描边余量（PL013.5）：环描边以柱轮廓为中心线内外各 0.75px，
+        // 满高柱轮廓与 viewBox 边界重合时外半段被 SVG 裁剪（顶弧切平/底部露线）——
+        // 柱底收至 H−1.5 让描边全程落界内
+        const plotH = H - 3;
+        const geom = days.map((d, i) => {
+          const total = d.work + d.rest;
+          const barH = total ? (total / maxTotal) * plotH : 0;
+          const restH = total ? (d.rest / total) * barH : 0;
+          return {
+            x: Math.round(i * slot + (slot - 20) / 2), // 柱缘整数：小数左缘的根治点
+            w: 20,
+            y: H - 1.5 - barH, // 柱顶（柱底 = H−1.5，环定位用）
+            barH,
+            workH: total ? (d.work / total) * barH : 0,
+            restH,
+          };
+        });
+        wcGeom = geom;
+        const barsG = $("wcBars");
         const sig = `${days.length}|${Math.round(todayWork)}|${S.viewDay || 0}`; // 含查看日：切日必须重画选中柱
-        if (colsEl.dataset.sig !== sig) {
-          colsEl.innerHTML = cols;
-          colsEl.dataset.sig = sig;
+        if (barsG.dataset.sig !== sig) {
+          barsG.innerHTML = geom
+            .map((g) => {
+              // 柱段规范（用户定案）：休息（绿）在上、工作（橙）在下；下面直角、上面圆角——
+              // 圆角由顶部的 rest 段承担（roundedTopRect：path 只圆上角两弧，SVG rx 四角全圆不可用）；
+              // 无休息的柱圆角回落到 work 段顶
+              const r = Math.min(3, g.w / 2);
+              const work =
+                g.workH > 0
+                  ? g.restH > 0
+                    ? `<rect class="seg work" x="${g.x}" y="${(g.y + g.restH).toFixed(1)}" width="${g.w}" height="${g.workH.toFixed(1)}" />`
+                    : `<path class="seg work" d="${roundedTopRect(g.x, g.y, g.w, g.workH, r)}" />`
+                  : "";
+              const rest =
+                g.restH > 0
+                  ? `<path class="seg rest" d="${roundedTopRect(g.x, g.y, g.w, g.restH, r)}" />`
+                  : "";
+              return work + rest;
+            })
+            .join("");
+          barsG.dataset.sig = sig;
+          if (selTimer) flashSel(selIdx); // 重建冲掉环：高亮仍活跃则重启序列
+        }
+        if ((S.viewDay || 0) !== lastViewDay) {
+          lastViewDay = S.viewDay || 0;
+          flashSel(viewIdx); // 切日即闪：0.3s 亮起 → 1s 保持 → 0.5s 淡出（PL013.5）
         }
         $("wc-avg-line").style.bottom = `${((avgWork / maxTotal) * 100).toFixed(1)}%`;
         $("wc-avg-num").textContent = fmtCN(avgWork);
@@ -948,6 +994,34 @@
           ? '<path d="m18 15-6-6-6 6" />'
           : '<path d="m6 9 6 6 6-6" />';
         $("wc-delta-text").textContent = `浮动 ${Math.abs(deltaPct)}%`;
+      }
+
+      // ===== 周卡选中环闪现即逝（PL013.5，SVG 环版）：切换查看日时环亮起（0.3s 淡入）
+      // → 保持 1s → 淡出（0.5s），任何柱不常驻；环 = 常驻 rect，闪现走 opacity 双速过渡 =====
+      let selTimer = 0;
+      let selIdx = -1;
+      let lastViewDay = 0; // 初值 = 初始 viewDay：首帧不算"切换"，加载无常驻环
+      let wcGeom = []; // 最近一次渲染的七日柱几何（x/y/w/barH，环轮廓消费）
+      /** 选中环闪现：清旧计时器 → 环按最新几何定位到新柱并亮起（0.3s opacity 淡入）
+       *  → 1.3s 后熄灭（0.5s 淡出走基态 transition）；环为开口路径——只包左右两侧与
+       *  顶部圆弧，底部不封口（用户定案：底部不露出） */
+      function flashSel(idx) {
+        if (selTimer) clearTimeout(selTimer);
+        selIdx = idx;
+        const ring = $("wcSelRing");
+        const g = wcGeom[idx];
+        if (!g) return;
+        const r = Math.min(3, g.w / 2);
+        ring.setAttribute(
+          "d",
+          `M${g.x},${(g.y + g.barH).toFixed(1)} L${g.x},${(g.y + r).toFixed(1)} Q${g.x},${g.y} ${(g.x + r).toFixed(1)},${g.y} L${(g.x + g.w - r).toFixed(1)},${g.y} Q${g.x + g.w},${g.y} ${(g.x + g.w).toFixed(1)},${(g.y + r).toFixed(1)} L${(g.x + g.w).toFixed(1)},${(g.y + g.barH).toFixed(1)}`,
+        );
+        ring.classList.add("on");
+        selTimer = setTimeout(() => {
+          ring.classList.remove("on");
+          selTimer = 0;
+          selIdx = -1;
+        }, 1300);
       }
 
       // 日期行左右箭头：往左看过去数据，右边界 = 今天
@@ -1691,6 +1765,9 @@
         if (open) {
           if (settingsBoard.classList.contains("open")) setSettings(false); // 两板互斥
           flyBoard(statsBoard, statsBtn);
+          // 首柱绘制发生在板隐藏/缩零态时，开板会拉伸陈旧栅格（首进显示不正确）——
+          // 清 sig 强制下一 tick 重绘，揭示动画中途即以 scale(1) 正确比例重拍（PL013.5）
+          delete $("wcBars").dataset.sig;
         }
         statsBoard.classList.toggle("open", open);
         if (!open) statsBoard.classList.remove("flipped"); // 关板复位到统计面

@@ -299,39 +299,30 @@
   position: absolute;
   inset: 12px 0 12px 0; /* 顶部 12px「平均」标签条 + 底部 12px 星期标签行，柱区与均线共用同一坐标系 */
 }
-.wc-cols {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: flex-end;
-  gap: 7px;
-}
-.wc-col {
-  flex: 1;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-}
-.wc-bar {
-  width: 100%;
-  max-width: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  border-radius: 3px;
-  overflow: hidden;
-}
-.wc-bar .seg {
+/* 七日堆叠柱 SVG（PL013.5 追加）：柱缘坐标 JS 取整，杜绝 flex 均分非整列宽的小数左缘 */
+.wc-svg {
   display: block;
   width: 100%;
+  height: 100%;
 }
-.wc-bar .seg.work {
-  background: var(--work);
+.wc-svg .seg.work {
+  fill: var(--work);
 }
-.wc-bar .seg.rest {
-  background: var(--rest);
+.wc-svg .seg.rest {
+  fill: var(--rest);
+}
+/* 选中环：常驻 rect 闪现 opacity（亮 0.3s / 熄 0.5s，transition 取目标态时长）；
+   不用 box-shadow——环不再改变柱的视觉宽度，亦无小数左缘问题 */
+#wcSelRing {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+#wcSelRing.on {
+  opacity: 1;
+  transition: opacity 0.3s ease;
 }
 .wc-avg {
   position: absolute;
@@ -403,7 +394,4 @@
   margin-left: 4px;
 }
 
-/* 查看日柱高亮：左右箭头切换日期时，对应柱描边点亮 */
-.wc-col.sel .wc-bar {
-  box-shadow: 0 0 0 1.5px var(--accent);
-}
+/* 查看日柱高亮已上移至 #wcSelRing（PL013.5 SVG 环版），旧 .wc-col.sel 规则随 HTML 柱退役 */
