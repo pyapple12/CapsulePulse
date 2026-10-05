@@ -698,7 +698,7 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.013。窗口 300×400 =
+        原型版本 ui2.0 V0.014。窗口 300×400 =
         参考项目同尺寸；上方侧角钮与各控件均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
@@ -1253,11 +1253,8 @@
         const W = svg.clientWidth;
         if (svg.viewBox.baseVal.width !== W) {
           svg.setAttribute("viewBox", `0 0 ${W} 12`);
-          // 彗星专用裁剪右界收进 D 圆心（W−6）：白纹行程不变，越过圆心的露出段被硬裁，
-          // 切断线藏进圆盘（r5.4+描边）视觉无痕；此 clip 挂在无平移的外壳上故真停在 W−6
-          //（clipPath 按引用元素用户坐标系解释，若挂走廊组会被 translate 带走——上版教训）；
-          // 段条左圆角仍由 graphClip（全宽）统一裁
-          document.getElementById("graphClipCometRect").setAttribute("width", W - 0);
+          // 彗星裁剪矩形的 x/width 随 renderGraph 每帧按进入节点同步（见彗星块）——
+          // viewBox 变化时无需在此处理；段条左圆角仍由 graphClip（全宽）统一裁
         }
         const xpx = (ts) => ((ts - clockIn) / (endTs - clockIn)) * W;
         const bars = [];
@@ -1353,6 +1350,12 @@
           const wasHidden = comet.style.display === "none";
           comet.style.display = "";
           comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
+          // 出生点裁剪（PL013.6）：彗星层外壳的 clip 左界 = 进入节点中心——白纹越过
+          // W 圆心才可见（恢复旧走廊 overflow:hidden 的"从圆心发出"观感，SVG 迁移时丢失）
+          document.getElementById("graphClipCometRect").setAttribute("x", birthX.toFixed(2));
+          document
+            .getElementById("graphClipCometRect")
+            .setAttribute("width", (W - birthX).toFixed(2));
           if (wasHidden) launchComet(true); // 从过去日切回：即时满员，避免逐格补流的稀疏期
         } else {
           // 过去日班已结束：停发白纹并清场（流只属于进行中的班；walk=0 亦令发射器自然静默）
@@ -1418,12 +1421,14 @@
         }
       }
 
-      // ===== 电量（按自动下班时长由满到空；下班后冻结）=====
+      // ===== 电量（工作日进度条：反映距自动下班点还剩多少墙钟时间，用户定案）=====
+      // 分子 = 距上班时刻的墙钟时长——与班内计时（elapsed）完全解耦：重置/休息/暂停
+      // 都不影响电池（下班点不因休息顺延，休息期间照常消耗）；下班后冻结在当下刻度
       function renderBattery() {
         const ratio =
           !S.duty && S.batFrozen != null
             ? S.batFrozen
-            : clamp01(1 - elapsed() / (S.autoOutH * 3600000));
+            : clamp01(1 - (Date.now() - S.clockInTs) / (S.autoOutH * 3600000));
         const pct = Math.round(ratio * 100);
         $("batFill").style.width = `${pct}%`;
         $("batPct").textContent = `${pct}%`;
@@ -1611,7 +1616,7 @@
         r.addEventListener("change", () => {
           const v = r.value;
           if (v === "off") {
-            S.batFrozen = clamp01(1 - elapsed() / (S.autoOutH * 3600000));
+            S.batFrozen = clamp01(1 - (Date.now() - S.clockInTs) / (S.autoOutH * 3600000));
             S.duty = false;
             S.running = false;
             S.accum = 0;
@@ -1714,7 +1719,7 @@
           S.batFrozen = null;
           S.pausedAtMin = null; // 新班开始：段尾重新跟随当前时刻
         } else {
-          S.batFrozen = clamp01(1 - elapsed() / (S.autoOutH * 3600000)); // 冻结结束那一刻电量
+          S.batFrozen = clamp01(1 - (Date.now() - S.clockInTs) / (S.autoOutH * 3600000)); // 冻结下班那一刻电量（墙钟口径，与电池驱动同源）
           S.duty = false;
           S.running = false;
           S.accum = 0;
