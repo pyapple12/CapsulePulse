@@ -86,7 +86,8 @@
   fill: rgba(120, 132, 146, 0.5);
   stroke: rgba(255, 255, 255, 0.7);
   stroke-width: 1;
-  transition: fill 0.3s ease;
+  /* 不挂 fill 过渡：节点层按位复用时 R/W/D 身份互换会让旧色渐变到新色
+     （绿 R 被改派成蓝 D 的「先绿后蓝」伪影），点亮改直切；reduced-motion 缺口随之闭合 */
 }
 .graph-node text {
   font-family: var(--font-stack);

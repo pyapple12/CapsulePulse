@@ -654,7 +654,7 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.009。窗口 300×400 =
+        原型版本 ui2.0 V0.011。窗口 300×400 =
         参考项目同尺寸；上方侧角钮与各控件均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
@@ -750,15 +750,15 @@
         [228, 335, "work"],
       ];
 
-      // ===== 周模拟数据（接近真实状态）：本周前 6 天工作/休息分钟 + 上周日均工作。
-      // 今天（第七天）由 EV_MOCK 实时累计，三值/堆叠柱/日均/浮动/明细全由此派生 =====
+      // ===== 周模拟数据（接近真实状态）：本周前 6 天的上班时刻 + 工作/休息分钟 + 上周日均工作。
+      // 今天（第七天）由 EV_MOCK 实时累计，三值/堆叠柱/日均/浮动/明细/历史图谱全由此派生 =====
       const WEEK_PREV = [
-        { day: "一", work: 276, rest: 84 }, // 4h36m + 1h24m
-        { day: "二", work: 243, rest: 117 }, // 4h03m + 1h57m
-        { day: "三", work: 302, rest: 66 }, // 5h02m + 1h06m
-        { day: "四", work: 208, rest: 142 }, // 3h28m + 2h22m
-        { day: "五", work: 265, rest: 96 }, // 4h25m + 1h36m
-        { day: "六", work: 36, rest: 58 }, // 休息日：36m + 58m
+        { day: "一", in: "09:12", work: 276, rest: 84 }, // 4h36m + 1h24m
+        { day: "二", in: "08:47", work: 243, rest: 117 }, // 4h03m + 1h57m
+        { day: "三", in: "09:38", work: 302, rest: 66 }, // 5h02m + 1h06m
+        { day: "四", in: "10:03", work: 208, rest: 142 }, // 3h28m + 2h22m
+        { day: "五", in: "08:55", work: 265, rest: 96 }, // 4h25m + 1h36m
+        { day: "六", in: "11:20", work: 36, rest: 58 }, // 休息日：36m + 58m
       ];
       const LAST_WEEK_AVG_WORK = 196; // 上周日均工作（分钟）
 
@@ -766,24 +766,47 @@
       function todaySegsMin(offset = 0) {
         const nowMin = (Date.now() - S.clockInTs) / 60000;
         if (offset < 0) {
-          const totals = WEEK_PREV[WEEK_PREV.length + offset];
-          // 确定式合成：从上班时刻（0 分）连续铺满当日总时长——工作拆三段（45/33/22%）、
-          // 休息拆两段（60/40%）首尾相接不留缝，末段吸收取整余量保总量；班末余量留白
+          const idx = WEEK_PREV.length + offset;
+          const totals = WEEK_PREV[idx];
+          // 确定式合成：从上班时刻（0 分）连续铺满当日总时长。三套分段形态按日轮换
+          //（工作/休息配比各自合计 1.0），每类段的末次出现吸收取整余量保总量——
+          // 逐日形状肉眼可辨，不再千日一面；段间连续相接不留缝
+          const plans = [
+            [
+              ["work", 0.45],
+              ["rest", 0.6],
+              ["work", 0.33],
+              ["rest", 0.4],
+              ["work", 0.22],
+            ],
+            [
+              ["work", 0.3],
+              ["rest", 0.5],
+              ["work", 0.45],
+              ["rest", 0.5],
+              ["work", 0.25],
+            ],
+            [
+              ["work", 0.25],
+              ["rest", 0.35],
+              ["work", 0.3],
+              ["rest", 0.35],
+              ["work", 0.25],
+              ["rest", 0.3],
+              ["work", 0.2],
+            ],
+          ];
+          const plan = plans[idx % plans.length];
+          const lastOf = {};
+          plan.forEach(([type], i) => (lastOf[type] = i)); // 每类段末次出现的位次
           let t = 0;
           const segs = [];
-          const plan = [
-            ["work", 0.45],
-            ["rest", 0.6],
-            ["work", 0.33],
-            ["rest", 0.4],
-            ["work", 0.22],
-          ];
           const used = { work: 0, rest: 0 };
-          plan.forEach(([type, ratio], idx) => {
-            const isLast = idx === plan.length - 1;
-            const mins = isLast
-              ? totals[type] - used[type] // 末段兜底：合成总量与当日总计严格相等
-              : Math.round(totals[type] * ratio);
+          plan.forEach(([type, ratio], i) => {
+            const mins =
+              i === lastOf[type]
+                ? totals[type] - used[type] // 末次兜底：该类合成总量与当日总计严格相等
+                : Math.round(totals[type] * ratio);
             used[type] += mins;
             if (mins <= 0) return;
             segs.push({ type, start: t, end: t + mins });
@@ -801,6 +824,17 @@
           return { type, start: o0, end };
         }).filter((s) => s.end > s.start);
       }
+      /** 查看日上班时间戳：今天 = 演示 clockInTs；过去日 = 真实日历日期 + 该日模拟上班时刻
+       *  （WEEK_PREV.in）。时间图谱与明细面共用同源锚点，轴标/段条/时刻列随查看日切换 */
+      function dayClockInTs(offset) {
+        if ((offset || 0) >= 0) return S.clockInTs;
+        const d = new Date(); // 真实日历今天（与 renderDayLabel 同锚）
+        d.setDate(d.getDate() + offset);
+        const [h, m] = WEEK_PREV[WEEK_PREV.length + offset].in.split(":").map(Number);
+        d.setHours(h, m, 0, 0);
+        return d.getTime();
+      }
+
       /** 分钟 → "XhYYm"（三值数字） */
       const fmtHM = (m) => `${Math.floor(m / 60)}h${String(Math.round(m) % 60).padStart(2, "0")}m`;
       /** 分钟 → "X小时Y分钟"（日均数字） */
@@ -890,7 +924,7 @@
         const offset = S.viewDay || 0;
         const segs = todaySegsMin(offset);
         const nowMin = (Date.now() - S.clockInTs) / 60000;
-        const dayClockIn = S.clockInTs + offset * 86400000; // 查看日上班锚点（与 renderGraph 同口径）
+        const dayClockIn = dayClockInTs(offset); // 查看日上班锚点（与 renderGraph 同源）
         const fmtT = (min) => {
           const d = new Date(dayClockIn + min * 60000);
           return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -1059,45 +1093,48 @@
         $("dialArcs").innerHTML = svg;
       }
 
-      // ===== 时间图谱：上班→自动下班 D 的分段进度条 + 里程碑节点（R 进休 / W 复工 / D）=====
+      // ===== 时间图谱：分段进度条 + 里程碑节点（R 进休 / W 复工 / D 日终）。
+      // 今天轴 = 上班→自动下班（D 计划位）；过去日轴 = 该日上班→实际下班（D 亮 = 工作结束）=====
       const SVG_NS = "http://www.w3.org/2000/svg";
       const graphPad = (n) => String(n).padStart(2, "0");
       const graphHhmm = (ts) => {
         const d = new Date(ts);
         return `${graphPad(d.getHours())}:${graphPad(d.getMinutes())}`;
       };
-      /** 渲染时间图谱：段按状态染色（工作橙红 / 休息绿）推进到当前时刻，之后留空槽；
-       *  节点由状态转换生成（进休 R 绿 / 复工 W 橙红）+ 固定 D（自动下班，最右端），到达即点亮 */
+      /** 渲染时间图谱：今天 = 段条推进到当前 + 在岗蓝占位到 D（计划终点），彗星在飞；
+       *  过去日 = 该日上班 → 实际下班的整段回放，窗口随查看日切换、段条铺满无死区，
+       *  D = 日终标记（工作结束即亮，与自动下班无关——用户定案），彗星停发（班已结束） */
       function renderGraph() {
         const track = $("graphTrack");
         const cp = $("graphCp");
         if (!track || !cp) return;
-        const offset = S.viewDay || 0;
-        const clockIn = S.clockInTs + offset * 86400000; // 查看日的上班时刻
-        const spanMs = S.autoOutH * 3600000;
-        const nowTs = offset === 0 ? Date.now() : clockIn + spanMs; // 过去日 = 整班已结束
-        const endTs = clockIn + spanMs;
-        const pct = (ts) => ((ts - clockIn) / spanMs) * 100;
+        const isToday = (S.viewDay || 0) === 0;
+        const clockIn = dayClockInTs(S.viewDay || 0); // 查看日的上班时刻（随日切换）
+        const wallNow = Date.now();
         // 段与表盘同源：今天 = mock 段 + 进行中尾段；过去日 = 合成演示分段（整体已落定）
         let segs;
-        if (offset === 0) {
+        if (isToday) {
           segs = EV_MOCK.map(([o0, o1, st]) => [clockIn + o0 * 60000, clockIn + o1 * 60000, st]);
           const cur = S.running ? "work" : "rest";
           const tail = segs[segs.length - 1];
-          if (nowTs > tail[1]) {
+          if (wallNow > tail[1]) {
             if (tail[2] === cur) {
-              tail[1] = nowTs;
+              tail[1] = wallNow;
             } else {
-              segs.push([tail[1], nowTs, cur]);
+              segs.push([tail[1], wallNow, cur]);
             }
           }
         } else {
-          segs = todaySegsMin(offset).map(({ start, end, type }) => [
+          segs = todaySegsMin(S.viewDay || 0).map(({ start, end, type }) => [
             clockIn + start * 60000,
             clockIn + end * 60000,
             type,
           ]);
         }
+        // 窗口：今天 = 上班 → 自动下班（D 计划位）；过去日 = 上班 → 该日实际下班（末段终点）
+        const endTs = isToday ? clockIn + S.autoOutH * 3600000 : segs[segs.length - 1][1];
+        const nowTs = isToday ? wallNow : endTs; // 过去日整班已结束：查看时刻 = 下班点
+        const pct = (ts) => ((ts - clockIn) / (endTs - clockIn)) * 100;
         const bars = [];
         const nodes = [];
         segs.forEach(([t0, t1, st], i) => {
@@ -1129,6 +1166,11 @@
           el.style.left = `${b.left.toFixed(2)}%`;
           el.style.width = `${b.w.toFixed(2)}%`;
         });
+        // 节点数量变化（形态轮换日间切换，如 7 节点的周三 ↔ 5 节点的周二）→ 整层重建：
+        // 新元素以终态样式直接呈现，不触发 fill 过渡，杜绝「就地改派身份」的跨色渐变伪影
+        if (cp.children.length !== nodes.length) {
+          cp.innerHTML = "";
+        }
         while (cp.children.length > nodes.length) cp.lastChild.remove();
         while (cp.children.length < nodes.length) {
           // SVG 节点：circle + text；central 对齐的是字体盒而非墨迹，大写字母墨迹恒低 0.5px，dy=-0.5 校正回光学居中
@@ -1182,9 +1224,18 @@
             );
           })();
         }
-        const launchPct = pct(segs[segs.length - 1][0]); // 进入节点 = 当前段起点
-        comet.style.left = `${launchPct.toFixed(2)}%`; // 左缘 = 进入节点中心：白纹从徽章中心出生
-        comet.style.width = `${(100 - launchPct).toFixed(2)}%`; // 右缘 = D 节点中心：白纹在此消失
+        if (isToday) {
+          const wasHidden = comet.style.display === "none";
+          const launchPct = pct(segs[segs.length - 1][0]); // 进入节点 = 当前段起点
+          comet.style.display = "";
+          comet.style.left = `${launchPct.toFixed(2)}%`; // 左缘 = 进入节点中心：白纹从徽章中心出生
+          comet.style.width = `${(100 - launchPct).toFixed(2)}%`; // 右缘 = D 节点中心：白纹在此消失
+          if (wasHidden) launchComet(true); // 从过去日切回：即时满员，避免逐格补流的稀疏期
+        } else {
+          // 过去日班已结束：停发白纹并清场（流只属于进行中的班；walk=0 亦令发射器自然静默）
+          comet.style.display = "none";
+          for (const s of [...comet.children]) s.remove();
+        }
         $("axisStart").textContent = `上班 ${graphHhmm(clockIn)}`;
         $("axisEnd").textContent = `下班 ${graphHhmm(endTs)}`;
       }
