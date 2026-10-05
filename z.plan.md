@@ -1262,3 +1262,55 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 - 豁免清单 13 项条件豁免逐条复核全部维持原判，无豁免外新静默兜底
 - 前端零 any、零 v-html、零幽灵依赖；业务零含量复核通过（blockWidth/weekBarWidth/formatDisplay 等均为注释声明的纯展示换算）
 - FIX002.1 语义在 A003 后仍成立：回滚路径裸 diag（错误可上抛）与 lib.rs warn_diag（吞错双写）分工合理——P3-5 仅 quit 一处属同族漏改
+
+---
+
+## 附录 PL013：时间图谱 SVG 化（2026-10-06 立项）
+
+> 背景：历史图谱重锚（V0.011）后用户报"放大缩小时段条与节点对不齐"——根因 = 段条（HTML div + 百分比定位）与节点（SVG 小图 + px transform）两套坐标体系在缩放/DPI 变化时各自落到不同设备像素，半像素漂移不可根除。
+> 关键洞察：①两套坐标系各自落整是漂移根源，唯一治本解 = 段/节点/彗星进同一幅 SVG——矢量内部由构造保证对齐，任何缩放整幅统一光栅化；②viewBox 必须用"实际像素宽 × 固定高 12"，不用 0-100 百分比宽（preserveAspectRatio:none 拉伸下圆会变椭圆）；③彗星白纹必须同进 SVG（出生/消失点与节点像素级同源），否则走廊又回两套坐标。
+> 目标：时间图谱绘制层整体 SVG 化——任何缩放下节点压段交界、D 贴条尾零漂移；V0.011 全部既有行为（日终 D 语义/彗星停发/形态轮换/窗口重锚）零回归；零新依赖。
+> 状态：✅ 已完成（2026-10-06 收口，ui2.0 V0.012；PL013 四条勾结见 x.progress.md，验证记录见 .temp/pl013-verification.md——结构断言改前 FAIL/改后 PASS、对齐 maxAbsDev 0.01px、今天/过去日/彗星回归全过；缩放矩阵设备像素层由用户实机复核（探针盲区已记档）；计划外缺陷：节点平移漏算 cx=6 系统性右偏，改后探针当场抓出修复）
+> 编号说明：PL012 留给"原型映射回 ui/"（design/README.md 自 2026-09-16 起以 PL012 指代映射期），本附录顺延取 PL013。
+
+### 方向定案（2026-10-06 用户拍板）
+
+1. **整幅 SVG 同坐标系**：段条/节点/彗星全部进一幅 `<svg>`，viewBox = `0 0 W 12`（W = clientWidth 实测，每渲染读、宽变才写回），preserveAspectRatio="none" 吸收亚像素差，1 用户单位 = 1 CSS px——"固定高度"落为高 12 恒定、宽按实测，圆恒为圆
+2. **彗星一并进 SVG**：白纹 rect 夹在段与节点之间（保持 track < comet < nodes 原层级），出生/消失点与节点像素级同源；COMET 参数/动画钟/帧哨兵机制一行不动
+3. **语义层零改动**：V0.011 的窗口重锚/日终 D/三形态轮换/停发清场全部沿用，本次只换绘制输出层
+
+### 实现措施（按文件/函数拆解）
+
+#### design/index.html
+
+- **HTML**：`.graph` 内 graph-track/graph-cp 两 div 替换为单 `<svg id="graphSvg" height="12" width="100%" preserveAspectRatio="none">`，defs 五件——clipPath `#graphClip`（rect rx=6 全宽 h12，圆角统一裁）+ linearGradient `#gWork/#gRest/#gDuty`（竖直，色值 = 现 CSS 渐变原值）+ `#gStripe`（横向 透明白 22% 透明）；层序 = ghost rect（rx=6 空槽）→ g#graphBars（clip）→ g#graphComet（clip）→ g#graphNodes
+- **renderGraph**：`pct()` 换 `xpx(ts) = ((ts − clockIn) / (endTs − clockIn)) × W`；W = svg.clientWidth 每帧读、viewBox 宽 ≠ W 才 setAttribute；段条输出 rect（x/width/y=0/height=12，class work/rest/duty/active 保留，CSS `fill: url(#gWork)` 系）；节点输出 g.graph-node（circle cx=交界 cy=6 r=5.4 + text 同 x y=6 dy=-0.5），D 的 cx = W − 6（右贴边，取代 translate(-100%)）；"数量对齐复用 + setAttribute"与"数量变化整层重建"两机制原样保留（createElement 换 createElementNS）
+- **spawnStripe/launchComet**：白纹 rect（x=-24 w=24 h=12 fill=url(#gStripe) class=comet-stripe）append 目标换 #graphComet；走廊 group 每次 render 更新 transform=translate(birthX,0)；--walk = W − birthX + 24（rect 初始 x=-24，keyframes 改 translateX(0 → var(--walk))，走出 clip 即消失）；过去日停发清场与 wasHidden 满员沿用
+- **不动**：dayClockInTs/窗口重锚/D 亮灭判定/三形态合成/COMET 常量/动画钟/帧哨兵
+
+#### design/assets/css/graph.css
+
+- **删**：.graph-track/.graph-seg/.graph-cp/.graph-comet/.graph-node 的定位规则（position/left/width/overflow/transform/background）
+- **留改**：颜色规则搬家（.graph-seg.work → fill: url(#gWork) 系；.graph-node circle/text 颜色与 .lit/.end 保留——上轮已去 fill transition 直切）；keyframes cometWalk 改 translateX(0 → var(--walk))；reduced-motion 白纹 display:none 保留（SVG 元素照吃）
+- **不动**：.graph 容器、.chart-axis（仍是 HTML）、节点 text 字体规则
+
+### 验证方案（全部可执行、可断言）
+
+1. **缩放矩阵**：Ctrl± 75%/100%/125%/150% 四档（系统 DPI 禁改）逐一断言——R/W 圆心与段交界 x 差 ≤0.5px、D 圆右缘与条尾 x 差 ≤0.5px（getBoundingClientRect 实测）
+2. **功能回归**：今天（duty 占位/D 暗/彗星满员 10 条）；过去日（铺满 100/D 亮/彗星 0/轴标随日切）；5↔7 节点日切换重建无伪影
+3. **门禁**：script 语法冒烟 + prettier
+4. **反验**：缩放回 100% 后图形与改前逐项一致（层序/颜色/几何）
+
+### 验收标准
+
+- 四档缩放零漂移；V0.011 行为清单零回归；零新依赖；graph.css 定位死规则 grep 清零
+
+### 明确不做（YAGNI 边界）
+
+- ui/ 正式前端不动（PL012 映射期再落）
+- 不引 SVG 库（D3 等）；不做响应式断点重排（容器宽变化只同步 viewBox）
+- 不升级彗星动效（仍 24px 白纹线性位移）；图谱不加点击交互
+
+### 拆分 todo
+
+PL013.1–4 见 x.progress.md「PL013」任务组。

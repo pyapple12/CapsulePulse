@@ -1,117 +1,96 @@
-/* 时间图谱：分段进度条 + R/W/D 节点 + 节点彗星发射流 */
-/* 时间图谱：上班→自动下班 D 的分段进度条 + 里程碑节点（R 进休 / W 复工 / D 自动下班） */
-.graph {
-  position: relative;
-  height: 12px; /* 行高 = 药丸高：与相邻玻璃卡的间距即视觉间距（无行内死区） */
-}
-.graph-track {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
+/* 时间图谱：分段进度条 + R/W/D 节点 + 节点彗星发射流（PL013 起整幅 SVG 同坐标系：
+   段/节点/白纹同一次光栅化，缩放/DPI 变化零漂移；viewBox = 实际像素宽 × 12，JS 每帧同步） */
+#graphSvg {
+  display: block;
+  width: 100%;
   height: 12px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.35); /* 空槽（当前时刻之后的未推进段） */
-  overflow: hidden;
 }
-.graph-seg {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  overflow: hidden;
-  /* 不用 width 过渡：width 动画会走合成层光栅化，与 track 裁剪边界错位漏出 1px 暗线；
-     直接按 100ms 步进写入（单步 < 0.1px）视觉同样平滑 */
+/* 空槽（未推进段） */
+#graphSvg .ghost {
+  fill: rgba(255, 255, 255, 0.35);
 }
-.graph-seg.work {
-  background: linear-gradient(180deg, #ff9d82, var(--work));
+/* 段条渐变端色：stop 走 CSS 类（var() 在 CSS 里可用，属性里不可）；渐变 objectBoundingBox 逐段竖直 */
+#graphSvg stop.sw-from {
+  stop-color: #ff9d82;
 }
-.graph-seg.rest {
-  background: linear-gradient(180deg, #6ee7b7, var(--rest));
+#graphSvg stop.sw-to {
+  stop-color: var(--work);
 }
-.graph-seg.duty {
-  background: linear-gradient(180deg, #7cc0ec, var(--accent)); /* 当前进度 → D 的在岗蓝占位 */
+#graphSvg stop.sr-from {
+  stop-color: #6ee7b7;
 }
-/* 【节点彗星·逐条发射·当前生效 2026-09-26，用户定案发射模型】白纹一条条独立发射：
-   从进入节点中心出生，匀速走到 D 中心消失；发射频率固定（每走 --comet-spacing px 发一条，
-   参数在 index.html 的 COMET 常量），同屏条数随「进入节点 → D」的距离自适应。
-   .graph-comet = 发射走廊（容器，左缘=进入节点中心、右缘=D 中心，JS 定位）；
-   .comet-stripe = 每条独立的白纹，机器表达 = 每条一次 linear 位移动画、播完自移除 */
-.graph-comet {
-  position: absolute;
-  top: 0; /* 与药丸条同带（行高即药丸高），白纹贴着药丸飞行 */
-  height: 12px;
-  overflow: hidden;
-  pointer-events: none;
+#graphSvg stop.sr-to {
+  stop-color: var(--rest);
 }
-.comet-stripe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 24px;
-  height: 100%;
-  background: linear-gradient(
-    135deg,
-    transparent 0 9px,
-    rgba(255, 255, 255, 0.22) 9px 14px,
-    transparent 14px
-  );
+#graphSvg stop.sd-from {
+  stop-color: #7cc0ec;
+}
+#graphSvg stop.sd-to {
+  stop-color: var(--accent);
+}
+/* 白纹端色（135° 斜带硬边复刻：透明 0–0.375 / 白 22% 0.375–0.583 / 透明 0.583–1，沿对角轴） */
+#graphSvg stop.ss-edge {
+  stop-color: #fff;
+  stop-opacity: 0;
+}
+#graphSvg stop.ss-mid {
+  stop-color: #fff;
+  stop-opacity: 0.22;
+}
+/* 段条着色（work 橙红 / rest 绿 / duty 在岗蓝占位） */
+#graphSvg .graph-seg.work {
+  fill: url(#gWork);
+}
+#graphSvg .graph-seg.rest {
+  fill: url(#gRest);
+}
+#graphSvg .graph-seg.duty {
+  fill: url(#gDuty);
+}
+/* 【节点彗星·逐条发射·2026-09-26 定稿，PL013 迁 SVG】白纹一条条独立发射：从进入节点
+   中心出生，匀速走到 D 中心消失；发射频率固定（每走 14px 发一条，参数在 index.html 的
+   COMET 常量），同屏条数随走廊宽自适应。白纹 = 走廊 group 内 x=-24 的 rect（24px 出生
+   潜行段），CSS 位移动画走出 clip 即消失；reduced-motion 整体停飞 */
+#graphSvg .comet-stripe {
+  fill: url(#gStripe);
   animation: cometWalk linear forwards;
 }
-/* 单条白纹的一生：从走廊左外 -24px 出生，匀速走到右缘外消失（--walk = 走廊宽，JS 写入） */
 @keyframes cometWalk {
   from {
-    transform: translateX(-24px);
+    transform: translateX(0);
   }
   to {
     transform: translateX(var(--walk, 116px));
   }
 }
-.graph-cp {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.graph-node {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 12px;
-  height: 12px;
-  overflow: visible;
-}
-.graph-node.end {
-  transform: translate(-100%, -50%); /* D 固定在最右端，避免半个圆溢出卡片 */
-}
-.graph-node circle {
+/* 节点（circle+text 由 JS 按交界 x 平移定位；D 由 cx=W−6 右贴边） */
+#graphSvg .graph-node circle {
   fill: rgba(120, 132, 146, 0.5);
   stroke: rgba(255, 255, 255, 0.7);
   stroke-width: 1;
-  /* 不挂 fill 过渡：节点层按位复用时 R/W/D 身份互换会让旧色渐变到新色
+  /* 不挂 fill 过渡：节点按位复用时 R/W/D 身份互换会让旧色渐变到新色
      （绿 R 被改派成蓝 D 的「先绿后蓝」伪影），点亮改直切；reduced-motion 缺口随之闭合 */
 }
-.graph-node text {
+#graphSvg .graph-node text {
   font-family: var(--font-stack);
   font-size: 8px;
   font-weight: 700;
-  text-anchor: middle;
-  dominant-baseline: central; /* 字体盒居中（大写字母墨迹因此恒低 0.5px，由 index.html 的 dy=-0.5 校正） */
   fill: rgba(255, 255, 255, 0.72); /* 未到达：暗字母 */
-  transition: fill 0.3s ease;
 }
-.graph-node.lit text {
+#graphSvg .graph-node.lit text {
   fill: #fff;
 }
-.graph-node.lit.work circle {
-  fill: var(--work);
-}
-.graph-node.lit.rest circle {
+#graphSvg .graph-node.lit.rest circle {
   fill: var(--rest);
 }
-.graph-node.lit.end circle {
+#graphSvg .graph-node.lit.work circle {
+  fill: var(--work);
+}
+#graphSvg .graph-node.lit.end circle {
   fill: var(--accent);
 }
 @media (prefers-reduced-motion: reduce) {
-  .comet-stripe {
+  #graphSvg .comet-stripe {
     display: none;
   }
 }
