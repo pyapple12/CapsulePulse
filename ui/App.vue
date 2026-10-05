@@ -47,6 +47,8 @@ const autoOutAt = ref(0);
 // 统计视图刷新信号：计时/打卡动作后自增，StatsView watch 重拉（保持 Rust 不推送定案）
 const statsRefreshKey = ref(0);
 let statsTimer: number | undefined;
+// 自动下班条自隐句柄（FIX005.1：横幅不再滞留至重启；新触发先清旧防叠加）
+let autoOutHideTimer: number | undefined;
 let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
 // PL011 分态纱浓度：聚焦磨砂态 0% 纱（磨砂已足够）、失焦透明态 30% 纱（保可读）——
@@ -183,6 +185,15 @@ function onConfirmCancel(): void {
   confirmMode.value = null;
 }
 
+/** 收起自动下班条并清自隐句柄（FIX005.1：展示层生命周期与打卡流对称） */
+function clearAutoOutBanner(): void {
+  if (autoOutHideTimer !== undefined) {
+    window.clearTimeout(autoOutHideTimer);
+    autoOutHideTimer = undefined;
+  }
+  autoOutVisible.value = false;
+}
+
 /** 确认框确认：执行打卡 → 刷新在岗态与统计；失败经错误条可见（FIX002.3） */
 async function onConfirmOk(): Promise<void> {
   const mode = confirmMode.value;
@@ -200,6 +211,11 @@ async function onConfirmOk(): Promise<void> {
   // 下班成功即清提醒条（FIX002.2：提醒触发后直接下班不再滞留）
   if (mode === "out" && !actionError.value) {
     reminderVisible.value = false;
+  }
+  // 上班成功清双横幅（FIX005.1：新工作日开始，昨日提醒条/已自动下班条语境失效）
+  if (mode === "in" && !actionError.value) {
+    reminderVisible.value = false;
+    clearAutoOutBanner();
   }
   void refreshStats();
   statsRefreshKey.value++;
@@ -235,11 +251,23 @@ onMounted(() => {
     .then((un) => {
       unlistenReminder = un;
     })
-    .catch((err) => console.error("reminder-due 监听注册失败", err));
-  // workday-auto-out：payload = 回填下班时刻（上班 + N），文案条告知 + 界面即刷
+    .catch((err) => {
+      // 注册失败必须可见（FIX005.3：release 无控制台，ACL 静默拒是登记过的现实风险）
+      actionError.value = `提醒监听注册失败：${String(err)}`;
+      console.error("reminder-due 监听注册失败", err);
+    });
+  // workday-auto-out：payload = 回填下班时刻（上班 + N），文案条告知 + 界面即刷；
+  // 30s 后自隐（FIX005.1：此前无任何清理点会滞留至重启），新触发重置计时
   listen<number>("workday-auto-out", (event) => {
     autoOutAt.value = event.payload;
     autoOutVisible.value = true;
+    if (autoOutHideTimer !== undefined) {
+      window.clearTimeout(autoOutHideTimer);
+    }
+    autoOutHideTimer = window.setTimeout(() => {
+      autoOutVisible.value = false;
+      autoOutHideTimer = undefined;
+    }, 30_000);
     void refreshStats();
     statsRefreshKey.value++;
   })
@@ -252,6 +280,9 @@ onMounted(() => {
 onUnmounted(() => {
   if (statsTimer !== undefined) {
     window.clearInterval(statsTimer);
+  }
+  if (autoOutHideTimer !== undefined) {
+    window.clearTimeout(autoOutHideTimer);
   }
   window.removeEventListener("pointermove", onPointerMove);
   window.removeEventListener("mousedown", onWindowDown);

@@ -62,7 +62,10 @@ mod tests {
         ctx.storage.lock().unwrap().add_session(0, 400).unwrap();
 
         let s = stats_snapshot(&ctx).unwrap();
-        assert_eq!(s.today_secs, 100);
+        // 运行日归一（FIX005 顺带修复）：周一起算时 week_start == day_start，
+        // "周内早于今日"那笔（week+7200）落回今日内，今日三值应随之合并为 300
+        let is_monday = today == week;
+        assert_eq!(s.today_secs, if is_monday { 300 } else { 100 });
         assert_eq!(s.week_secs, 300);
         assert_eq!(s.all_secs, 700);
     }

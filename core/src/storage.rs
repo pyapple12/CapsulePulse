@@ -39,6 +39,7 @@ impl Storage {
     }
 
     /// 内存库（测试专用）。
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StorageError> {
         Self::init(Connection::open_in_memory()?)
     }

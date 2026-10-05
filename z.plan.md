@@ -54,7 +54,7 @@
 11. **.arrow 第三按钮变体**（A003，StatsView）：有意保留的视觉中性小件设计决策。
 12. **refreshKey/offset 同 tick 双拉**（A002→A003）：watch 双源幂等读命令，同 #9 低概率无害。
 13. **pointermove 每帧 querySelectorAll**（A003）：rAF 节流 + 元素 ≤10，成本可忽略。
-14. **session_stats 失败静默冻结旧值**（A003）：有意降级——轮询场景冻结旧值优于报错打断，注释声明。
+14. **session\_\* 快照命令失败静默冻结旧值**（A003；A005 外延 session_status 同族）：有意降级——轮询场景冻结旧值优于报错打断，注释声明；session_status（TimerCard 100ms 计时口）与 session_stats 同款处理。
 15. **DockNav role="tab" 无 tablist 父级**（A003）：桌面小工具两页签、button 键盘可达，a11y 收益低（YAGNI）。
 16. **`saturate(1.6)` 配方遗产**（A003，--glass-blur）：浮层虹彩色彩增强仍有视觉作用，非死配置。
 17. **托盘 hide 时 Focused(false) 触发语义未实证**（A003）：PL011 用户目验已含日常显隐路径，材质终态正确自愈，中间态无观察者。
@@ -63,7 +63,7 @@
 20. **`v-model.number` 空串**（A002"其余"拆分）：Rust 侧校验兜底（1–240 / 1–72 严格夹取）。
 21. **命令命名三风格并存**（A002"其余"拆分）：改名连带全量 invoke + generate_handler，高风险低收益；破坏性 API 变更时机（若有）另议。
 
-### ② 条件豁免（13 项，按触发条件分组）
+### ② 条件豁免（14 项，按触发条件分组）
 
 **触发 = 打包分发（Phase 6，一组销 5 项）：**
 
@@ -80,15 +80,16 @@
 
 **触发 = 性能证据（db 体积/查询耗时异常，3 项）：**
 
-8. **events 无索引**（A001-O2）：`total_since` 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）。
+8. **sessions/events 无索引**（A001-O2；A005 外延 sessions.started_at 同族）：`total_since` 与今日/本周条件 SUM 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）。
 9. **week_detail 逐日取锁**（A002→A003）：7 天 14 次取锁 + 7 次查询，本地 SQLite 毫秒级、翻页触发低频。
 10. **浮层双层 backdrop-filter 并存**（A002"4 层"表述已随 PL010/011 架构更新 → A003 现状 2 层）：短暂低频态、240px 小面积。
 
-**触发 = 需求演进 / 理论缺口（3 项）：**
+**触发 = 需求演进 / 理论缺口（4 项）：**
 
 11. **跨零点段归属起点日 + as_secs 秒级截断**（A001-O8）：单表 `(started_at, seconds)` schema 固有语义（段不拆分）；引入"跨零点段拆分"需求时重评数据模型。
 12. **原子写无 fsync**（A002→A003，settings.rs:82）：断电窗口 rename 后可能旧内容，纯理论缺口；产品定位升级为关键数据可靠性时重评。
 13. **pause 回滚窗口与 async 自动下班理论竞态**（A003，commands/session.rs:93-110）：需存储失败 + 操作同毫秒多重条件交错；错账实际复现时重评（需验证）。
+14. **睡眠挂起双口径分歧**（A005-P3-2，2026-10-05 登记）：场景——Instant 单调钟在 macOS/Linux（CLOCK_MONOTONIC / mach_absolute_time）挂起期停走、墙钟照走，睡眠后 sessions 段时长（单调口径）与图谱工作块/自动下班（墙钟跨度）口径分歧；Windows QPC 文档语义通常含挂起时长，当前唯一实机平台**未实机复核**（用户无合盖条件，需验证）。降级行为——无（语义分歧非故障，归因偏差仅 macOS/Linux 可达）；触发 = macOS/Linux 适配（[problems#1] 同条件），届时实测定级：无分歧维持豁免、有分歧另立唤醒拆段任务。
 
 ---
 
@@ -1195,3 +1196,69 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 - 翻面系统 CSS 3D 细节正确：翻转面各自滚动、36px 死规则显式覆盖、backface 全覆盖
 - 渲染签名（sig）机制避免无谓 DOM 重建（index.html:856-859、899-913），内容级签名含进行中段时长
 - 样式拆分后职责边界清晰，每文件头部有职责注释，加载顺序在 index.html 固定
+
+---
+
+## 附录 A005：全量代码审计报告（第4轮，2026-10-05）
+
+> 状态：✅ 已修复（2026-10-05 收口，ui2.0 V0.010——ui 分支单序列号仅入 commit 标题合并即弃，主项目版本号不推进；FIX005 八条勾结见 x.progress.md——P3-1/3/4/5/6/7 代码修复 + 门禁全绿 91 测试；P3-2 免实机走查留档，条件豁免登记为第四节 #14（需验证标注）；门禁拦出计划外缺陷一并修复：stats 周一时间敏感测试按运行日归一）
+> 范围：core/ 全部 .rs（16 文件 3927 行）+ ui/ 全部前端（12 文件 1827 行）+ Cargo.toml / tauri.conf.json / capabilities / package.json / vite.config.ts / tsconfig.json / 根 index.html / 静态资源引用；不审计 node_modules / dist / target / .temp / .agents / design/（A004 已单独覆盖）与生成代码。基线 = 6e99ea5（ui-2.0 分支，该分支对 ui/ 与 core/ 相对 main 零改动，结论对 main 同样成立）。
+> 方式：主会话回归复核（A003 十五项逐项 grep + git 行级对比）+ 三路并行逐文件通读（Rust 纯逻辑 / Tauri 集成 / 前端 explore 子任务）+ 汇总后六条 P3 主张行号 sed 实证。豁免比对以第四节（永久 21 + 条件 13）为准。
+> 观察项处置：编号经用户确认取 A005/FIX005（A004 已被 design 审计占用）；7 条观察项按默认不提升（与 A004 先例一致），其中两条带豁免条目外延建议（#8 events 无索引 → "sessions/events 无索引"；#14 session_stats 静默冻结 → "session_\* 快照命令"），待用户确认后再并入第四节，不在本轮直接修订。
+
+### 零、上轮修复复核清单（A003 → FIX003，V0.1.1.2–3）
+
+| 上轮条目                                   | 现状                                                                               | 证据                         |
+| ------------------------------------------ | ---------------------------------------------------------------------------------- | ---------------------------- |
+| P2-1 拖拽白名单补 .overlay                 | ✅ 在位，注释同步                                                                  | App.vue:65-67                |
+| P3-1 last_fired cfg(test)                  | ✅ 在位                                                                            | reminder.rs:49-50            |
+| P3-2 删 DutySpan                           | ✅ 在位（clock_out 返回 Result<()>，测试随签名同步）                               | workday.rs:98-104            |
+| P3-3 storage 三方法 cfg(test)              | ✅ 在位                                                                            | storage.rs:82/125/137        |
+| P3-4~7 过时注释四批                        | ✅ 全部更正，Mica/vibrancy 零残留                                                  | mod.rs:30、App.vue:313/347   |
+| P3-8/9 白名单⑦登记 + reminder diag 双写    | ✅ 在位（eprintln+diag 并存）                                                      | lib.rs:37、reminder.rs:35-36 |
+| P3-10 release 可观测性                     | ✅ 在位（勘误：warn_diag 为 1 处定义 + 8 处调用，A003 记"9 处调用"系把定义行计入） | lib.rs:48-215                |
+| P3-11 restart 留痕失败回滚                 | ✅ 在位，start/pause/resume/restart 四族回滚齐全                                   | commands/session.rs:75-190   |
+| P3-12 --r-ctrl                             | ✅ 零残留                                                                          | 全 ui/ grep                  |
+| P3-13 统计失败可见性                       | ✅ 在位（week 并入 loadError + 空文案门控）                                        | StatsView.vue:21-126         |
+| f4d49dd 附带补口（settings tmp 清理 diag） | ✅ 在位                                                                            | settings.rs:88               |
+
+结论：15 项全部完好；FIX003 后 core/ 唯一后续改动（f4d49dd settings.rs +1 行）本身即修复内容，零回退、零新引入回归。
+
+### 一、P0-P3 修复清单（按严重度）
+
+无 P0 / P1 / P2；P3 七项。性质：除 P3-5 为 FIX003.8 同提交收口遗漏（遗留族）外均为新增。
+
+| #    | 文件:行号                                       | 类型 | 描述                                                                                                                                                                                                                                                                                                                         | 建议                                                                                                                         | 性质                             | 影响面                  |
+| ---- | ----------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | ----------------------- |
+| P3-1 | ui/App.vue:187-206 + 240-246                    | 1    | 横幅生命周期不对称：① reminderVisible 仅经 TimerCard 动作/手动下班清除——上班打卡（clock_in，新工作日开始）不走这两条路径，昨日"已连续工作 N 分钟"提醒条跨日残留；② autoOutVisible 赋 true 后无任何置 false 点，"已自动下班"横幅滞留至重启且无手动关闭手段                                                                    | onConfirmOk 的 mode === "in" 成功分支补清两个 Visible；autoOut 可顺带评估定时消失                                            | 新增                             | Vue 前端                |
+| P3-2 | session.rs:40-44（波及 commands/session.rs:47） | 1/8  | 系统睡眠双口径分歧（需验证）：Instant 在 macOS/Linux 挂起期停走（Linux CLOCK_MONOTONIC 排除 suspend），睡眠后暂停 → sessions 段时长不含睡眠，而图谱工作块按墙钟跨度整段计入、自动下班按墙钟判定——同段"图谱 ~9h vs sessions ~10min"分歧。Windows QPC 通常含挂起时长（当前唯一实机平台或不受影响），macOS/Linux 适配前不可实证 | 先实机复核 Windows QPC 睡眠行为定级（大概率无恙）；确认后二选一：唤醒拆段，或登记条件豁免"睡眠语义"（挂 macOS/Linux 条件组） | 新增                             | 计时状态机 / 跨模块     |
+| P3-3 | ui/App.vue:229 + 238                            | 6/13 | 注释失实 + 提醒监听失败不可见：注释声称 reminder-due"注册失败必须可见"，实现只有 console.error——release GUI 下零感知（Tauri ACL 静默拒是本项目登记过的现实风险），与同文件 set_settings/打卡失败走 actionError 可见反馈不对称                                                                                                | catch 内补 actionError 可见反馈，或注释降格"仅 dev 可见"消除失实                                                             | 新增                             | Vue 前端 / 错误策略合规 |
+| P3-4 | commands/workday.rs:82-91 vs 108-131            | 4    | day/week 四步管道逐字重复：day_detail_inner 与 week_detail_inner 循环体同为 day_bounds → day_fetch_start → events_between → reduce_day，A003 亮点承诺的"口径完全一致"目前靠注释而非代码保证——改口径需两处同步，漏一处即两视图分叉                                                                                            | 抽 day_summary_inner 供两者复用                                                                                              | 新增（PL008.6 引入 week 时未抽） | 统计口径一致性          |
+| P3-5 | lib.rs:91-97                                    | 4/13 | quit 分支内联手写 diag::log + eprintln 双写（顺序还与 warn_diag 相反）——FIX003.8 在同文件、同提交引入行为等价的 warn_diag 助手却未换用，同文件两种双写写法并存                                                                                                                                                               | 一行替换为 warn_diag(...)，行为零变化                                                                                        | 遗留（FIX003.8 收口遗漏）        | 可维护性                |
+| P3-6 | storage.rs:41-44                                | 5    | Storage::open_in_memory 生产零调用，doc 已标"测试专用"但未隔离——A003 P3-3 隔离三方法时漏网的同族第 4 个                                                                                                                                                                                                                      | #[cfg(test)] 一行（与三方法同款）                                                                                            | 新增                             | 存储层封装              |
+| P3-7 | commands/mod.rs:124,130                         | 6    | test_support 内 FakeClock::new() 与 advance() 为 pub 且无 ///——同模块其余 pub 项均有文档，文件内自不一致                                                                                                                                                                                                                     | 各补一行中文 ///                                                                                                             | 新增（测试支撑代码遗留）         | 文档一致性              |
+
+### 二、参考级观察项（记录不修）
+
+| 文件:行号                             | 描述                                                                                                                        | 回落理由                                                                                                           |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| settings.rs:82-90                     | save 写失败时 tmp 大概率不存在，remove_file 报 NotFound → diag 落"清理失败"实为无可清理的噪音                               | 仅失败路径诊断噪音，主错误照常上抛                                                                                 |
+| workday.rs:203                        | 同日两个孤儿 clock_out（无 clock_in）时重叠 duty 窗口 → duty_secs 双计                                                      | 归约契约"输入仅来自本应用写入"；仅外部改库可触发（需验证级）                                                       |
+| storage.rs:115-121                    | sessions.started_at 无索引，条件 SUM 全表扫                                                                                 | 豁免 #8（events 无索引）同族兄弟；一行/暂停速率下万行级 <1ms；建议归档时把该豁免条目外延为"sessions/events 无索引" |
+| diag.rs:11-19 + paths.rs:38-42        | 每次 diag::log 解析路径 + create_dir_all                                                                                    | 低频失败通道，单次微秒级；无轮转已豁免                                                                             |
+| App.vue:24 + StatsView.vue:73-75      | 停留统计页数据不随时间更新（仅挂载/refreshKey/offset 三触发口）；App.vue:24 注释"30s 兜底"口径略宽（只覆盖 StatsCard 与环） | 切页即重拉兜底；统计页停留无产品承诺                                                                               |
+| App.vue:214-220                       | isFocused 查询失败退回默认纱态——白名单⑦场景文本未字面含此前端侧降级                                                         | ⑦ 理由（装饰层/不中断/自愈）完全覆盖，有行内注释；下次白名单修订可补一句外延                                       |
+| TimerCard.vue:40-42                   | session_status 失败仅 console，计时显示静默冻结                                                                             | 与已豁免"session_stats 静默冻结"同族；建议归档时该豁免条目外延为"session_\* 快照命令"                              |
+| SettingsPanel.vue:22,30               | number input min/max 与 Rust validate() 双维护                                                                              | HTML 属性仅 UI 提示，Rust 校验是权威门禁（saveError 可见）                                                         |
+| commands/reminder.rs:22 vs lib.rs:267 | reminder-due emit 失败严格报错 vs window-focus 落日志维持——双策略并存                                                       | A003 P3-8 已裁定上下文不同，维持原判                                                                               |
+| lib.rs:106                            | 托盘文案"开始/暂停"实际覆盖三态                                                                                             | 纯文案级惯例表意                                                                                                   |
+
+### 三、亮点
+
+- A003 十五项修复经 V0.1.1.3 至今零回退；ui-2.0 分支十次提交全程未触正式代码，分支纪律干净
+- 三方契约零漂移：六组 serde 结构与 types.ts 逐字段对齐（含 BlockKind lowercase rename、Option→number|null）；12 命令 ↔ generate_handler ↔ invoke 三方一一对账；3 事件名与 payload 类型全对
+- 生产代码零 unwrap/expect、SQL 全参数化、错误消息无路径泄漏；锁序 workday→session→storage/settings/fire 全链无反向嵌套
+- start/pause/resume/restart 四族回滚完整且互不嵌套持锁（FIX003.9 自锁教训的注释在位）
+- 豁免清单 13 项条件豁免逐条复核全部维持原判，无豁免外新静默兜底
+- 前端零 any、零 v-html、零幽灵依赖；业务零含量复核通过（blockWidth/weekBarWidth/formatDisplay 等均为注释声明的纯展示换算）
+- FIX002.1 语义在 A003 后仍成立：回滚路径裸 diag（错误可上抛）与 lib.rs warn_diag（吞错双写）分工合理——P3-5 仅 quit 一处属同族漏改
