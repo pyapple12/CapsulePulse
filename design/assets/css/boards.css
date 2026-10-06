@@ -45,22 +45,38 @@
   height: 44px;
   font-size: 14px;
 }
-/* 设置面板行 */
-.set-row {
+/* 设置面板行（CT 移植）：名称+描述双行居左、控件居右；行间分隔线 */
+.setting-row {
+  padding: 6px 0; /* 压缩行距使五行不溢出板高（无滚动条，用户定案） */
+}
+.setting-row + .setting-row {
+  border-top: 1px solid rgba(128, 128, 128, 0.18);
+}
+.setting-row.inline {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 0;
-  border-bottom: 1px solid rgba(40, 90, 150, 0.08);
+  gap: 10px;
 }
-.set-row:last-of-type {
-  border-bottom: none;
-}
-.set-row .n {
+.setting-row .setting-name {
+  margin: 0;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 800;
+  color: #333; /* 名称 333 灰（用户定案）；两级类选择器压过 .sheet p 的 --ink-2 */
+  text-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5); /* 右1 下1 模糊5 浓度50%（用户定案） */
 }
-.set-row input[type="number"] {
+.setting-row .setting-desc {
+  margin: 2px 0 0;
+  /* Chrome 中文环境最小字号钳制会把小 px 中文抬回 ~12px（与名称同大）——
+     以 12px 排版再 scale 输出缩小视觉（transform 不受字号钳制，scale 用户手调）；
+     中灰加粗、无描边无阴影无透明度（用户定案） */
+  font-size: 12px;
+  transform: scale(0.8);
+  transform-origin: left top;
+  color: #555; /* 中灰再灰一档（用户定案） */
+  font-weight: 700; /* 加粗（用户定案） */
+}
+.setting-row input[type="number"] {
   width: 60px;
   height: 30px;
   border-radius: 9px;
@@ -69,44 +85,101 @@
   font-family: inherit;
   font-size: 13px;
   background: rgba(255, 255, 255, 0.8);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.9),
+    1px 1px 2px rgba(42, 42, 42, 0.2); /* 右1 下1 模糊2（用户定案） */
   color: var(--ink);
 }
-.set-row input[type="number"]:focus {
+.setting-row input[type="number"]:focus {
   outline: 1.5px solid var(--accent);
 }
-.switch {
-  position: relative;
-  width: 46px;
-  height: 26px;
-  border-radius: 999px;
-  background: rgba(40, 90, 150, 0.18);
-  cursor: pointer;
-  transition: background 0.15s;
+
+/* 步进器（CT 移植）：− 数值 +，范围 4~12（自动下班小时，用户定案） */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.switch.on {
+.stepper-btn {
+  width: 26px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    1px 1px 2px rgba(42, 42, 42, 0.2); /* 右1 下1 模糊2（用户定案） */
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.stepper-btn:not(:disabled):active {
+  transform: scale(0.94);
+}
+.stepper-value {
+  min-width: 24px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* 开关（CT sour-vampirebat-66 移植，颜色令牌化）：checkbox 隐藏 + slider 过冲回弹；
+   轨道淡色→checked 主题色、白钮 checked 放大顶满右端（40.5×18px，font-size 9px 基准） */
+.switch {
+  font-size: 9px;
+  position: relative;
+  display: inline-block;
+  width: 40.5px;
+  height: 2em;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch .slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 30%, #fff);
+  border-radius: 50px;
+  box-shadow: 1px 1px 2px rgba(42, 42, 42, 0.2); /* 右1 下1 模糊2（用户定案） */
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.switch .slider:before {
+  position: absolute;
+  content: "";
+  height: 1.4em;
+  width: 1.4em;
+  left: 0.3em;
+  bottom: 0.3em;
+  background-color: #fff;
+  border-radius: 50px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.switch input:checked + .slider {
   background: var(--accent);
 }
-.switch i {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  transition: left 0.15s;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-}
-.switch.on i {
-  left: 23px;
+.switch input:checked + .slider:before {
+  transform: translateX(2.2em);
+  width: 2em;
+  height: 2em;
+  bottom: 0;
 }
 
 /* ============================================================
    玻璃板（借鉴 CapsuleTODO 归档/设置板，配色换本项目）：
    设置板自齿轮、统计板自统计钮缩放飞出，覆于内容之上。揭示动画只用 transform scale——
    clip-path 会破坏 backdrop 采样（Chromium 渲染层边界）。
-   内层复用 .sheet 皮肤（h4 / set-row / acts 一行不重写），此处只作布局与缩放覆盖 */
+   内层复用 .sheet 皮肤（h4 / setting-row / acts 一行不重写），此处只作布局与缩放覆盖 */
 /* 翻转页（用户定案：左右翻）：正面 = 统计，背面 = 今日明细；
    玻璃面不带 backdrop-filter（3D 变换下 backdrop 采样不可靠），雾化由内容自雾化承担 */
 .flip-scene {
@@ -194,11 +267,7 @@
   visibility: visible;
   transition: none;
 }
-/* 板标题居中（用户定案） */
-.board-title {
-  text-align: center;
-  margin-bottom: 10px !important;
-}
+/* 板标题已删（PL014 用户定案：设置即时生效点外即收，标题无信息量） */
 #settings-board .board-glass {
   overflow-y: auto; /* 设置板无翻转面，滚动留在原层 */
 }

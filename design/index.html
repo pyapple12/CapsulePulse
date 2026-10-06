@@ -650,28 +650,58 @@
       <!-- 设置板（借鉴 CapsuleTODO）：玻璃板从齿轮中心缩放飞出，覆于内容之上 -->
       <div id="settings-board">
         <div class="board-glass sheet">
-          <h4 class="board-title">设置</h4>
-          <div class="set-row">
-            <span class="n">提醒阈值（分钟）</span
-            ><input type="number" id="setThreshold" value="50" min="1" max="240" />
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">提醒阈值（分钟）</p>
+              <p class="setting-desc">连续工作达到阈值提醒休息</p>
+            </div>
+            <input type="number" id="setThreshold" value="50" min="1" max="99" />
           </div>
-          <div class="set-row">
-            <span class="n">提醒声音</span>
-            <div class="switch on" onclick="this.classList.toggle('on')"><i></i></div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">提醒声音</p>
+              <p class="setting-desc">达到阈值播放提示音</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setSound" checked />
+              <span class="slider"></span>
+            </label>
           </div>
-          <div class="set-row">
-            <span class="n">系统通知</span>
-            <div class="switch on" onclick="this.classList.toggle('on')"><i></i></div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">系统通知</p>
+              <p class="setting-desc">达到阈值发送系统通知</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setNotify" checked />
+              <span class="slider"></span>
+            </label>
           </div>
-          <div class="set-row">
-            <span class="n">自动下班</span>
-            <div class="switch on" onclick="this.classList.toggle('on')"><i></i></div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">自动下班</p>
+              <p class="setting-desc">达到时长自动下班并回填记账</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setAutoOutOn" checked />
+              <span class="slider"></span>
+            </label>
           </div>
-          <div class="set-row">
-            <span class="n">自动下班（小时）</span
-            ><input type="number" id="setAutoOut" value="8" min="1" max="72" />
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">自动下班（小时）</p>
+              <p class="setting-desc">工作日时长上限 4~12 小时</p>
+            </div>
+            <div class="stepper">
+              <button id="setAutoOutDec" class="stepper-btn" aria-label="减少" type="button">
+                −
+              </button>
+              <span id="setAutoOutValue" class="stepper-value">8</span>
+              <button id="setAutoOutInc" class="stepper-btn" aria-label="增加" type="button">
+                +
+              </button>
+            </div>
           </div>
-          <div class="acts"><button class="ok" onclick="closeSettings()">完成</button></div>
         </div>
       </div>
     </div>
@@ -698,7 +728,7 @@
         <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
       >
       <div class="hint">
-        原型版本 ui2.0 V0.014。窗口 300×400 =
+        原型版本 ui2.0 V0.015。窗口 300×400 =
         参考项目同尺寸；上方侧角钮与各控件均可交互；验证通过后按 README 映射回 ui/。
       </div>
     </div>
@@ -1532,7 +1562,7 @@
         $("remindText").textContent = `已连续工作 ${S.thresholdMin} 分钟，休息一下吧`;
       }
       setThreshold.addEventListener("change", () => {
-        const v = Math.min(240, Math.max(1, Number(setThreshold.value) || 50));
+        const v = Math.min(99, Math.max(1, Number(setThreshold.value) || 50));
         setThreshold.value = String(v);
         S.thresholdMin = v;
         syncRemindText();
@@ -1541,19 +1571,29 @@
       });
       syncRemindText();
 
-      // ===== 自动下班小时数接线：改设置 → 表盘弧跨度/电量耗尽/图谱 D 点/文案全部随动 =====
-      const setAutoOut = $("setAutoOut");
+      // ===== 自动下班小时数接线（PL014 步进器）：4~12 步进 1，边界禁用；改设置 →
+      // 表盘弧跨度/电量耗尽/图谱 D 点/文案全部随动 =====
+      /** 同步步进器数值与边界禁用态 + 自动下班条文案 */
+      function syncAutoOutStepper() {
+        $("setAutoOutValue").textContent = String(S.autoOutH);
+        $("setAutoOutDec").disabled = S.autoOutH <= 4;
+        $("setAutoOutInc").disabled = S.autoOutH >= 12;
+      }
       /** 只同步文案（自动下班条显示当前 autoOutH） */
       function syncAutoOutText() {
         $("autoOutText").textContent = `已到自动下班时间（上班 + ${S.autoOutH}h），已回填记账`;
       }
-      setAutoOut.addEventListener("change", () => {
-        const v = Math.min(72, Math.max(1, Number(setAutoOut.value) || 8));
-        setAutoOut.value = String(v);
+      function stepAutoOut(delta) {
+        const v = S.autoOutH + delta;
+        if (v < 4 || v > 12) return; // 边界外静默：按钮禁用态已挡，此为键盘兜底
         S.autoOutH = v;
+        syncAutoOutStepper();
         syncAutoOutText();
         render();
-      });
+      }
+      $("setAutoOutDec").addEventListener("click", () => stepAutoOut(-1));
+      $("setAutoOutInc").addEventListener("click", () => stepAutoOut(1));
+      syncAutoOutStepper();
       syncAutoOutText();
 
       // ===== 日期卡（每分钟节流）：12h 时刻 + AM/PM；下行 英文星期全称 + 英文日期 =====
@@ -1762,9 +1802,7 @@
       function toggleSettings() {
         setSettings(!settingsBoard.classList.contains("open"));
       }
-      function closeSettings() {
-        setSettings(false);
-      }
+      // 完成 button 已删（PL014：设置即时生效 + 点板外收板），closeSettings 随之退役
 
       function setStats(open) {
         if (open) {

@@ -1314,3 +1314,52 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 ### 拆分 todo
 
 PL013.1–4 见 x.progress.md「PL013」任务组。
+
+---
+
+## 附录 PL014：设置板 CT 化改造（2026-10-06 立项）
+
+> 背景：用户指认 CP 设置板对照 CT（CapsuleTODO design/）设置板有四类落差——行结构单薄（单行名称紧排无描述）、开关样式自研简陋（div+on 类）、数值控件是可输入框（自动下班应为 4~12 小时档位值，不该有输入环节）、完成按钮冗余（设置本就即时生效）。
+> 参照物：`E:\CodeMission\CapsuleTODO\design\`——index.html 设置板结构 + assets/css/settings.css 全文（行解剖/步进器/两代开关）+ panels.js 点外收板机制（CP 已同构在位）。
+> 关键事实：CT 设置板**没有完成按钮**——设置即时生效、点板外即收；数值控件 = 步进器（`− 值 +`，范围约束落在按钮禁用态上）；开关 = uiverse sour-vampirebat-66（checkbox 隐藏 + slider 过冲回弹）；行 = 名称(12px/600) + 描述(8px/60%) 双行 + 分隔线。
+> 目标：设置板观感与控件形态全面对齐 CT；消灭全部可输入环节；删除冗余按钮。零功能损失（CP 设置本就即时生效，点外收板逻辑已在位）。
+> 状态：📌 待实施（PL014 任务清单见 x.progress.md）
+> 编号：PL014（PL013 已占用，顺位下一）
+
+### 方向定案（2026-10-06 用户拍板）
+
+1. 提醒阈值：**保留手动输入**，样式迭代适配新行结构，**限制 1~99**（原 1~240 收窄）
+2. 完成按钮：**删除**（CT 原味——设置即时生效 + 点板外即收，按钮冗余；点外收板 CP 已在位，零功能损失）
+3. 三枚开关（提醒声音/系统通知/自动下班）：**CT sour-vampirebat-66 原样移植**（`label > input[checkbox 隐藏] + slider`，40.5×18px，白钮过冲回弹 cubic-bezier(0.175, 0.885, 0.32, 1.275)，checked 时钮放大顶满右端）；颜色令牌化：#d4acfb/#b84fce → `--accent` 系
+4. 自动下班小时：**步进器**（CT stepper 样式：`− 8 +`，按钮 26×22 玻璃质感、数值 14px/700），范围 **4~12、步长 1**，边界按钮禁用
+5. 行结构：升格 CT 行解剖——名称 12px/600 + 描述 8px/60% 双行 + 行间分隔线 rgba(128,128,128,0.18) + `padding: 10px 0`
+
+### 实现措施（文件/函数级）
+
+#### design/index.html
+
+- 设置板 HTML 重写：5 行改 `setting-row inline` 结构（名称/描述双行居左、控件居右）；阈值 input 保留（`min=1 max=99`）；自动下班行换 stepper 三件套（dec/value/inc，id 延续 setAutoOut 语义）；**删 `.acts` 完成按钮**
+- JS：开关从 `div onclick` 改 `checkbox change` 监听（即时生效行为不变）；stepper dec/inc 按钮（4/12 边界禁用、写 `S.autoOutH`）；阈值 input 的 change 夹取同步 1~99
+
+#### design/assets/css/boards.css
+
+- 删旧 `.set-row input[type=number]` / `.switch` / `.sheet .acts button` 相关规则
+- 新增：`setting-row`（分隔线 + padding）/ `setting-name`（12px/600）/ `setting-desc`（8px、60%）/ `stepper` 三件套（CT 移植）/ `switch`（CT 移植 + 颜色令牌化：#d4acfb→`color-mix(--accent 30%, #fff)` 系、#b84fce→`var(--accent)`）
+
+### 映射期备注（PL012 事项）
+
+原型阈值上限收窄 1~99 后，映射回 ui/ 时需同步 Rust 侧 `validate` 上限（现 1..=240）——原型阶段不动 core/。
+
+### 验证方案
+
+live——开关观感（过冲回弹/令牌色/键盘可达）、步进器 4/12 边界禁用、阈值 1~99 约束与即时生效、无按钮点外收板、设置板全功能回归。
+
+### 明确不做
+
+- theme-switch（日夜太阳月亮豪华开关）不搬——CP 无对应设置项
+- 设置项增减不做（本期纯观感与控件形态改造）
+- core/ 不动（阈值上限映射期再同步）
+
+### 拆分 todo
+
+PL014.1–4 见 x.progress.md「PL014」任务组。
