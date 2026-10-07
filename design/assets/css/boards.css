@@ -81,6 +81,9 @@
   height: 30px;
   border-radius: 9px;
   border: none;
+  /* 左侧等宽 padding 配平右侧原生上下旋钮预留（Chromium 实测 ~14px）——
+     编辑区对称后 text-align center 即真居中；旋钮保留（用户定案） */
+  padding-left: 14px;
   text-align: center;
   font-family: inherit;
   font-size: 13px;
@@ -101,6 +104,9 @@
   gap: 10px;
 }
 .stepper-btn {
+  display: flex; /* 符号 flex 双向居中——viewBox 中心即图形中心，几何真居中（PL015） */
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 22px;
   border: none;
@@ -110,11 +116,21 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.7),
     1px 1px 2px rgba(42, 42, 42, 0.2); /* 右1 下1 模糊2（用户定案） */
   color: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
   cursor: pointer;
-  transition: all 0.15s;
+  /* 双速按压：松手 0.22s easeOutQuint 长尾柔收（与开关 slider 同族曲线，用户定案）；
+     all 收窄为 transform，杜绝背景/阴影隐式动画 */
+  transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.stepper-btn svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+.stepper-btn path {
+  stroke: currentColor; /* 承接按钮 color: inherit */
+  stroke-width: 2; /* 符号加粗（用户定案） */
+  stroke-linecap: round;
+  fill: none;
 }
 .stepper-btn:disabled {
   opacity: 0.35;
@@ -122,6 +138,9 @@
 }
 .stepper-btn:not(:disabled):active {
   transform: scale(0.94);
+  /* 双速前半：按下 0.07s ease-out 瞬时到位（用户定案） */
+  transition-duration: 0.07s;
+  transition-timing-function: ease-out;
 }
 .stepper-value {
   min-width: 24px;

@@ -85,14 +85,17 @@
   }
 
   /* 翻面系统（V0.007 起）：0.6s 翻板与按压弹簧在减弱动态效果下直切；
-     周卡选中环淡入淡出（PL013.5 SVG 环版）与设置开关滑块（PL014）同退避为直切 */
+     周卡选中环淡入淡出（PL013.5 SVG 环版）与设置开关滑块（PL014）同退避为直切；
+     步进器双速按压（PL015）同退避——:active 特异性高于单类，须一并列入 */
   .flip-inner,
   .t-duty,
   .t-duty:active,
   .flip-back,
   .flip-back:active,
   #wcSelRing,
-  .switch .slider {
+  .switch .slider,
+  .stepper-btn,
+  .stepper-btn:not(:disabled):active {
     transition: none;
   }
 

@@ -9,7 +9,7 @@
 ## R001 uiverse-io/galaxy 调研——UI kit 定位与动效候选（2026-09-16）
 
 **来源**：https://github.com/uiverse-io/galaxy（浅克隆留档 `.temp/galaxy-upstream/`，gitignore 内，全量分析非抽样）
-**关联**：PL012 玻璃材质落地的外围参考；后续动效任务的候选池
+**关联**：玻璃材质落地的外围参考；后续动效任务的候选池
 
 ### 一、定位结论
 

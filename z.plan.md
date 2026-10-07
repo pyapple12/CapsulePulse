@@ -5,6 +5,12 @@
 
 ## 一、已完成 ✅
 
+- **PL015 设置板控件几何修正**（2026-10-08 收口，ui2.0 V0.016；阈值 "50" 等宽补偿居中旋钮保留 + 加减按钮 SVG 化/stroke 2 加粗/布局级 dx0dy0 居中 + 按压双速曲线 0.07s/0.22s + devkit 退避补步进器）→ 附录 PL015
+- **PL014 设置板 CT 化**（2026-10-06 收口，ui2.0 V0.015；setting-row 行解剖 + CT 开关过冲回弹 + 自动下班步进器 4~~12 + 阈值收窄 1~~99 + 删完成按钮与标题 + 文字层级与控件投影）→ 附录 PL014
+- **PL013 时间图谱绘制层 SVG 化**（2026-10-06 收口，ui2.0 V0.012–V0.014；图谱/七日柱/选中环 SVG 体系，缩放零漂移构造保证；含周卡柱 SVG 化与选中环闪现即逝、彗星出生点归位）→ 附录 PL013
+- **PL012 编号废弃**（2026-10-06 用户定案；PL013/PL014 跳号后序列留空洞，该编号永不复用，全仓引用已清理归零）——本行即唯一信源，映射期相关事项一律无编号指代
+- **A004 design/ 原型代码审计**（2026-10-04 归档，design 范围首轮；P1 计时收口与 P3 批次全数收口）→ 附录 A004
+- **ui2.0 设计原型迭代**（2026-09-16 起，ui2.0 V0.001–V0.011；玻璃配方试验场 → 计时/统计双页可交互原型 → 历史日重锚与节点彗星发射流）→ design/ 目录
 - **PL011 焦点联动材质·平时透明聚焦磨砂**（2026-09-13 收口，V0.1.1.1；平时 alpha 透明常驻 + 聚焦 Acrylic 磨砂 + 分态纱浓度）→ 附录 PL011
 - **PL010 材质重构·真实玻璃**（2026-09-13 收口，V0.1.0.14；路线三易，最终 = DWM 系统背板聚焦真磨砂 + 全窗单层 + 拖拽修复）→ 附录 PL010
 - **PL009 光与生命感**（2026-09-13 收口，V0.1.0.13）→ 附录 PL009
@@ -21,7 +27,7 @@
 
 ## 二、待完成
 
-（当前无立项任务；下一步方向由用户定）
+（当前无立项任务；已知下一步方向 = 原型映射回 ui/【映射期，未立项】）
 
 （UI 三连、PL010 材质返工与 PL011 焦点联动材质均已收口；打包分发/三端适配见计划书 Phase 6/7，未立项）
 
@@ -1271,7 +1277,6 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 > 关键洞察：①两套坐标系各自落整是漂移根源，唯一治本解 = 段/节点/彗星进同一幅 SVG——矢量内部由构造保证对齐，任何缩放整幅统一光栅化；②viewBox 必须用"实际像素宽 × 固定高 12"，不用 0-100 百分比宽（preserveAspectRatio:none 拉伸下圆会变椭圆）；③彗星白纹必须同进 SVG（出生/消失点与节点像素级同源），否则走廊又回两套坐标。
 > 目标：时间图谱绘制层整体 SVG 化——任何缩放下节点压段交界、D 贴条尾零漂移；V0.011 全部既有行为（日终 D 语义/彗星停发/形态轮换/窗口重锚）零回归；零新依赖。
 > 状态：✅ 已完成（2026-10-06 收口，ui2.0 V0.012；PL013 四条勾结见 x.progress.md，验证记录见 .temp/pl013-verification.md——结构断言改前 FAIL/改后 PASS、对齐 maxAbsDev 0.01px、今天/过去日/彗星回归全过；缩放矩阵设备像素层由用户实机复核（探针盲区已记档）；计划外缺陷：节点平移漏算 cx=6 系统性右偏，改后探针当场抓出修复）
-> 编号说明：PL012 留给"原型映射回 ui/"（design/README.md 自 2026-09-16 起以 PL012 指代映射期），本附录顺延取 PL013。
 
 ### 方向定案（2026-10-06 用户拍板）
 
@@ -1307,7 +1312,7 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 
 ### 明确不做（YAGNI 边界）
 
-- ui/ 正式前端不动（PL012 映射期再落）
+- ui/ 正式前端不动（映射期再落）
 - 不引 SVG 库（D3 等）；不做响应式断点重排（容器宽变化只同步 viewBox）
 - 不升级彗星动效（仍 24px 白纹线性位移）；图谱不加点击交互
 
@@ -1346,7 +1351,7 @@ PL013.1–4 见 x.progress.md「PL013」任务组。
 - 删旧 `.set-row input[type=number]` / `.switch` / `.sheet .acts button` 相关规则
 - 新增：`setting-row`（分隔线 + padding）/ `setting-name`（12px/600）/ `setting-desc`（8px、60%）/ `stepper` 三件套（CT 移植）/ `switch`（CT 移植 + 颜色令牌化：#d4acfb→`color-mix(--accent 30%, #fff)` 系、#b84fce→`var(--accent)`）
 
-### 映射期备注（PL012 事项）
+### 映射期备注
 
 原型阈值上限收窄 1~99 后，映射回 ui/ 时需同步 Rust 侧 `validate` 上限（现 1..=240）——原型阶段不动 core/。
 
@@ -1363,3 +1368,51 @@ live——开关观感（过冲回弹/令牌色/键盘可达）、步进器 4/12
 ### 拆分 todo
 
 PL014.1–4 见 x.progress.md「PL014」任务组。
+
+## 附录 PL015：设置板控件几何修正（2026-10-07 立项）
+
+> 背景：PL014 落地后用户目测四缺陷，实验场实测定位（canvas 字体度量 + 截图像素级包围盒）——① 步进器 `+`/`−` 字形不居中：CSS 居中的是字体盒，而 `+`/`−` 按排版惯例画在数学轴（基线上方 ~3.5px），本机 Segoe UI Variable Display 13px 字体盒中心在基线上方 5.5px，固定下沉 `+` 1.1px / `−` 1.6px（`−` 孤杆无竖笔参照更显眼）；② 按压"文字下沉"观感：`:active` 的 scale(0.94) 以中心整体缩小无任何下移，是"字形本已偏低 + 下缘上贴 + 0.15s ease 慢曲线放大过程感"三者叠加，且 scale 重光栅化字形有 hinting 抖动（"形变"来源）；③ 按压动画曲线生硬：`transition: all 0.15s` 默认 ease；④ 阈值输入框 "50" 左偏 7.5px：原生 number 旋钮（`::-webkit-inner-spin-button`，实测预留 13.98px）占位后 `text-align: center` 只在剩余 46px 内居中。
+> 目标：四缺陷全数归位——"50" 真居中（旋钮保留）、加减按钮 SVG 几何居中 + 加粗、按压双速曲线；设置逻辑与交互行为零变化。
+> 状态：✅ 已完成（2026-10-08 收口，ui2.0 V0.016；PL015 四条勾结见 x.progress.md，验证记录见 .temp/pl015-verification.md——改前探针 FAIL 复现（"50" −7px、+/− 下沉 1.0/1.5px）、改后 A1–A4 全过（"50" delta 0、布局级双按钮 dx=0/dy=0 严格居中、双速曲线与退避扫描在位）、live 交互零回归；实验场标签页遮挡节流（rAF 0 帧）探针对策 = board-glass transition:none 注入瞬达终态，按压手感目验留待用户日常使用）
+> 编号：PL015（PL013/PL014 已占用，PL012 永久废弃，顺位下一）
+
+### 方向定案（2026-10-07 用户拍板）
+
+1. 原生上下箭头旋钮：**保留**（不隐藏、不禁用，键盘 ↑↓ 调值继续可用）；"50" 居中走**左侧等宽 padding 补偿**（`padding-left: 14px` 配平旋钮预留宽度，编辑区对称后 `text-align: center` 即真居中）
+2. 加减按钮：**SVG 化**（内联 `<svg viewBox="0 0 12 12">` 几何线段取代文本字符 U+2212/U+002B）+ **加粗**（stroke-width 2，现字形横杆视觉粗度 ~1.4px）+ **双向几何居中**（viewBox 中心 = 图形中心，flex 居中即真居中，字体度量下沉连根拔除，缩放重光栅化零字形抖动）
+3. 按压曲线：**双速**——按下 0.07s ease-out 瞬时到位、松手 0.22s `cubic-bezier(0.23, 1, 0.32, 1)`（easeOutQuint 族）长尾柔收；与开关 slider 曲线（0.4s cubic-bezier(0.23,1,0.32,1) / 0.4s cubic-bezier(0.175,0.885,0.32,1.275)）同族，整板手感统一
+4. 线帽 `round`（与整体圆角语言一致；CT 方头 butt 不采用）
+
+### 实现措施（文件/函数级）
+
+#### design/index.html
+
+- 设置板步进器两按钮内容替换：`#setAutoOutDec` 文本 `−` → `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 6 H9"/></svg>`；`#setAutoOutInc` 文本 `+` → `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3 V9 M3 6 H9"/></svg>`；`aria-label`（减少/增加）与 `type="button"` 保留；JS 全部不动
+
+#### design/assets/css/boards.css
+
+- `.setting-row input[type="number"]`：新增 `padding-left: 14px`（配平右侧旋钮预留 13.98px；Chromium 大版本若改旋钮宽度最多偏零点几 px，映射 ui/ 后走 WebView2 固定内核更稳）
+- `.stepper-btn`：新增 `display: flex; align-items: center; justify-content: center;`；`transition: all 0.15s` 改 `transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1)`（all 收窄杜绝背景/阴影隐式动画）
+- 新增 `.stepper-btn svg`：`display: block; width: 12px; height: 12px;`
+- 新增 `.stepper-btn path`：`stroke: currentColor; stroke-width: 2; stroke-linecap: round; fill: none;`（currentColor 承接既有 `color: inherit`）
+- `.stepper-btn:not(:disabled):active`：保留 `transform: scale(0.94)`，新增 `transition-duration: 0.07s; transition-timing-function: ease-out;`
+
+#### design/assets/css/devkit.css
+
+- reduced-motion 退避清单补 `.stepper-btn`（与 `.switch .slider` 同款写法）——按压反馈属过渡动效，按项目纪律尊重 reduced-motion
+
+### 验证方案（全部可执行、可断言）
+
+- 像素探针（实验场截图页内解码）：阈值输入框 "50" 墨迹中心 vs 输入框几何中心 Δ≤0.5px；SVG `+`/`−` 墨迹 bbox 中心 vs 按钮中心，水平/垂直均 Δ≤0.25px
+- live：旋钮箭头仍在（视觉确认）、键盘 ↑↓ 可调值；步进 4/12 边界禁用、阈值 1~99 约束、点外收板零回归；按压手感按下瞬时/松手柔收
+- reduced-motion 退避走查（`.stepper-btn` 在清单）；`npx prettier --write` 三文件；纯样式无逻辑不涉 vue-tsc
+
+### 明确不做
+
+- 不隐藏/禁用原生旋钮（用户定案）
+- 按压缩小反馈保留 scale(0.94)（SVG 线段对称缩放，无字形抖动；不另做背景/内环变体）
+- 设置项增减、主题开关不做；core/ 不动
+
+### 拆分 todo
+
+PL015.1–4 见 x.progress.md「PL015」任务组。
