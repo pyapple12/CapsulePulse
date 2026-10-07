@@ -97,36 +97,43 @@
   outline: 1.5px solid var(--accent);
 }
 
-/* 步进器（CT 移植）：− 数值 +，范围 4~12（自动下班小时，用户定案） */
+/* 步进器（CT 移植 + 整体 SVG 化）：− 数值 +，范围 4~12（自动下班小时，用户定案）；
+   按钮视觉（圆角框 + 符号）全部由内联 SVG 矢量承担，HTML 按钮只剩透明点击外壳 */
 .stepper {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 .stepper-btn {
-  display: flex; /* 符号 flex 双向居中——viewBox 中心即图形中心，几何真居中（PL015） */
-  align-items: center;
-  justify-content: center;
   width: 26px;
   height: 22px;
+  padding: 0;
   border: none;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.35);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
-    1px 1px 2px rgba(42, 42, 42, 0.2); /* 右1 下1 模糊2（用户定案） */
+  background: none; /* 视觉移交 SVG：框面/内环在 rect，投影 drop-shadow 在 svg */
   color: inherit;
   cursor: pointer;
-  /* 双速按压：松手 0.22s easeOutQuint 长尾柔收（与开关 slider 同族曲线，用户定案）；
-     all 收窄为 transform，杜绝背景/阴影隐式动画 */
-  transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1);
 }
 .stepper-btn svg {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: 100%;
+  height: 100%;
+  /* 投影跟随 SVG 轮廓（CT 原配方软晕：模糊须盖过偏移，无方向硬边）；
+     按压动画缩放整个矢量单元（框 + 符号一体重渲染，用户定案） */
+  filter: drop-shadow(1.7px 1.7px 8px rgba(0, 0, 0, 0.35));
+  transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1);
 }
-.stepper-btn path {
+.stepper-btn:not(:disabled):active svg {
+  transform: scale(0.94);
+  /* 双速前半：按下 0.07s ease-out 瞬时到位（用户定案） */
+  transition-duration: 0.07s;
+  transition-timing-function: ease-out;
+}
+.stepper-btn .st-frame {
+  fill: rgba(255, 255, 255, 0.35); /* 框面（原按钮 background） */
+  stroke: rgba(255, 255, 255, 0.7); /* 内环（原 inset 0 0 0 1px）；0.5 锚点 + 1 描边 = 内贴 1px */
+  stroke-width: 1;
+}
+.stepper-btn .st-glyph {
   stroke: currentColor; /* 承接按钮 color: inherit */
   stroke-width: 2; /* 符号加粗（用户定案） */
   stroke-linecap: round;
@@ -135,12 +142,6 @@
 .stepper-btn:disabled {
   opacity: 0.35;
   cursor: default;
-}
-.stepper-btn:not(:disabled):active {
-  transform: scale(0.94);
-  /* 双速前半：按下 0.07s ease-out 瞬时到位（用户定案） */
-  transition-duration: 0.07s;
-  transition-timing-function: ease-out;
 }
 .stepper-value {
   min-width: 24px;

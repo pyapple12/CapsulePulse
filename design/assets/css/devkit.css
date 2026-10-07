@@ -94,8 +94,8 @@
   .flip-back:active,
   #wcSelRing,
   .switch .slider,
-  .stepper-btn,
-  .stepper-btn:not(:disabled):active {
+  .stepper-btn svg,
+  .stepper-btn:not(:disabled):active svg {
     transition: none;
   }
 
