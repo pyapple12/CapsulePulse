@@ -1,0 +1,153 @@
+/* ============================================================
+   CapsulePulse 玻璃引擎 · design 版
+   配方来源：试验场 E 定稿读数（2026-09-16）
+   纱浓度15% · 颗粒10 · 云纹15 · 光带60% · 磨砂5px · 折射25%
+   阴影100%/范围200%/角度140° · Bloom80% · 透镜线开 · 漏光/色溢关
+   ============================================================ */
+:root {
+  /* —— 基础令牌（与 ui/App.vue 同源）—— */
+  --accent: #4aa8e8; /* 主题色 = 淡天蓝（比天蓝略深；全站单一来源） */
+  --mint-bright: #34d399;
+  --ink: #1d1d1f;
+  --ink-2: rgba(29, 29, 31, 0.55);
+  --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  /* —— 控件交互令牌（UI 打磨：右上角齿轮设置钮 + tooltip + 飞出玻璃板）—— */
+  --ctrl-hover: rgba(0, 0, 0, 0.25); /* 设置钮悬停/开板底 = 25% 黑（用户定案） */
+  /* —— 计时区令牌（重构）—— */
+  --work: #ff6b4a; /* 工作段（时钟弧）橙红 */
+  --rest: #34d399; /* 休息段（时钟弧）绿 */
+  /* —— 统计卡布局间距令牌（单一来源，改一处全局生效）—— */
+  --card-pad-y: 9px; /* 卡上下内边距（药丸条上间隙 = 左右 12px 的补偿值：9 + 行内 3 = 12） */
+  --card-pad-x: 12px; /* 卡左右内边距 */
+  --gap-caption: 1px; /* 进度条 → 时间轴：标注关系，紧 */
+  --gap-title-graph: 16px; /* 日期行（在岗中）→ 进度条：内容到内容的距离 = 板内边距（用户定案） */
+  --gap-block: 8px; /* 块与块：时间轴 → 三值、统计卡与卡，共用一值 */
+
+  /* —— 时间图谱节点彗星：发射参数在 index.html 的 COMET 常量（speed / spacing）—— */
+
+  /* —— 定稿配方令牌（试验场读数直换）—— */
+  --veil-a: 0.15; /* 纱浓度 15% */
+  --grain-o: 0.1; /* 颗粒 10 */
+  --mottle-o: 0.15; /* 云纹 15 */
+  --sweep-o: 0.6; /* 光带 60% */
+  --blur: 5px; /* 磨砂 5px（清玻璃方向） */
+  --shadow-o: 1; /* 阴影浓度 100% */
+  --edge-dir: 140deg; /* 阴影角度 140°（右下偏下） */
+  /* 由角度与定稿读数（范围200%/Bloom80%）推得的影子偏移与虚影模糊 */
+  --sx: 23.1px;
+  --sy: 27.6px;
+  --b1: 66px;
+  --b2: 22px;
+  /* 背景照片（试验台可切换） */
+  --bg-photo: url("assets/lab-bg.jpg");
+
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)'/></svg>");
+  --mottle: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='900'><filter id='m'><feTurbulence type='fractalNoise' baseFrequency='0.012' numOctaves='3' seed='7' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='900' height='900' filter='url(%23m)'/></svg>");
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+body {
+  min-height: 100vh;
+  padding: 48px 24px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  font-family: var(--font-stack);
+  color: var(--ink);
+  user-select: none;
+  background:
+    radial-gradient(90% 70% at 88% 4%, rgba(70, 120, 180, 0.2), transparent 58%),
+    radial-gradient(95% 65% at 50% 114%, rgba(190, 222, 255, 0.55), transparent 62%),
+    var(--bg-photo) center / cover no-repeat fixed,
+    linear-gradient(
+      160deg,
+      rgba(214, 226, 236, 0.28) 0%,
+      rgba(226, 236, 244, 0.28) 45%,
+      rgba(208, 222, 234, 0.28) 100%
+    );
+}
+svg {
+  display: block;
+}
+button {
+  font-family: inherit;
+  border: none;
+  cursor: pointer;
+  background: none;
+  color: inherit;
+}
+
+/* ============================================================
+   APP 窗口（300×400，与参考项目同尺寸）：五层纱 + 位移折射 + 三件套
+   ============================================================ */
+.window {
+  position: relative;
+  width: 300px;
+  height: 400px;
+  border-radius: 8px;
+  padding: 18px 16px 12px;
+  background: rgba(245, 250, 255, var(--veil-a));
+  backdrop-filter: blur(var(--blur)) saturate(1.35) url(#rf-window);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35) url(#rf-window);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.62),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 0 14px 2px rgb(255 255 255 / calc(var(--k-lens, 1) * 0.4)),
+    inset 0 0 3px 1px rgb(255 255 255 / calc(var(--k-lens, 1) * 0.75)),
+    inset 0 0 0 2.5px rgb(70 120 180 / calc(var(--k-lens, 1) * 0.05)),
+    var(--sx, 23px) var(--sy, 28px) var(--b1, 66px) rgb(12 32 60 / calc(var(--shadow-o, 1) * 0.5)),
+    calc(var(--sx, 23px) * 0.3) calc(var(--sy, 28px) * 0.3) var(--b2, 22px)
+      rgb(12 32 60 / calc(var(--shadow-o, 1) * 0.36));
+  overflow: hidden;
+}
+/* 五层结构化纱（定稿子集：云纹/颗粒/光带；漏光与色溢关闭未纳入） */
+.fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.fx.mottle {
+  background-image: var(--mottle);
+  background-size: cover;
+  opacity: var(--mottle-o);
+  mix-blend-mode: soft-light;
+}
+.fx.grain {
+  background-image: var(--grain);
+  background-size: 180px 180px;
+  opacity: var(--grain-o);
+  mix-blend-mode: overlay;
+}
+.fx.sweep {
+  background: linear-gradient(
+    115deg,
+    transparent 28%,
+    rgba(255, 255, 255, 0.55) 45%,
+    transparent 60%
+  );
+  opacity: var(--sweep-o);
+}
+/* 窗缘透光带：随阴影角度（140° 定稿） */
+.window::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 3;
+  background: linear-gradient(var(--edge-dir), transparent 80%, rgba(255, 255, 255, 0.4) 96%);
+}
+.window > .content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}

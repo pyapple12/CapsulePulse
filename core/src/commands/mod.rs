@@ -121,12 +121,14 @@ pub(crate) mod test_support {
     }
 
     impl FakeClock {
+        /// 新建零点假钟（时间源注入测试用）。
         pub fn new() -> Self {
             Self {
                 offset: Rc::new(Cell::new(Duration::ZERO)),
             }
         }
 
+        /// 前拨假钟推进时间轴。
         pub fn advance(&self, d: Duration) {
             self.offset.set(self.offset.get() + d);
         }

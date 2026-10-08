@@ -90,9 +90,8 @@ fn handle_action(app: &AppHandle, id: &str) {
         "quit" => {
             let ctx = app.state::<AppContext>();
             if let Err(err) = commands::session::persist_before_quit(&ctx) {
-                // 容错白名单 ④：退出前落库失败仍退出（退出意图优先）；失败落诊断日志
-                diag::log(&format!("退出前落库失败（仍退出）：{err}"));
-                eprintln!("退出前落库失败（仍退出）：{err}");
+                // 容错白名单 ④：退出前落库失败仍退出（退出意图优先）；双写助手统一出口（FIX005.5）
+                warn_diag(&format!("退出前落库失败（仍退出）：{err}"));
             }
             app.exit(0);
         }

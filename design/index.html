@@ -1,0 +1,2181 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CapsulePulse · design 原型</title>
+    <link rel="stylesheet" href="glass.css" />
+    <link rel="stylesheet" href="assets/css/topbar.css" />
+    <link rel="stylesheet" href="assets/css/timer.css" />
+    <link rel="stylesheet" href="assets/css/hourglass.css" />
+    <link rel="stylesheet" href="assets/css/controls.css" />
+    <link rel="stylesheet" href="assets/css/stats.css" />
+    <link rel="stylesheet" href="assets/css/graph.css" />
+    <link rel="stylesheet" href="assets/css/boards.css" />
+    <link rel="stylesheet" href="assets/css/devkit.css" />
+  </head>
+  <body>
+    <!-- ============ 位移折射滤镜（窗口专用，25% 定稿强度） ============ -->
+    <svg width="0" height="0" style="position: absolute">
+      <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
+        <feImage x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m" />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="m"
+          scale="12"
+          xChannelSelector="R"
+          yChannelSelector="G"
+        />
+      </filter>
+    </svg>
+
+    <!-- ============ APP 窗口（300×400，与参考项目同尺寸） ============ -->
+    <div class="window" id="win">
+      <div class="fx mottle"></div>
+      <div class="fx grain"></div>
+      <div class="fx sweep"></div>
+
+      <div class="content">
+        <header class="topbar">
+          <h1 class="title">
+            CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas>
+          </h1>
+        </header>
+
+        <!-- 文案条（提醒 / 自动下班） -->
+        <div class="banner remind" id="bn-remind">
+          <span class="dot"></span><span id="remindText">已连续工作 50 分钟，休息一下吧</span>
+        </div>
+        <div class="banner auto" id="bn-auto">
+          <span class="dot"></span
+          ><span id="autoOutText">已到自动下班时间（上班 + 8h），已回填记账</span>
+        </div>
+
+        <!-- 计时页 -->
+        <section class="stage" id="page-timer">
+          <!-- ① 日期卡（左）+ 区间时钟（右），等高 -->
+          <div class="timer-top">
+            <div class="date-card" id="dcCard">
+              <div class="dc-time-row">
+                <span class="dc-time" id="dcTime">11:11</span>
+                <span class="dc-ampm" id="dcAmpm">PM</span>
+              </div>
+              <div class="dc-day" id="dcDay">Wednesday, June 15th</div>
+              <svg
+                class="dc-ic dc-moon"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"
+                />
+                <path
+                  d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.156 1.156 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.156 1.156 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732L13.863.1z"
+                />
+              </svg>
+              <svg
+                class="dc-ic dc-sun"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"
+                />
+              </svg>
+            </div>
+            <div class="dial">
+              <div class="face">
+                <p class="v-index">II</p>
+                <p class="h-index">II</p>
+                <svg class="face-arcs" viewBox="0 0 180 180" aria-hidden="true">
+                  <g id="dialArcs"></g>
+                </svg>
+                <div class="hour" id="handHour"></div>
+                <div class="minute" id="handMin"></div>
+                <div class="second" id="handSec"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ② 翻转计时（时 : 分 : 秒 . 十分位，JS 生成 7 格） -->
+          <div class="flip-clock" id="flipClock"></div>
+
+          <!-- ③ 沙漏（50 分钟提醒器）+ START + 电量 -->
+          <div class="status-row">
+            <svg
+              class="hourglass"
+              id="hourglass"
+              viewBox="0 0 56 56"
+              role="img"
+              aria-label="50 分钟沙漏"
+            >
+              <clipPath id="sand-mound-top">
+                <path
+                  d="M 14.613 13.087 C 15.814 12.059 19.3 8.039 20.3 6.539 C 21.5 4.789 21.5 2.039 21.5 2.039 L 3 2.039 C 3 2.039 3 4.789 4.2 6.539 C 5.2 8.039 8.686 12.059 9.887 13.087 C 11 14.039 12.25 14.039 12.25 14.039 C 12.25 14.039 13.5 14.039 14.613 13.087 Z"
+                  class="loader__sand-mound-top"
+                ></path>
+              </clipPath>
+              <clipPath id="sand-mound-bottom">
+                <path
+                  d="M 14.613 20.452 C 15.814 21.48 19.3 25.5 20.3 27 C 21.5 28.75 21.5 31.5 21.5 31.5 L 3 31.5 C 3 31.5 3 28.75 4.2 27 C 5.2 25.5 8.686 21.48 9.887 20.452 C 11 19.5 12.25 19.5 12.25 19.5 C 12.25 19.5 13.5 19.5 14.613 20.452 Z"
+                  class="loader__sand-mound-bottom"
+                ></path>
+              </clipPath>
+              <g transform="translate(2,2)">
+                <g
+                  transform="rotate(-90,26,26)"
+                  stroke-linecap="round"
+                  stroke-dashoffset="153.94"
+                  stroke-dasharray="153.94 153.94"
+                  stroke="hsl(0,0%,100%)"
+                  fill="none"
+                >
+                  <circle
+                    transform="rotate(0,26,26)"
+                    r="24.5"
+                    cy="26"
+                    cx="26"
+                    stroke-width="2.5"
+                    class="loader__motion-thick"
+                  ></circle>
+                  <circle
+                    transform="rotate(90,26,26)"
+                    r="24.5"
+                    cy="26"
+                    cx="26"
+                    stroke-width="1.75"
+                    class="loader__motion-medium"
+                  ></circle>
+                  <circle
+                    transform="rotate(180,26,26)"
+                    r="24.5"
+                    cy="26"
+                    cx="26"
+                    stroke-width="1"
+                    class="loader__motion-thin"
+                  ></circle>
+                </g>
+                <g transform="translate(13.75,9.25)" class="loader__model">
+                  <!-- 整体投影：本体 + 上下盖的剪影，垫在最底层。
+                       本体已是透明玻璃（alpha 0.15），drop-shadow 按 alpha 取影 → 投不出来，
+                       故用剪影副本当影子（渲染后 1px 距离 / 3px 模糊） -->
+                  <g class="loader__shadow">
+                    <use href="#hgBody"></use>
+                    <rect height="2" width="24.5"></rect>
+                    <rect height="2" width="24.5" y="31.5"></rect>
+                  </g>
+                  <path
+                    id="hgBody"
+                    d="M 1.5 2 L 23 2 C 23 2 22.5 8.5 19 12 C 16 15.5 13.5 13.5 13.5 16.75 C 13.5 20 16 18 19 21.5 C 22.5 25 23 31.5 23 31.5 L 1.5 31.5 C 1.5 31.5 2 25 5.5 21.5 C 8.5 18 11 20 11 16.75 C 11 13.5 8.5 15.5 5.5 12 C 2 8.5 1.5 2 1.5 2 Z"
+                    class="loader__body"
+                  ></path>
+
+                  <g stroke-linecap="round" stroke="hsl(35,90%,78%)">
+                    <line
+                      y2="20.75"
+                      x2="12"
+                      y1="15.75"
+                      x1="12"
+                      stroke-dasharray="0.25 33.75"
+                      stroke-width="1"
+                      class="loader__sand-grain-left"
+                    ></line>
+                    <line
+                      y2="21.75"
+                      x2="12.5"
+                      y1="16.75"
+                      x1="12.5"
+                      stroke-dasharray="0.25 33.75"
+                      stroke-width="1"
+                      class="loader__sand-grain-right"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12.25"
+                      y1="18"
+                      x1="12.25"
+                      stroke-dasharray="0.5 107.5"
+                      stroke-width="1"
+                      class="loader__sand-drop"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12.25"
+                      y1="14.75"
+                      x1="12.25"
+                      stroke-dasharray="54 54"
+                      stroke-width="1.5"
+                      class="loader__sand-fill"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12"
+                      y1="16"
+                      x1="12"
+                      stroke-dasharray="1 107"
+                      stroke-width="1"
+                      stroke="hsl(35,90%,83%)"
+                      class="loader__sand-line-left"
+                    ></line>
+                    <line
+                      y2="31.5"
+                      x2="12.5"
+                      y1="16"
+                      x1="12.5"
+                      stroke-dasharray="12 96"
+                      stroke-width="1"
+                      stroke="hsl(35,90%,83%)"
+                      class="loader__sand-line-right"
+                    ></line>
+
+                    <g stroke-width="0" fill="hsl(35,90%,78%)">
+                      <path
+                        d="M 12.25 15 L 15.392 13.486 C 21.737 11.168 22.5 2 22.5 2 L 2 2.013 C 2 2.013 2.753 11.046 9.009 13.438 L 12.25 15 Z"
+                        clip-path="url(#sand-mound-top)"
+                      ></path>
+                      <path
+                        d="M 12.25 18.5 L 15.392 20.014 C 21.737 22.332 22.5 31.5 22.5 31.5 L 2 31.487 C 2 31.487 2.753 22.454 9.009 20.062 Z"
+                        clip-path="url(#sand-mound-bottom)"
+                      ></path>
+                    </g>
+
+                    <g stroke-width="2" stroke-linecap="round" opacity="0.7" fill="none">
+                      <path
+                        d="M 19.437 3.421 C 19.437 3.421 19.671 6.454 17.914 8.846 C 16.157 11.238 14.5 11.5 14.5 11.5"
+                        stroke="hsl(0,0%,100%)"
+                        class="loader__glare-top"
+                      ></path>
+                      <path
+                        transform="rotate(180,12.25,16.75)"
+                        d="M 19.437 3.421 C 19.437 3.421 19.671 6.454 17.914 8.846 C 16.157 11.238 14.5 11.5 14.5 11.5"
+                        stroke="hsla(0,0%,100%,0)"
+                        class="loader__glare-bottom"
+                      ></path>
+                    </g>
+
+                    <!-- 上下盖（原组件在此；不继承沙粒组的沙色描边，纯黑：#000 + #333 高光） -->
+                    <rect height="2" width="24.5" fill="#000" stroke="none"></rect>
+                    <rect
+                      height="1"
+                      width="19.5"
+                      y="0.5"
+                      x="2.5"
+                      ry="0.5"
+                      rx="0.5"
+                      fill="#333"
+                      stroke="none"
+                    ></rect>
+                    <rect height="2" width="24.5" y="31.5" fill="#000" stroke="none"></rect>
+                    <rect
+                      height="1"
+                      width="19.5"
+                      y="32"
+                      x="2.5"
+                      ry="0.5"
+                      rx="0.5"
+                      fill="#333"
+                      stroke="none"
+                    ></rect>
+                  </g>
+                </g>
+              </g>
+            </svg>
+            <span class="start-label" id="startLabel">
+              <span class="sl-base">START</span>
+              <span class="sl-fill">START</span>
+            </span>
+            <div class="battery" id="battery">
+              <div class="bat-shell"><div class="bat-fill" id="batFill"></div></div>
+              <div class="bat-nub"></div>
+              <span class="bat-pct" id="batPct">62%</span>
+            </div>
+          </div>
+
+          <!-- ④ 打卡 pill（上班/下班） -->
+          <button class="pill-cast" id="pillCast">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <rect x="4" y="7" width="16" height="13" rx="2" />
+            </svg>
+            <span id="pillText">上班</span>
+          </button>
+
+          <!-- ⑤ 三段式控制（借鉴 uiverse laksh_7112 radio-input：玻璃质感 + 抬起/按下投影）：
+               工作/休息 = 互斥选中；重置 = 瞬时（按下回弹，不保持选中） -->
+          <div class="seg-control" id="segRun">
+            <label class="seg">
+              <input type="radio" name="runseg" value="work" />
+              <span class="text">工作</span>
+            </label>
+            <label class="seg">
+              <input type="radio" name="runseg" value="rest" />
+              <span class="text">休息</span>
+            </label>
+            <button class="seg seg-reset" id="segReset" type="button">
+              <span class="text">重置</span>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- 统计板（借鉴 CapsuleTODO archive）：玻璃板里是统计信息，从统计钮飞出 -->
+      <div id="stats-board">
+        <div class="board-glass flip-scene">
+          <div class="flip-inner">
+            <section class="stats sheet flip-face front">
+              <div class="daynav">
+                <button class="arrow" id="arrow-prev">
+                  <svg
+                    width="7"
+                    height="7"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="m15 5-7 7 7 7" />
+                  </svg>
+                </button>
+                <span class="day" id="day-label">9月16日 · 周二 · 在岗中</span>
+                <button class="arrow" id="arrow-next" disabled>
+                  <svg
+                    width="7"
+                    height="7"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="m9 5 7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="graph-block">
+                <div class="graph">
+                  <svg id="graphSvg" height="12" width="100%" preserveAspectRatio="none">
+                    <defs>
+                      <clipPath id="graphClip"><rect width="100%" height="12" rx="6" /></clipPath>
+                      <clipPath id="graphClipComet">
+                        <rect id="graphClipCometRect" width="100%" height="12" rx="6" />
+                      </clipPath>
+                      <linearGradient id="gWork" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" class="sw-from" />
+                        <stop offset="1" class="sw-to" />
+                      </linearGradient>
+                      <linearGradient id="gRest" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" class="sr-from" />
+                        <stop offset="1" class="sr-to" />
+                      </linearGradient>
+                      <linearGradient id="gDuty" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" class="sd-from" />
+                        <stop offset="1" class="sd-to" />
+                      </linearGradient>
+                      <linearGradient
+                        id="gStripe"
+                        gradientUnits="userSpaceOnUse"
+                        x1="-21"
+                        y1="-3"
+                        x2="-3"
+                        y2="15"
+                      >
+                        <stop offset="0" class="ss-edge" />
+                        <stop offset="0.3535" class="ss-edge" />
+                        <stop offset="0.3535" class="ss-mid" />
+                        <stop offset="0.5498" class="ss-mid" />
+                        <stop offset="0.5498" class="ss-edge" />
+                        <stop offset="1" class="ss-edge" />
+                      </linearGradient>
+                    </defs>
+                    <rect class="ghost" width="100%" height="12" rx="6" />
+                    <g id="graphBars" clip-path="url(#graphClip)"></g>
+                    <!-- 裁剪挂不动的外壳（clipPath 随引用元素坐标系走，挂平移组会被走廊带走），
+                         平移挂内层：可见区右界恒 = graphClipComet 右缘（D 圆心） -->
+                    <g clip-path="url(#graphClipComet)">
+                      <g id="graphComet"></g>
+                    </g>
+                    <g id="graphNodes"></g>
+                  </svg>
+                </div>
+                <div class="chart-axis"><span id="axisStart"></span><span id="axisEnd"></span></div>
+              </div>
+
+              <div class="triple-row">
+                <div class="gcard t-card t-duty">
+                  <div class="tc-head">
+                    <span class="tc-icon">
+                      <svg viewBox="-8 -8 16 16" width="16" height="16">
+                        <circle r="7" />
+                        <g
+                          transform="translate(0 0) scale(0.3333) translate(-12 -12)"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
+                        </g>
+                      </svg>
+                    </span>
+                    <span class="tc-title"
+                      ><svg viewBox="0 0 20 14" width="20" height="14">
+                        <text
+                          x="10"
+                          y="7"
+                          dy="0.0"
+                          text-anchor="middle"
+                          dominant-baseline="central"
+                        >
+                          在岗
+                        </text>
+                      </svg></span
+                    >
+                    <span class="tc-percent"
+                      ><svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="m18 15-6-6-6 6" />
+                      </svg>
+                      1%</span
+                    >
+                  </div>
+                  <b id="num-duty"></b>
+                  <span class="tc-hint">今日明细</span>
+                </div>
+                <div class="gcard t-card t-work">
+                  <div class="tc-head">
+                    <span class="tc-icon">
+                      <svg viewBox="-8 -8 16 16" width="16" height="16">
+                        <circle r="7" />
+                        <g
+                          transform="translate(0 0) scale(0.3333) translate(-12 -12)"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                          <rect width="20" height="14" x="2" y="6" rx="2" />
+                        </g>
+                      </svg>
+                    </span>
+                    <span class="tc-title"
+                      ><svg viewBox="0 0 20 14" width="20" height="14">
+                        <text x="10" y="7" dy="0" text-anchor="middle" dominant-baseline="central">
+                          工作
+                        </text>
+                      </svg></span
+                    >
+                    <span class="tc-percent"
+                      ><svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="m18 15-6-6-6 6" />
+                      </svg>
+                      5%</span
+                    >
+                  </div>
+                  <b id="num-work"></b>
+                  <div class="tc-range"><i class="fill" style="width: 73%"></i></div>
+                </div>
+                <div class="gcard t-card t-rest">
+                  <div class="tc-head">
+                    <span class="tc-icon">
+                      <svg viewBox="-8 -8 16 16" width="16" height="16">
+                        <circle r="7" />
+                        <g
+                          transform="translate(0.3 0) scale(0.3333) translate(-12 -12)"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M10 2v2" />
+                          <path d="M14 2v2" />
+                          <path
+                            d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"
+                          />
+                          <path d="M6 2v2" />
+                        </g>
+                      </svg>
+                    </span>
+                    <span class="tc-title"
+                      ><svg viewBox="0 0 20 14" width="20" height="14">
+                        <text x="10" y="7" dy="0" text-anchor="middle" dominant-baseline="central">
+                          休息
+                        </text>
+                      </svg></span
+                    >
+                    <span class="tc-percent"
+                      ><svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="m6 9 6 6 6-6" />
+                      </svg>
+                      6%</span
+                    >
+                  </div>
+                  <b id="num-rest"></b>
+                  <div class="tc-range"><i class="fill" style="width: 27%"></i></div>
+                </div>
+              </div>
+
+              <div class="gcard week-card">
+                <div class="wc-head">
+                  <span class="wc-left">
+                    <span class="wc-label">日均</span>
+                    <b class="wc-num" id="wc-avg-num"></b>
+                  </span>
+                  <span class="wc-delta">
+                    <span class="l">与上周相比</span>
+                    <span class="v" id="wc-delta">
+                      <svg
+                        id="wc-delta-arrow"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="m18 15-6-6-6 6" />
+                      </svg>
+                      <span id="wc-delta-text"></span>
+                    </span>
+                  </span>
+                </div>
+                <div class="wc-chart">
+                  <div class="wc-plot">
+                    <div class="wc-avg" id="wc-avg-line"></div>
+                    <!-- 七日堆叠柱 SVG 化（PL013.5 追加）：柱缘坐标 JS 取整，杜绝 flex 均分
+                         非整列宽的小数左缘（缺 1px 观感）；选中环 = 常驻 rect，闪现走 opacity -->
+                    <svg class="wc-svg" id="wcSvg" preserveAspectRatio="none">
+                      <g id="wcBars"></g>
+                      <path id="wcSelRing" />
+                    </svg>
+                  </div>
+                  <div class="wc-days">
+                    <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span
+                    ><span>六</span><span class="today">今</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="detail-face sheet flip-face back">
+              <h3 id="detail-title">今日明细</h3>
+              <div class="detail">
+                <!-- 今日明细行由 renderDetailMock() 依 EV_MOCK + 上班时刻生成 -->
+              </div>
+              <button class="flip-back" id="detail-back" type="button">返回统计</button>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- 侧角按钮（左统计 · 右设置，对称落位；借鉴 CapsuleTODO archive 触点） -->
+      <button
+        class="sideButton statsButton"
+        id="stats-btn"
+        aria-label="统计"
+        onclick="toggleStats()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 13h4v7H4zM10 8h4v12h-4zM16 4h4v16h-4z" />
+        </svg>
+        <span class="tooltip">统计</span>
+      </button>
+      <button
+        class="sideButton settingsButton"
+        id="gear"
+        aria-label="设置"
+        onclick="toggleSettings()"
+      >
+        <svg viewBox="0 -960 960 960" aria-hidden="true">
+          <path
+            d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"
+          />
+        </svg>
+        <span class="tooltip">设置</span>
+      </button>
+
+      <!-- 打卡双向确认框 -->
+      <div class="overlay" id="confirm" style="display: none">
+        <div class="sheet">
+          <h4 id="cfTitle">确认上班打卡</h4>
+          <p id="cfText">开始记录今日在岗时长。</p>
+          <div class="acts">
+            <button onclick="closeConfirm()">取消</button>
+            <button class="ok" id="cfOk" onclick="confirmOk()">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置板（借鉴 CapsuleTODO）：玻璃板从齿轮中心缩放飞出，覆于内容之上 -->
+      <div id="settings-board">
+        <div class="board-glass sheet">
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">提醒阈值（分钟）</p>
+              <p class="setting-desc">连续工作达到阈值提醒休息</p>
+            </div>
+            <input type="number" id="setThreshold" value="50" min="1" max="99" />
+          </div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">提醒声音</p>
+              <p class="setting-desc">达到阈值播放提示音</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setSound" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">系统通知</p>
+              <p class="setting-desc">达到阈值发送系统通知</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setNotify" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">自动下班</p>
+              <p class="setting-desc">达到时长自动下班</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setAutoOutOn" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-row inline">
+            <div>
+              <p class="setting-name">自动下班（小时）</p>
+              <p class="setting-desc">上限 4~12 小时</p>
+            </div>
+            <div class="stepper">
+              <button id="setAutoOutDec" class="stepper-btn" aria-label="减少" type="button">
+                <svg viewBox="0 0 26 22" aria-hidden="true">
+                  <rect class="st-frame" x="0.5" y="0.5" width="25" height="21" rx="6" />
+                  <path class="st-glyph" d="M10 11 H16" />
+                </svg>
+              </button>
+              <span id="setAutoOutValue" class="stepper-value">8</span>
+              <button id="setAutoOutInc" class="stepper-btn" aria-label="增加" type="button">
+                <svg viewBox="0 0 26 22" aria-hidden="true">
+                  <rect class="st-frame" x="0.5" y="0.5" width="25" height="21" rx="6" />
+                  <path class="st-glyph" d="M13 8 V14 M10 11 H16" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 演示控制台（验证用，不属于 APP 设计） ============ -->
+    <div class="devkit">
+      <b>演示状态</b>
+      <label><input type="radio" name="dstate" value="off" /> 未上班</label>
+      <label><input type="radio" name="dstate" value="run" checked /> 计时中</label>
+      <label><input type="radio" name="dstate" value="pause" /> 暂停</label>
+      <label><input type="checkbox" id="dk-remind" /> 提醒条</label>
+      <label><input type="checkbox" id="dk-auto" /> 自动下班条</label>
+      <label
+        >磨砂
+        <input
+          type="range"
+          id="dk-blur"
+          min="0"
+          max="30"
+          value="5"
+          style="width: 90px; accent-color: #4aa8e8"
+        />
+        <button type="button" onclick="setBg(0)" style="color: #ffd9ec">咖啡店</button>
+        <button type="button" onclick="setBg(1)" style="color: #ffe9c9">书店</button></label
+      >
+      <div class="hint">
+        原型版本 ui2.0 V0.018。窗口 300×400 =
+        参考项目同尺寸；上方侧角钮与各控件均可交互；验证通过后按 README 映射回 ui/。
+      </div>
+    </div>
+
+    <script>
+      // ===== 位移贴图（kube.io 管线：圆角矩形 SDF → 法线 → R/X、G/Y 编码，128 中性）=====
+      function makeMap(w, h, radius, bezel, strength) {
+        const cv = document.createElement("canvas");
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext("2d");
+        const img = ctx.createImageData(w, h);
+        const hw = w / 2,
+          hh = h / 2,
+          r = Math.min(radius, hw, hh);
+        const sdf = (x, y) => {
+          const dx = Math.abs(x - hw) - (hw - r),
+            dy = Math.abs(y - hh) - (hh - r);
+          return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - r;
+        };
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4,
+              d = sdf(x + 0.5, y + 0.5);
+            let R = 128,
+              G = 128;
+            if (d > -bezel && d < 1.5) {
+              const nx = sdf(x + 1, y) - sdf(x - 1, y),
+                ny = sdf(x, y + 1) - sdf(x, y - 1);
+              const len = Math.hypot(nx, ny) || 1;
+              const t = Math.min(1, (d + bezel) / bezel),
+                mag = 127 * Math.sin((t * Math.PI) / 2);
+              R = 128 + (nx / len) * mag;
+              G = 128 + (ny / len) * mag;
+            }
+            img.data[i] = R;
+            img.data[i + 1] = G;
+            img.data[i + 2] = 128;
+            img.data[i + 3] = 255;
+          }
+        ctx.putImageData(img, 0, 0);
+        return cv.toDataURL();
+      }
+      // 定稿折射 25%：基准 scale 48 × 0.25 = 12
+      const f = document.getElementById("rf-window");
+      f.querySelector("feImage").setAttribute("href", makeMap(300, 400, 8, 16, 12));
+      f.querySelector("feDisplacementMap").setAttribute("scale", 12);
+
+      // ===== APP 状态机（客户端演示模拟）=====
+      const $ = (id) => document.getElementById(id);
+      const S = {
+        duty: true,
+        running: true,
+        startTs: Date.now(),
+        accum: 335 * 60000,
+        clockInTs: Date.now() - 335 * 60000, // 上班时刻（演示：335 分钟前）
+        autoOutH: 8, // 自动下班时长（小时）
+        thresholdMin: 50, // 提醒阈值（分钟）——沙漏周期跟随它
+        batFrozen: null, // 下班后冻结的电量
+        pausedAtMin: null, // 收段时刻的墙钟分钟（暂停/下班记录、上班/恢复清空）——今日段尾收口用
+        viewDay: 0, // 统计面查看日偏移：0 = 今天，-1 = 昨天…（左右箭头切换）
+      };
+      const elapsed = () => (S.running ? S.accum + (Date.now() - S.startTs) : S.accum);
+      const clamp01 = (n) => Math.min(1, Math.max(0, n));
+
+      // 区间弧：12h 表盘（0° = 12 点、顺时针，圆心 90,90 —— 180 表盘坐标）
+      const DIAL_C = 90;
+      const angleOf = (ts) => {
+        const d = new Date(ts);
+        return (((d.getHours() % 12) * 60 + d.getMinutes() + d.getSeconds() / 60) / 720) * 360;
+      };
+      const polar = (r, deg) => {
+        const a = ((deg - 90) * Math.PI) / 180;
+        return [DIAL_C + r * Math.cos(a), DIAL_C + r * Math.sin(a)];
+      };
+      const arcPath = (r, a0, a1) => {
+        const delta = (((a1 - a0) % 360) + 360) % 360;
+        if (delta < 0.5) return "";
+        const [x0, y0] = polar(r, a0);
+        const [x1, y1] = polar(r, a0 + delta);
+        const large = delta > 180 ? 1 : 0;
+        return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+      };
+
+      // 当日工作/休息段（演示 mock，单位 = 距上班的分钟数）
+      const EV_MOCK = [
+        [0, 46, "work"],
+        [46, 64, "rest"],
+        [64, 110, "work"],
+        [110, 128, "rest"],
+        [128, 173, "work"],
+        [173, 228, "rest"],
+        [228, 335, "work"],
+      ];
+
+      // ===== 周模拟数据（接近真实状态）：本周前 6 天的上班时刻 + 工作/休息分钟 + 上周日均工作。
+      // 今天（第七天）由 EV_MOCK 实时累计，三值/堆叠柱/日均/浮动/明细/历史图谱全由此派生 =====
+      const WEEK_PREV = [
+        { day: "一", in: "09:12", work: 276, rest: 84 }, // 4h36m + 1h24m
+        { day: "二", in: "08:47", work: 243, rest: 117 }, // 4h03m + 1h57m
+        { day: "三", in: "09:38", work: 302, rest: 66 }, // 5h02m + 1h06m
+        { day: "四", in: "10:03", work: 208, rest: 142 }, // 3h28m + 2h22m
+        { day: "五", in: "08:55", work: 265, rest: 96 }, // 4h25m + 1h36m
+        { day: "六", in: "11:20", work: 36, rest: 58 }, // 休息日：36m + 58m
+      ];
+      const LAST_WEEK_AVG_WORK = 196; // 上周日均工作（分钟）
+
+      /** 当日各段（分钟轴）：offset 0 = 今天实时（进行中段延伸到当前）；负数 = 过去日，由总计合成演示分段 */
+      function todaySegsMin(offset = 0) {
+        const nowMin = (Date.now() - S.clockInTs) / 60000;
+        if (offset < 0) {
+          const idx = WEEK_PREV.length + offset;
+          const totals = WEEK_PREV[idx];
+          // 确定式合成：从上班时刻（0 分）连续铺满当日总时长。三套分段形态按日轮换
+          //（工作/休息配比各自合计 1.0），每类段的末次出现吸收取整余量保总量——
+          // 逐日形状肉眼可辨，不再千日一面；段间连续相接不留缝
+          const plans = [
+            [
+              ["work", 0.45],
+              ["rest", 0.6],
+              ["work", 0.33],
+              ["rest", 0.4],
+              ["work", 0.22],
+            ],
+            [
+              ["work", 0.3],
+              ["rest", 0.5],
+              ["work", 0.45],
+              ["rest", 0.5],
+              ["work", 0.25],
+            ],
+            [
+              ["work", 0.25],
+              ["rest", 0.35],
+              ["work", 0.3],
+              ["rest", 0.35],
+              ["work", 0.25],
+              ["rest", 0.3],
+              ["work", 0.2],
+            ],
+          ];
+          const plan = plans[idx % plans.length];
+          const lastOf = {};
+          plan.forEach(([type], i) => (lastOf[type] = i)); // 每类段末次出现的位次
+          let t = 0;
+          const segs = [];
+          const used = { work: 0, rest: 0 };
+          plan.forEach(([type, ratio], i) => {
+            const mins =
+              i === lastOf[type]
+                ? totals[type] - used[type] // 末次兜底：该类合成总量与当日总计严格相等
+                : Math.round(totals[type] * ratio);
+            used[type] += mins;
+            if (mins <= 0) return;
+            segs.push({ type, start: t, end: t + mins });
+            t += mins; // 连续相接：段间不留空档
+          });
+          return segs;
+        }
+        // 段尾收口于计时态：计时中 = 当前墙钟分钟；暂停/下班 = 收段时刻（pausedAtMin），
+        // 不随墙钟继续增长；末段在计时中与 renderGraph 的尾段延长同义，延伸到当前时刻。
+        // clockIn 重置后 nowMin 未达段起点，末尾丢弃 end <= start 的空段防负值
+        const endCap = S.running ? nowMin : (S.pausedAtMin ?? nowMin);
+        return EV_MOCK.map(([o0, o1, type], i) => {
+          const isLast = i === EV_MOCK.length - 1;
+          const end = Math.min(isLast && S.running ? Infinity : o1, endCap);
+          return { type, start: o0, end };
+        }).filter((s) => s.end > s.start);
+      }
+      /** 查看日上班时间戳：今天 = 演示 clockInTs；过去日 = 真实日历日期 + 该日模拟上班时刻
+       *  （WEEK_PREV.in）。时间图谱与明细面共用同源锚点，轴标/段条/时刻列随查看日切换 */
+      function dayClockInTs(offset) {
+        if ((offset || 0) >= 0) return S.clockInTs;
+        const d = new Date(); // 真实日历今天（与 renderDayLabel 同锚）
+        d.setDate(d.getDate() + offset);
+        const [h, m] = WEEK_PREV[WEEK_PREV.length + offset].in.split(":").map(Number);
+        d.setHours(h, m, 0, 0);
+        return d.getTime();
+      }
+
+      /** 分钟 → "XhYYm"（三值数字） */
+      const fmtHM = (m) => `${Math.floor(m / 60)}h${String(Math.round(m) % 60).padStart(2, "0")}m`;
+      /** 分钟 → "X小时Y分钟"（日均数字） */
+      const fmtCN = (m) => `${Math.floor(m / 60)}小时${Math.round(m) % 60}分钟`;
+
+      /** 三值数字：跟随当前查看日（今天 = EV_MOCK 实时累计，过去 = 该日总计） */
+      function renderTriple() {
+        const segs = todaySegsMin(S.viewDay || 0);
+        const sum = (t) =>
+          segs.filter((s) => s.type === t).reduce((a, s) => a + (s.end - s.start), 0);
+        $("num-duty").textContent = fmtHM(sum("work") + sum("rest"));
+        $("num-work").textContent = fmtHM(sum("work"));
+        $("num-rest").textContent = fmtHM(sum("rest"));
+      }
+
+      /** 日期行：查看日日期 + 星期 + 状态；左右箭头按数据边界禁用 */
+      function renderDayLabel() {
+        const offset = S.viewDay || 0;
+        const d = new Date(); // 锚定真实日历今天（上班跨午夜时不受上班时刻影响）
+        d.setDate(d.getDate() + offset);
+        const week = "日一二三四五六"[d.getDay()];
+        const status =
+          offset === 0 ? (S.running ? "在岗中" : S.duty ? "休息中" : "未上班") : "已下班";
+        $("day-label").textContent =
+          `${d.getMonth() + 1}月${d.getDate()}日 · 周${week} · ${status}`;
+        $("arrow-prev").disabled = offset <= -WEEK_PREV.length;
+        $("arrow-next").disabled = offset >= 0;
+      }
+
+      /** 顶部圆角矩形轮廓（柱体与选中环共用：下面直角、上面圆角，用户定案），返回 path d */
+      function roundedTopRect(x, y, w, h, r) {
+        const rr = Math.min(r, h / 2, w / 2);
+        return `M${x},${(y + h).toFixed(1)} L${x},${(y + rr).toFixed(1)} Q${x},${y} ${(x + rr).toFixed(1)},${y} L${(x + w - rr).toFixed(1)},${y} Q${x + w},${y} ${(x + w).toFixed(1)},${(y + rr).toFixed(1)} L${(x + w).toFixed(1)},${(y + h).toFixed(1)} Z`;
+      }
+
+      /** 周卡（屏幕使用时间风格）：日均 / 浮动徽章 / 七日堆叠柱 全由数据派生（三值由 renderTriple 负责） */
+      function renderWeekMock() {
+        const segs = todaySegsMin();
+        const todayWork = segs
+          .filter((s) => s.type === "work")
+          .reduce((a, s) => a + (s.end - s.start), 0);
+        const todayRest = segs
+          .filter((s) => s.type === "rest")
+          .reduce((a, s) => a + (s.end - s.start), 0);
+        const days = [...WEEK_PREV, { day: "今", work: todayWork, rest: todayRest }];
+        const viewIdx = days.length - 1 + (S.viewDay || 0);
+        const maxTotal = Math.max(...days.map((d) => d.work + d.rest));
+        const avgWork = days.reduce((a, d) => a + d.work, 0) / days.length;
+        // 七日堆叠柱 SVG 几何（PL013.5 追加）：viewBox = 实际像素宽×高，柱 x 取整杜绝小数左缘；
+        // 槽位 = W/7（可带小数，仅用于求柱心），柱宽固定 20，每柱两枚 rect（下 rest 上 work）
+        const svg = $("wcSvg");
+        const W = svg.clientWidth;
+        const H = svg.clientHeight;
+        if (svg.viewBox.baseVal.width !== W || svg.viewBox.baseVal.height !== H) {
+          svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+        }
+        const slot = W / 7;
+        // 上下各留 1.5px 描边余量（PL013.5）：环描边以柱轮廓为中心线内外各 0.75px，
+        // 满高柱轮廓与 viewBox 边界重合时外半段被 SVG 裁剪（顶弧切平/底部露线）——
+        // 柱底收至 H−1.5 让描边全程落界内
+        const plotH = H - 3;
+        const geom = days.map((d, i) => {
+          const total = d.work + d.rest;
+          const barH = total ? (total / maxTotal) * plotH : 0;
+          const restH = total ? (d.rest / total) * barH : 0;
+          return {
+            x: Math.round(i * slot + (slot - 20) / 2), // 柱缘整数：小数左缘的根治点
+            w: 20,
+            y: H - 1.5 - barH, // 柱顶（柱底 = H−1.5，环定位用）
+            barH,
+            workH: total ? (d.work / total) * barH : 0,
+            restH,
+          };
+        });
+        wcGeom = geom;
+        const barsG = $("wcBars");
+        const sig = `${days.length}|${Math.round(todayWork)}|${S.viewDay || 0}`; // 含查看日：切日必须重画选中柱
+        if (barsG.dataset.sig !== sig) {
+          barsG.innerHTML = geom
+            .map((g) => {
+              // 柱段规范（用户定案）：休息（绿）在上、工作（橙）在下；下面直角、上面圆角——
+              // 圆角由顶部的 rest 段承担（roundedTopRect：path 只圆上角两弧，SVG rx 四角全圆不可用）；
+              // 无休息的柱圆角回落到 work 段顶
+              const r = Math.min(3, g.w / 2);
+              const work =
+                g.workH > 0
+                  ? g.restH > 0
+                    ? `<rect class="seg work" x="${g.x}" y="${(g.y + g.restH).toFixed(1)}" width="${g.w}" height="${g.workH.toFixed(1)}" />`
+                    : `<path class="seg work" d="${roundedTopRect(g.x, g.y, g.w, g.workH, r)}" />`
+                  : "";
+              const rest =
+                g.restH > 0
+                  ? `<path class="seg rest" d="${roundedTopRect(g.x, g.y, g.w, g.restH, r)}" />`
+                  : "";
+              return work + rest;
+            })
+            .join("");
+          barsG.dataset.sig = sig;
+          if (selTimer) flashSel(selIdx); // 重建冲掉环：高亮仍活跃则重启序列
+        }
+        if ((S.viewDay || 0) !== lastViewDay) {
+          lastViewDay = S.viewDay || 0;
+          flashSel(viewIdx); // 切日即闪：0.3s 亮起 → 1s 保持 → 0.5s 淡出（PL013.5）
+        }
+        $("wc-avg-line").style.bottom = `${((avgWork / maxTotal) * 100).toFixed(1)}%`;
+        $("wc-avg-num").textContent = fmtCN(avgWork);
+        const deltaPct = Math.round(((avgWork - LAST_WEEK_AVG_WORK) / LAST_WEEK_AVG_WORK) * 100);
+        const up = deltaPct >= 0;
+        const v = $("wc-delta");
+        v.classList.toggle("up", up);
+        v.classList.toggle("down", !up);
+        $("wc-delta-arrow").innerHTML = up
+          ? '<path d="m18 15-6-6-6 6" />'
+          : '<path d="m6 9 6 6 6-6" />';
+        $("wc-delta-text").textContent = `浮动 ${Math.abs(deltaPct)}%`;
+      }
+
+      // ===== 周卡选中环闪现即逝（PL013.5，SVG 环版）：切换查看日时环亮起（0.3s 淡入）
+      // → 保持 1s → 淡出（0.5s），任何柱不常驻；环 = 常驻 rect，闪现走 opacity 双速过渡 =====
+      let selTimer = 0;
+      let selIdx = -1;
+      let lastViewDay = 0; // 初值 = 初始 viewDay：首帧不算"切换"，加载无常驻环
+      let wcGeom = []; // 最近一次渲染的七日柱几何（x/y/w/barH，环轮廓消费）
+      /** 选中环闪现：清旧计时器 → 环按最新几何定位到新柱并亮起（0.3s opacity 淡入）
+       *  → 1.3s 后熄灭（0.5s 淡出走基态 transition）；环为开口路径——只包左右两侧与
+       *  顶部圆弧，底部不封口（用户定案：底部不露出） */
+      function flashSel(idx) {
+        if (selTimer) clearTimeout(selTimer);
+        selIdx = idx;
+        const ring = $("wcSelRing");
+        const g = wcGeom[idx];
+        if (!g) return;
+        const r = Math.min(3, g.w / 2);
+        ring.setAttribute(
+          "d",
+          `M${g.x},${(g.y + g.barH).toFixed(1)} L${g.x},${(g.y + r).toFixed(1)} Q${g.x},${g.y} ${(g.x + r).toFixed(1)},${g.y} L${(g.x + g.w - r).toFixed(1)},${g.y} Q${g.x + g.w},${g.y} ${(g.x + g.w).toFixed(1)},${(g.y + r).toFixed(1)} L${(g.x + g.w).toFixed(1)},${(g.y + g.barH).toFixed(1)}`,
+        );
+        ring.classList.add("on");
+        selTimer = setTimeout(() => {
+          ring.classList.remove("on");
+          selTimer = 0;
+          selIdx = -1;
+        }, 1300);
+      }
+
+      // 日期行左右箭头：往左看过去数据，右边界 = 今天
+      $("arrow-prev").addEventListener("click", () => {
+        S.viewDay = Math.max(S.viewDay - 1, -WEEK_PREV.length);
+        render();
+      });
+      $("arrow-next").addEventListener("click", () => {
+        S.viewDay = Math.min(S.viewDay + 1, 0);
+        render();
+      });
+
+      /** 明细行：随查看日（今天 = EV_MOCK + 上班时刻实时；过去日 = 合成段整体已落定），随后按最长段归一宽度 */
+      function renderDetailMock() {
+        const offset = S.viewDay || 0;
+        const segs = todaySegsMin(offset);
+        const nowMin = (Date.now() - S.clockInTs) / 60000;
+        const dayClockIn = dayClockInTs(offset); // 查看日上班锚点（与 renderGraph 同源）
+        const fmtT = (min) => {
+          const d = new Date(dayClockIn + min * 60000);
+          return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        };
+        const d = new Date(); // 背面标题随查看日（真实日历，与 renderDayLabel 同锚）
+        d.setDate(d.getDate() + offset);
+        $("detail-title").textContent =
+          offset === 0 ? "今日明细" : `${d.getMonth() + 1}月${d.getDate()}日明细`;
+        const data = segs.map((s, i) => {
+          // 「至今」仅今天的进行中末段；过去日段整体落定且不截到当前时刻
+          const ongoing = offset === 0 && i === segs.length - 1 && s.end >= nowMin;
+          const endMin = offset === 0 ? Math.min(s.end, nowMin) : s.end;
+          const secs = Math.max(0, Math.round((endMin - s.start) * 60));
+          return { type: s.type, start: s.start, end: s.end, ongoing, secs };
+        });
+        const last = data[data.length - 1];
+        const sig = `${data.length}|${last ? last.secs : 0}|${last ? last.ongoing : false}`; // 内容级签名：进行中段时长增长也会触发重建
+        const el = document.querySelector(".detail");
+        if (el.dataset.sig !== sig) {
+          el.dataset.sig = sig;
+          el.innerHTML = data
+            .map((d) => {
+              const mins = Math.round(d.secs / 60);
+              const t1 = d.ongoing ? "" : `–${fmtT(d.end)}`;
+              return `<div class="dl">
+                  <span class="time">${fmtT(d.start)}${t1}</span>
+                  <span class="track"><span class="blk ${d.type}" data-secs="${d.secs}"${d.ongoing ? " data-ongoing" : ""}></span></span>
+                  <span class="dur">${mins}分</span>${d.ongoing ? '<span class="ongoing">至今</span>' : ""}
+                </div>`;
+            })
+            .join("");
+        }
+        renderDetailBars();
+      }
+
+      function render() {
+        $("pillText").textContent = S.duty ? "下班" : "上班";
+        renderFlip(elapsed());
+        renderBattery();
+        renderHourglass();
+        $("startLabel").classList.toggle("working", S.running);
+        // 三段式控制：工作/休息互斥选中随运行状态；重置为瞬时按钮；未上班全禁用
+        const runMode = !S.duty ? "" : S.running ? "work" : "rest";
+        $("segRun").classList.toggle("off", !S.duty);
+        $("segReset").disabled = !S.duty;
+        for (const r of $("segRun").querySelectorAll("input")) {
+          r.disabled = !S.duty;
+          r.checked = r.value === runMode;
+        }
+        renderWeekMock();
+        renderTriple();
+        renderDayLabel();
+        renderDetailMock();
+        renderGraph();
+      }
+      setInterval(render, 100);
+
+      // ===== 翻转计时（时:分:秒.十分位，JS 驱动）=====
+      const flipEls = [];
+      (function buildFlip() {
+        const box = $("flipClock");
+        const layout = ["d", "d", ":", "d", "d", ":", "d", "d", ".", "s"];
+        for (const tk of layout) {
+          if (tk === "d" || tk === "s") {
+            const el = document.createElement("div");
+            el.className = "flip" + (tk === "s" ? " small" : "");
+            el.dataset.v = "0";
+            el.innerHTML =
+              '<div class="half top"><span>0</span></div><div class="half bottom"><span>0</span></div>';
+            box.appendChild(el);
+            flipEls.push(el);
+          } else {
+            const sep = document.createElement("span");
+            sep.className = "flip-sep";
+            sep.textContent = tk;
+            box.appendChild(sep);
+          }
+        }
+      })();
+
+      /** 单格翻页：静态两面归旧值 → 上半翻板落下（旧）→ 下半翻板转起（新），播完归位 */
+      function setFlip(el, v) {
+        const old = el.dataset.v;
+        if (old === v) return;
+        el.dataset.v = v;
+        const top = el.querySelector(".half.top");
+        const bottom = el.querySelector(".half.bottom");
+        el.querySelectorAll(".flap").forEach((n) => n.remove());
+        top.firstElementChild.textContent = old;
+        bottom.firstElementChild.textContent = old;
+        if (reducedMotion.matches) {
+          top.firstElementChild.textContent = v;
+          bottom.firstElementChild.textContent = v;
+          return;
+        }
+        const f1 = document.createElement("div");
+        f1.className = "half top flap flap-top";
+        f1.innerHTML = `<span>${old}</span>`;
+        const f2 = document.createElement("div");
+        f2.className = "half bottom flap flap-bottom";
+        f2.innerHTML = `<span>${v}</span>`;
+        el.append(f1, f2);
+        f1.addEventListener("animationend", () => {
+          top.firstElementChild.textContent = v;
+          f1.remove();
+        });
+        f2.addEventListener("animationend", () => {
+          bottom.firstElementChild.textContent = v;
+          f2.remove();
+        });
+      }
+
+      /** 把毫秒写入 7 格翻转（时 时 : 分 分 : 秒 秒 . 十分位） */
+      function renderFlip(ms) {
+        const t = Math.floor(ms / 100);
+        const d = t % 10;
+        const sec = Math.floor(t / 10) % 60;
+        const min = Math.floor(t / 600) % 60;
+        const hr = Math.floor(t / 36000);
+        const digits = [
+          Math.floor(hr / 10) % 10,
+          hr % 10,
+          Math.floor(min / 10) % 10,
+          min % 10,
+          Math.floor(sec / 10) % 10,
+          sec % 10,
+          d,
+        ];
+        digits.forEach((v, i) => setFlip(flipEls[i], String(v)));
+      }
+
+      // ===== 区间时钟：指针 + 弧（节流到秒）=====
+      let dialAt = 0;
+      function renderDial() {
+        const d = new Date();
+        const hAng = ((d.getHours() % 12) + d.getMinutes() / 60) * 30;
+        const mAng = (d.getMinutes() + d.getSeconds() / 60) * 6;
+        const sAng = d.getSeconds() * 6;
+        $("handHour").style.transform = `rotate(${hAng.toFixed(2)}deg)`;
+        $("handMin").style.transform = `rotate(${mAng.toFixed(2)}deg)`;
+        $("handSec").style.transform = `rotate(${sAng}deg)`;
+        const R = 72;
+        const autoOut = S.autoOutH * 3600000;
+        const a0 = angleOf(S.clockInTs);
+        let svg = `<path class="dial-track" d="${arcPath(R, a0, a0 + (S.autoOutH / 12) * 360)}" />`;
+        const nowTs = Date.now(); // 记录只画到"当前时刻"：与班内计时无关（重置计时不会抹掉已画记录）
+        const segs = EV_MOCK.map(([o0, o1, st]) => [
+          S.clockInTs + o0 * 60000,
+          S.clockInTs + o1 * 60000,
+          st,
+        ]);
+        const lastEndTs = S.clockInTs + EV_MOCK[EV_MOCK.length - 1][1] * 60000;
+        if (nowTs > lastEndTs) {
+          // mock 之后的一段（演示：按当前运行态续画到此刻）
+          segs.push([lastEndTs, nowTs, S.running ? "work" : "rest"]);
+        }
+        const endTs = S.clockInTs + autoOut;
+        for (const [t0, t1, st] of segs) {
+          const s0 = Math.max(t0, S.clockInTs);
+          const s1 = Math.min(t1, endTs, nowTs);
+          if (s1 <= s0) continue;
+          const sa = angleOf(s0);
+          const delta = ((s1 - s0) / (12 * 3600000)) * 360;
+          svg += `<path class="dial-arc ${st}" d="${arcPath(R, sa, sa + delta)}" />`;
+        }
+        $("dialArcs").innerHTML = svg;
+      }
+
+      // ===== 时间图谱：分段进度条 + 里程碑节点（R 进休 / W 复工 / D 日终）。
+      // 今天轴 = 上班→自动下班（D 计划位）；过去日轴 = 该日上班→实际下班（D 亮 = 工作结束）=====
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const graphPad = (n) => String(n).padStart(2, "0");
+      const graphHhmm = (ts) => {
+        const d = new Date(ts);
+        return `${graphPad(d.getHours())}:${graphPad(d.getMinutes())}`;
+      };
+      /** 渲染时间图谱：今天 = 段条推进到当前 + 在岗蓝占位到 D（计划终点），彗星在飞；
+       *  过去日 = 该日上班 → 实际下班的整段回放，窗口随查看日切换、段条铺满无死区，
+       *  D = 日终标记（工作结束即亮，与自动下班无关——用户定案），彗星停发（班已结束） */
+      function renderGraph() {
+        const svg = $("graphSvg");
+        if (!svg) return;
+        const isToday = (S.viewDay || 0) === 0;
+        const clockIn = dayClockInTs(S.viewDay || 0); // 查看日的上班时刻（随日切换）
+        const wallNow = Date.now();
+        // 段与表盘同源：今天 = mock 段 + 进行中尾段；过去日 = 合成演示分段（整体已落定）
+        let segs;
+        if (isToday) {
+          segs = EV_MOCK.map(([o0, o1, st]) => [clockIn + o0 * 60000, clockIn + o1 * 60000, st]);
+          const cur = S.running ? "work" : "rest";
+          const tail = segs[segs.length - 1];
+          if (wallNow > tail[1]) {
+            if (tail[2] === cur) {
+              tail[1] = wallNow;
+            } else {
+              segs.push([tail[1], wallNow, cur]);
+            }
+          }
+        } else {
+          segs = todaySegsMin(S.viewDay || 0).map(({ start, end, type }) => [
+            clockIn + start * 60000,
+            clockIn + end * 60000,
+            type,
+          ]);
+        }
+        // 窗口：今天 = 上班 → 自动下班（D 计划位）；过去日 = 上班 → 该日实际下班（末段终点）
+        const endTs = isToday ? clockIn + S.autoOutH * 3600000 : segs[segs.length - 1][1];
+        const nowTs = isToday ? wallNow : endTs; // 过去日整班已结束：查看时刻 = 下班点
+        // 坐标系：viewBox = 实际布局宽 × 12（1 单位 = 1 CSS px），段/节点/白纹同源零漂移；
+        // clientWidth 取布局尺寸，不受开板 scale 揭示动画影响（gBCR 会读到缩放中间值）
+        const W = svg.clientWidth;
+        if (svg.viewBox.baseVal.width !== W) {
+          svg.setAttribute("viewBox", `0 0 ${W} 12`);
+          // 彗星裁剪矩形的 x/width 随 renderGraph 每帧按进入节点同步（见彗星块）——
+          // viewBox 变化时无需在此处理；段条左圆角仍由 graphClip（全宽）统一裁
+        }
+        const xpx = (ts) => ((ts - clockIn) / (endTs - clockIn)) * W;
+        const bars = [];
+        const nodes = [];
+        segs.forEach(([t0, t1, st], i) => {
+          const s1 = Math.min(t1, nowTs, endTs);
+          if (s1 <= t0) return;
+          bars.push({
+            st,
+            x: xpx(t0),
+            w: xpx(s1) - xpx(t0),
+            active: nowTs < endTs && s1 === nowTs,
+          });
+          if (i > 0 && st !== segs[i - 1][2]) {
+            nodes.push({ ts: t0, ch: st === "rest" ? "R" : "W", kind: st });
+          }
+        });
+        // 未行驶段：当前进度 → D 铺在岗蓝（班内尚未发生的占位，非真实已发生段）
+        if (nowTs < endTs) {
+          bars.push({ st: "duty", x: xpx(nowTs), w: W - xpx(nowTs), active: false });
+        }
+        nodes.push({ ts: endTs, ch: "D", kind: "end" });
+        // 段条复用：数量对齐 + 改属性；圆角由 #graphClip 统一裁（段本体直角 rect）
+        const barsG = $("graphBars");
+        while (barsG.children.length > bars.length) barsG.lastChild.remove();
+        while (barsG.children.length < bars.length)
+          barsG.appendChild(document.createElementNS(SVG_NS, "rect"));
+        bars.forEach((b, i) => {
+          const el = barsG.children[i];
+          el.setAttribute("class", `graph-seg ${b.st}${b.active ? " active" : ""}`);
+          el.setAttribute("x", b.x.toFixed(2));
+          el.setAttribute("width", Math.max(0, b.w).toFixed(2));
+          el.setAttribute("y", "0");
+          el.setAttribute("height", "12");
+        });
+        // 节点：数量变化整层重建（新元素终态直呈，不触发过渡，杜绝跨色渐变伪影）
+        const nodesG = $("graphNodes");
+        if (nodesG.children.length !== nodes.length) nodesG.innerHTML = "";
+        while (nodesG.children.length > nodes.length) nodesG.lastChild.remove();
+        while (nodesG.children.length < nodes.length) {
+          // circle+text：central 对齐的是字体盒而非墨迹，大写字母墨迹恒低 0.5px，dy=-0.5 校正回光学居中
+          const el = document.createElementNS(SVG_NS, "g");
+          el.setAttribute("class", "graph-node");
+          el.innerHTML =
+            '<circle cx="6" cy="6" r="5.4" /><text x="6" y="6" dy="-0.5" text-anchor="middle" dominant-baseline="central" />';
+          nodesG.appendChild(el);
+        }
+        nodes.forEach((n, i) => {
+          const el = nodesG.children[i];
+          el.setAttribute("class", `graph-node ${n.kind}${n.ts <= nowTs ? " lit" : ""}`);
+          // 平移补偿 circle 自身 cx=6：常规节点圆心压交界；D 盒左缘 = W−12（右缘贴条尾，
+          // 与旧 translate(-100%) 等价——圆右缘收在 W−0.6，0.6px 内缩为原设计）
+          const off = n.kind === "end" ? 12 : 6;
+          el.setAttribute("transform", `translate(${(xpx(n.ts) - off).toFixed(2)} 0)`);
+          el.querySelector("text").textContent = n.ch;
+        });
+        // 彗星走廊（SVG 静态层，PL013 起与段/节点同坐标系）：左缘 = 进入节点中心，右缘 = D
+        // 中心；发射由渲染帧哨兵与网格唤醒驱动（动画钟追赶式，见 launchComet）
+        const comet = $("graphComet");
+        const birthX = xpx(segs[segs.length - 1][0]); // 进入节点 = 当前段起点
+        cometWalk = isToday ? W - birthX + 24 : 0; // 过去日停发：walk=0 令发射器自然静默
+        if (comet.dataset.awake !== "1") {
+          comet.dataset.awake = "1"; // 纪元回拨两个寿命定格 + 哨兵/唤醒只挂一次
+          cometEpoch = document.timeline.currentTime - ((2 * cometWalk) / COMET.speed) * 1000;
+          // 渲染帧哨兵（rAF 链）：帧距 > 250ms 判定挂起/遮挡——稀疏帧里发射的白纹 startTime
+          // 会被量化到帧点、相位失真，故挂起期间不发射，恢复首帧强制重建；
+          // cometLastFrame 初始 -Infinity，首个渲染帧即重建出满员稳态
+          requestAnimationFrame(function frame(t) {
+            if (t - cometLastFrame > 250) cometNeedsRebuild = true;
+            cometLastFrame = t;
+            if (cometNeedsRebuild) {
+              cometNeedsRebuild = false;
+              launchComet(true);
+            }
+            requestAnimationFrame(frame);
+          });
+          // 唤醒点对齐发射网格（自校正 setTimeout，不用会累积漂移的固定 setInterval）；
+          // 延时按动画钟折算——挂起期间唤醒随之冻结，与网格同钟，不会产生错位追赶
+          (function wake() {
+            const period = (COMET.spacing / COMET.speed) * 1000;
+            const animNow = document.timeline.currentTime;
+            const next = cometEpoch + (Math.floor((animNow - cometEpoch) / period) + 1) * period;
+            setTimeout(
+              () => {
+                launchComet();
+                wake();
+              },
+              Math.max(0, next - animNow),
+            );
+          })();
+        }
+        if (isToday) {
+          const wasHidden = comet.style.display === "none";
+          comet.style.display = "";
+          comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
+          // 出生点裁剪（PL013.6）：彗星层外壳的 clip 左界 = 进入节点中心——白纹越过
+          // W 圆心才可见（恢复旧走廊 overflow:hidden 的"从圆心发出"观感，SVG 迁移时丢失）
+          document.getElementById("graphClipCometRect").setAttribute("x", birthX.toFixed(2));
+          document
+            .getElementById("graphClipCometRect")
+            .setAttribute("width", (W - birthX).toFixed(2));
+          if (wasHidden) launchComet(true); // 从过去日切回：即时满员，避免逐格补流的稀疏期
+        } else {
+          // 过去日班已结束：停发白纹并清场（流只属于进行中的班；walk=0 亦令发射器自然静默）
+          comet.style.display = "none";
+          for (const s of [...comet.children]) s.remove();
+        }
+        $("axisStart").textContent = `上班 ${graphHhmm(clockIn)}`;
+        $("axisEnd").textContent = `下班 ${graphHhmm(endTs)}`;
+      }
+
+      // ===== 节点彗星发射器（动画钟追赶式）：发射网格 = cometEpoch 起每 period 一格，
+      // 记账钟 = document.timeline（CSS 动画的驱动钟）——渲染挂起（遮挡/最小化/托盘）时
+      // 动画钟冻结、网格随之冻结，不存在「错过」的槽位，恢复后流从冻结处无缝续播，
+      // 账面位置与屏幕永远一致（墙钟 performance.now 会与动画钟分叉，禁用于此） =====
+      const COMET = { speed: 18, spacing: 14 };
+      let cometEpoch = 0; // 发射纪元（document.timeline 毫秒），走廊首建时回拨两个寿命定格
+      let cometWalk = 0; // 当前走廊宽 px（含 24 出生潜行段）；过去日 = 0（停发）
+      let cometLastFrame = -Infinity; // 最近一渲染帧的动画钟时刻（-Infinity = 尚无帧证据）
+      let cometNeedsRebuild = false; // 挂起/遮挡恢复后待重建标记（由 rAF 哨兵置位）
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      /** 生成一条白纹：born 为发射网格时刻，age>0 时以负 animation-delay 从对应相位接入
+          （与 CSS 动画同一时间线，起始位置天然自洽），走出 D 后自移除 */
+      function spawnStripe(comet, born, age, walk) {
+        const s = document.createElementNS(SVG_NS, "rect");
+        s.setAttribute("class", "comet-stripe");
+        s.dataset.born = born;
+        s.setAttribute("x", "-24");
+        s.setAttribute("y", "0");
+        s.setAttribute("width", "24");
+        s.setAttribute("height", "12");
+        s.style.setProperty("--walk", `${Math.round(walk)}px`);
+        s.style.animationDuration = `${Math.round((walk / COMET.speed) * 1000)}ms`;
+        if (age > 0) s.style.animationDelay = `${-Math.round(age)}ms`;
+        comet.appendChild(s);
+        s.addEventListener("animationend", () => s.remove());
+      }
+      /** 追赶式发射器：帧新鲜时按寿命扫尾并对照网格补缺；帧陈旧（挂起/遮挡中）不发射——
+          稀疏帧会把新纹的 startTime 量化到帧点造成相位失真。
+          force = 重建模式：清掉全部白纹重播（挂起恢复后的首帧由 rAF 哨兵调用） */
+      function launchComet(force) {
+        if (reducedMotion.matches) return;
+        const comet = $("graphComet");
+        if (!comet || cometWalk <= 0) return; // walk=0 = 过去日/未就绪：自然静默
+        const walk = cometWalk;
+        const now = document.timeline.currentTime; // 与 CSS 动画同钟，账实永不分叉
+        const period = (COMET.spacing / COMET.speed) * 1000;
+        const life = (walk / COMET.speed) * 1000; // 单条生命周期 ms（含 24px 出生潜行段）
+        if (force) {
+          for (const s of [...comet.children]) s.remove();
+        } else {
+          if (now - cometLastFrame > 250) return; // 帧陈旧：此刻发射必失真，等帧哨兵重建
+          for (const s of [...comet.children]) {
+            if (now - parseFloat(s.dataset.born) >= life) s.remove();
+          }
+        }
+        const mNow = Math.floor((now - cometEpoch) / period); // 最近一个网格槽位
+        for (let m = mNow; m >= 0; m--) {
+          const born = cometEpoch + m * period;
+          const age = now - born;
+          if (age >= life) break; // 更早的槽位全部超出寿命
+          if (comet.querySelector(`[data-born="${born}"]`)) continue;
+          spawnStripe(comet, born, age, walk);
+        }
+      }
+
+      // ===== 电量（工作日进度条：反映距自动下班点还剩多少墙钟时间，用户定案）=====
+      // 分子 = 距上班时刻的墙钟时长——与班内计时（elapsed）完全解耦：重置/休息/暂停
+      // 都不影响电池（下班点不因休息顺延，休息期间照常消耗）；下班后冻结在当下刻度
+      function renderBattery() {
+        const ratio =
+          !S.duty && S.batFrozen != null
+            ? S.batFrozen
+            : clamp01(1 - (Date.now() - S.clockInTs) / (S.autoOutH * 3600000));
+        const pct = Math.round(ratio * 100);
+        $("batFill").style.width = `${pct}%`;
+        $("batPct").textContent = `${pct}%`;
+        // 原组件阈值色：≥45% greenyellow / 20–45% yellow / <20% red
+        const bat = $("battery");
+        bat.classList.toggle("mid", ratio >= 0.2 && ratio < 0.45);
+        bat.classList.toggle("low", ratio < 0.2);
+      }
+
+      // ===== 沙漏（提醒阈值计时器）：周期 = 设置里的 thresholdMin（分钟）
+      // 规则：① 按下"工作"（含暂停后恢复）或改了阈值 → 翻半圈回满 + 按阈值匀速漏
+      //       ② 按下"休息"且还有沙 → 翻半圈 + 从当前水位快速漏完
+      //       ③ 正在工作但已漏完 → 不翻转不重启，停在"上空下满"（此时点休息也不翻）
+      //       ④ 其余（暂停中、暂停后已漏完）→ 保持现状 =====
+      const HG_FLIP = 0.6; // 与 CSS --hg-flip 一致（秒）
+      const HG_DRAIN = 0.8; // 暂停快速漏完时长（秒）
+      const HG_MODEL_T = "translate(13.75px, 9.25px)";
+      const hgMs = () => S.thresholdMin * 60000; // 沙漏周期（跟随提醒阈值）
+      let hgKey = "";
+      let hgFlowTimer = 0;
+      let hgPrevRun = false; // 上一帧的工作态：识别"刚按下工作/休息"
+      let hgThres = S.thresholdMin; // 上一帧的阈值：识别"设置里改过阈值"
+      // 水位记录（0=上满下空，1=上空下满）：用于暂停时"从当前水位"继续快漏
+      let hgP0 = 0;
+      let hgT0 = Date.now();
+      let hgDur = hgMs();
+      const hgPNow = () => Math.min(1, hgP0 + (Date.now() - hgT0) / hgDur);
+
+      /** 翻半圈（-180° → 0°）并重启沙动画（.run） */
+      function hgFlipRestart(hg, model) {
+        model.style.transition = "none";
+        model.style.transform = `${HG_MODEL_T} rotate(-180deg)`;
+        void model.getBoundingClientRect(); // 强制布局：提交 -180° 这一帧（SVG 无 offsetWidth）
+        hg.classList.add("run"); // 沙/环从此刻重启动画（延迟见 --hg-delay）
+        model.style.transition = "";
+        model.style.transform = "";
+      }
+
+      /** 清掉当前动画态（沙流 + 沙层），供各分支按新状态重挂 */
+      function hgClearRun(hg) {
+        window.clearTimeout(hgFlowTimer);
+        hg.classList.remove("flowing");
+        hg.classList.remove("run");
+      }
+
+      function renderHourglass() {
+        const done = hgPNow() >= 1; // 沙已漏完
+        const key = `${S.running}|${S.thresholdMin}|${done}`;
+        if (key === hgKey) return;
+        hgKey = key;
+        const hg = $("hourglass");
+        const model = hg.querySelector(".loader__model");
+        const pCur = hgPNow(); // 当前水位
+        const started = S.running && !hgPrevRun; // 刚按下"工作"（含暂停后恢复）
+        const thresChanged = S.thresholdMin !== hgThres; // 设置里改了阈值
+        hgPrevRun = S.running;
+        hgThres = S.thresholdMin;
+
+        if ((started || thresChanged) && S.running) {
+          // ① 新的一段工作：翻正回满，按阈值匀速漏
+          hgClearRun(hg);
+          hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
+          hg.style.setProperty("--hg-delay", `${HG_FLIP}s`);
+          hgP0 = 0;
+          hgDur = hgMs();
+          hgT0 = Date.now();
+          hgFlipRestart(hg, model);
+          hgFlowTimer = window.setTimeout(() => hg.classList.add("flowing"), HG_FLIP * 1000);
+        } else if (thresChanged) {
+          // 阈值变了但当前暂停：只重置内部水位，画面留待下次"工作"统一翻转
+          hgP0 = 0;
+          hgDur = hgMs();
+          hgT0 = Date.now();
+        } else if (!S.running && !done) {
+          // ② 暂停且还有沙：翻半圈 + 从当前水位快速漏完（翻转后上仓装的正是"已漏走的 pCur"）
+          hgClearRun(hg);
+          hg.style.setProperty("--hg-dur", `${HG_DRAIN}s`);
+          hg.style.setProperty("--hg-delay", `${-(1 - pCur) * HG_DRAIN}s`);
+          hgP0 = 1 - pCur;
+          hgDur = HG_DRAIN * 1000;
+          hgT0 = Date.now();
+          hgFlipRestart(hg, model);
+        } else if (S.running && done) {
+          // ③ 工作漏完：不翻转，负一个周期的延迟让动画直接停在终态（上空下满）
+          hgClearRun(hg);
+          hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
+          hg.style.setProperty("--hg-delay", `${-hgMs() / 1000}s`);
+          hgP0 = 1;
+          hgDur = 1;
+          hgT0 = Date.now();
+          void hg.getBoundingClientRect(); // 重排后再挂 .run，让动画以负延迟直接落到终态
+          hg.classList.add("run");
+        }
+        // ④ 其余（暂停中、暂停后已漏完）：保持现状不动
+      }
+
+      // ===== 提醒阈值接线：改设置 → 沙漏周期跟随（强制翻转重启）+ 文案同步 =====
+      const setThreshold = $("setThreshold");
+      /** 只同步文案（初始化时用，避免早于 reducedMotion 触发 render） */
+      function syncRemindText() {
+        $("remindText").textContent = `已连续工作 ${S.thresholdMin} 分钟，休息一下吧`;
+      }
+      setThreshold.addEventListener("change", () => {
+        const v = Math.min(99, Math.max(1, Number(setThreshold.value) || 50));
+        setThreshold.value = String(v);
+        S.thresholdMin = v;
+        syncRemindText();
+        hgKey = ""; // 周期变了：下一帧强制翻转 + 重置水位
+        render();
+      });
+      syncRemindText();
+
+      // ===== 自动下班小时数接线（PL014 步进器）：4~12 步进 1，边界禁用；改设置 →
+      // 表盘弧跨度/电量耗尽/图谱 D 点/文案全部随动 =====
+      /** 同步步进器数值与边界禁用态 + 自动下班条文案 */
+      function syncAutoOutStepper() {
+        $("setAutoOutValue").textContent = String(S.autoOutH);
+        $("setAutoOutDec").disabled = S.autoOutH <= 4;
+        $("setAutoOutInc").disabled = S.autoOutH >= 12;
+      }
+      /** 只同步文案（自动下班条显示当前 autoOutH） */
+      function syncAutoOutText() {
+        $("autoOutText").textContent = `已到自动下班时间（上班 + ${S.autoOutH}h），已回填记账`;
+      }
+      function stepAutoOut(delta) {
+        const v = S.autoOutH + delta;
+        if (v < 4 || v > 12) return; // 边界外静默：按钮禁用态已挡，此为键盘兜底
+        S.autoOutH = v;
+        syncAutoOutStepper();
+        syncAutoOutText();
+        render();
+      }
+      $("setAutoOutDec").addEventListener("click", () => stepAutoOut(-1));
+      $("setAutoOutInc").addEventListener("click", () => stepAutoOut(1));
+      syncAutoOutStepper();
+      syncAutoOutText();
+
+      // ===== 日期卡（每分钟节流）：12h 时刻 + AM/PM；下行 英文星期全称 + 英文日期 =====
+      let dateAt = 0;
+      const WEEK_EN = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
+      const MONTH_EN = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+      const ordinal = (n) => {
+        const s = ["th", "st", "nd", "rd"];
+        const v = n % 100;
+        return n + (s[(v - 20) % 10] || s[v] || s[0]);
+      };
+      function renderDate() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, "0");
+        const h24 = d.getHours();
+        $("dcTime").textContent = `${h24 % 12 || 12}:${p(d.getMinutes())}`;
+        $("dcAmpm").textContent = h24 < 12 ? "AM" : "PM";
+        $("dcDay").textContent =
+          `${WEEK_EN[d.getDay()]}, ${MONTH_EN[d.getMonth()]} ${ordinal(d.getDate())}`;
+        $("dcCard").classList.toggle("day", h24 >= 6 && h24 < 18); // 白天显示太阳、夜间显示月亮
+      }
+      renderDate();
+      renderDial();
+      renderGraph();
+      setInterval(() => {
+        const now = Date.now();
+        if (now - dateAt > 60000) {
+          dateAt = now;
+          renderDate();
+        }
+        if (now - dialAt > 1000) {
+          dialAt = now;
+          renderDial();
+        }
+      }, 1000);
+
+      // 演示状态切换
+      document.querySelectorAll('input[name="dstate"]').forEach((r) =>
+        r.addEventListener("change", () => {
+          const v = r.value;
+          if (v === "off") {
+            S.batFrozen = clamp01(1 - (Date.now() - S.clockInTs) / (S.autoOutH * 3600000));
+            S.duty = false;
+            S.running = false;
+            S.accum = 0;
+            S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段：段尾冻结在下班时刻
+          }
+          if (v === "run") {
+            S.duty = true;
+            S.running = true;
+            S.startTs = Date.now();
+            S.accum = 0;
+            S.clockInTs = Date.now();
+            S.batFrozen = null;
+            S.pausedAtMin = null; // 新班开始：段尾重新跟随当前时刻
+          }
+          if (v === "pause") {
+            S.duty = true;
+            S.running = false;
+            S.accum = 335 * 60000;
+            S.clockInTs = Date.now() - 335 * 60000;
+            S.batFrozen = null;
+            S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段（= 335，与 accum 对齐）
+          }
+          // 打卡动作内部数据（pill/按钮/环）随 render 刷新
+          render();
+          // pill 与按钮文案由 render 依据 duty/running 计算 ✓
+        }),
+      );
+      // 打卡与按钮动作
+      $("pillCast").addEventListener("click", () => {
+        if (!S.duty) openConfirm("in");
+        else openConfirm("out");
+      });
+      // 三段式控制动作：工作（恢复计时）/ 休息（收段暂停）/ 重置（计时归零，瞬时）
+      $("segRun")
+        .querySelectorAll("input")
+        .forEach((r) =>
+          r.addEventListener("change", () => {
+            if (!S.duty) return;
+            if (r.value === "work") {
+              if (!S.running) {
+                S.running = true;
+                S.startTs = Date.now(); // 累计保留，续计
+                S.pausedAtMin = null; // 恢复计时：段尾重新跟随当前时刻
+              }
+            } else if (r.value === "rest") {
+              if (S.running) {
+                S.running = false;
+                S.accum += Date.now() - S.startTs; // 收段
+                S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 段尾冻结在收段时刻
+              }
+            }
+            syncDevkit();
+            render();
+          }),
+        );
+      // 重置：计时归零；若在工作则同时切到休息（瞬时按钮，不保持选中、归零后不进入工作）
+      $("segReset").addEventListener("click", () => {
+        if (!S.duty) return;
+        S.running = false;
+        S.accum = 0;
+        S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段：段尾冻结在重置时刻
+        syncDevkit();
+        render();
+      });
+      function syncDevkit() {
+        const v = !S.duty ? "off" : S.running ? "run" : "pause";
+        const r = document.querySelector(`input[name="dstate"][value="${v}"]`);
+        if (r) r.checked = true;
+      }
+      // 文案条开关
+      $("dk-remind").addEventListener("change", (e) =>
+        $("bn-remind").classList.toggle("show", e.target.checked),
+      );
+      $("dk-auto").addEventListener("change", (e) =>
+        $("bn-auto").classList.toggle("show", e.target.checked),
+      );
+
+      // ===== 确认框 =====
+      let confirmDir = "in";
+      function openConfirm(dir) {
+        confirmDir = dir || (S.duty ? "out" : "in");
+        $("cfTitle").textContent = confirmDir === "in" ? "确认上班打卡" : "确认下班打卡";
+        $("cfText").textContent =
+          confirmDir === "in"
+            ? "开始记录今日在岗时长；班内计时 = 工作、空隙 = 休息。"
+            : "班内计时将收段落库，并结算今日在岗 / 工作 / 休息三值。";
+        $("confirm").style.display = "flex";
+      }
+      function closeConfirm() {
+        $("confirm").style.display = "none";
+      }
+      function confirmOk() {
+        closeConfirm();
+        if (confirmDir === "in") {
+          S.duty = true;
+          S.running = true;
+          S.startTs = Date.now();
+          S.accum = 0;
+          S.clockInTs = Date.now(); // 上班时刻
+          S.batFrozen = null;
+          S.pausedAtMin = null; // 新班开始：段尾重新跟随当前时刻
+        } else {
+          S.batFrozen = clamp01(1 - (Date.now() - S.clockInTs) / (S.autoOutH * 3600000)); // 冻结下班那一刻电量（墙钟口径，与电池驱动同源）
+          S.duty = false;
+          S.running = false;
+          S.accum = 0;
+          S.pausedAtMin = (Date.now() - S.clockInTs) / 60000; // 收段：段尾冻结在下班时刻
+        }
+        syncDevkit();
+        render();
+      }
+      // ===== 玻璃板（借鉴 CapsuleTODO）：按钮原点缩放飞出、两板互斥、点板外收板 =====
+      const settingsBoard = $("settings-board");
+      const statsBoard = $("stats-board");
+      const gearBtn = $("gear");
+      const statsBtn = $("stats-btn");
+      const BOARD_TOP = 54;
+      const BOARD_LEFT = 12;
+
+      /** 把按钮中心换算成板内坐标写入 transform-origin（开板即从该按钮处飞出） */
+      function flyBoard(board, btn) {
+        const cr = $("win").getBoundingClientRect();
+        const br = btn.getBoundingClientRect();
+        board.style.setProperty(
+          "--origin-x",
+          `${Math.round(br.left + br.width / 2 - cr.left - BOARD_LEFT)}px`,
+        );
+        board.style.setProperty(
+          "--origin-y",
+          `${Math.round(br.top + br.height / 2 - cr.top - BOARD_TOP)}px`,
+        );
+      }
+
+      function setSettings(open) {
+        if (open) {
+          if (statsBoard.classList.contains("open")) setStats(false); // 两板互斥
+          flyBoard(settingsBoard, gearBtn);
+        }
+        settingsBoard.classList.toggle("open", open);
+        gearBtn.classList.toggle("open", open); // 开板保色、收板褪色
+        $("win").classList.toggle("board-open", open); // 同步雾化被盖的计时区内容
+      }
+      function toggleSettings() {
+        setSettings(!settingsBoard.classList.contains("open"));
+      }
+      // 完成 button 已删（PL014：设置即时生效 + 点板外收板），closeSettings 随之退役
+
+      function setStats(open) {
+        if (open) {
+          if (settingsBoard.classList.contains("open")) setSettings(false); // 两板互斥
+          flyBoard(statsBoard, statsBtn);
+          // 首柱绘制发生在板隐藏/缩零态时，开板会拉伸陈旧栅格（首进显示不正确）——
+          // 清 sig 强制下一 tick 重绘，揭示动画中途即以 scale(1) 正确比例重拍（PL013.5）
+          delete $("wcBars").dataset.sig;
+        }
+        statsBoard.classList.toggle("open", open);
+        if (!open) statsBoard.classList.remove("flipped"); // 关板复位到统计面
+        statsBtn.classList.toggle("open", open);
+        $("win").classList.toggle("board-open", open); // 同步雾化被盖的计时区内容
+      }
+
+      // 今日明细翻转入口：仅 在岗 卡（hover 小字暗示，点整卡翻面），返回按钮翻回
+      document
+        .querySelector(".t-duty")
+        .addEventListener("click", () => statsBoard.classList.add("flipped"));
+      $("detail-back").addEventListener("click", () => statsBoard.classList.remove("flipped"));
+
+      // 统计钮：按压回弹由 CSS :active 承担（见 glass.css），此处只管板的开合
+      function toggleStats() {
+        setStats(!statsBoard.classList.contains("open"));
+      }
+
+      // ===== 玻璃滚动浮钮（借鉴 CapsuleTODO design/assets/js/glass-bar.js）：统计板内容
+      // 溢出时在右侧缝隙出现 4×16 透明玻璃浮钮，随滚动比例移动。滚动体 = 两个翻转面
+      // （.flip-face 自带 overflow-y:auto，V0.007 起滚动在面内），sync 按翻转态取当前显示面；
+      // 轨道几何取"锚层"矩形（锚层 = 板层本身，不参与 scale 揭示/翻转 → 中途取值也是终态）=====
+      /**
+       * 给翻转统计板挂一枚玻璃浮钮（原生滑杆同时隐藏）。
+       * # 参数
+       * - `faces` 候选滚动面（.flip-face 列表）；`anchor` 浮钮锚层（不进滚动体、几何稳定）
+       * - `right` 浮钮距锚层右缘的像素（落在玻璃内距带的缝隙里）
+       */
+      function makeGlassBar(faces, anchor, right = 6) {
+        const THUMB_H = 16; // 与 .glass-thumb 高度同源
+        for (const f of faces) f.classList.add("glass-scroll"); // 各面隐藏原生滑杆
+        const bar = document.createElement("div");
+        bar.className = "glass-bar";
+        bar.hidden = true;
+        const thumb = document.createElement("i");
+        thumb.className = "glass-thumb";
+        bar.appendChild(thumb);
+        anchor.appendChild(bar);
+        const activeFace = () =>
+          statsBoard.classList.contains("flipped")
+            ? anchor.querySelector(".flip-face.back")
+            : anchor.querySelector(".flip-face.front");
+        const sync = () => {
+          const scroller = activeFace();
+          const ar = anchor.getBoundingClientRect();
+          const cs = getComputedStyle(scroller);
+          const padT = parseFloat(cs.paddingTop) || 0;
+          const padB = parseFloat(cs.paddingBottom) || 0;
+          bar.style.top = `${padT}px`;
+          bar.style.height = `${ar.height - padT - padB}px`;
+          bar.style.right = `${right}px`;
+          const range = scroller.scrollHeight - scroller.clientHeight;
+          const scrollable = range > 1; // 不溢出就不出现浮钮
+          bar.hidden = !scrollable;
+          if (!scrollable) return;
+          const trackH = ar.height - padT - padB - THUMB_H;
+          thumb.style.top = `${Math.round((scroller.scrollTop / range) * trackH)}px`;
+        };
+        for (const f of faces) f.addEventListener("scroll", sync, { passive: true });
+        new ResizeObserver(sync).observe(anchor); // 窗口尺寸变化时重算轨道
+        // 翻面/开合不产生 scroll 事件：观察板层类变化（flipped/open），即时重取活动面
+        new MutationObserver(sync).observe(anchor, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+        sync();
+      }
+      makeGlassBar(statsBoard.querySelectorAll(".flip-face"), statsBoard);
+
+      // 点板外任意位置收板（板内点击与按钮自身的开合不在此列）
+      document.addEventListener("click", (e) => {
+        if (!e.target.isConnected) return;
+        if (
+          settingsBoard.classList.contains("open") &&
+          !e.target.closest("#settings-board") &&
+          !e.target.closest("#gear")
+        ) {
+          setSettings(false);
+        }
+        if (
+          statsBoard.classList.contains("open") &&
+          !e.target.closest("#stats-board") &&
+          !e.target.closest("#stats-btn")
+        ) {
+          setStats(false);
+        }
+      });
+
+      // 磨砂对比滑杆（--blur 联动引擎）
+      const dkBlur = document.getElementById("dk-blur");
+      dkBlur.addEventListener("input", () =>
+        document.documentElement.style.setProperty("--blur", dkBlur.value + "px"),
+      );
+      // 背景切换（测试不同背景下的磨砂与玻璃质感）
+      const BGS = ["url(assets/lab-bg.jpg)", "url(assets/bg-bookstore.jpg)"];
+      function setBg(i) {
+        document.documentElement.style.setProperty("--bg-photo", BGS[i]);
+      }
+      // 初始（默认演示：计时中）
+      applyStateCall();
+      function applyStateCall() {
+        render();
+        syncDevkit();
+      }
+
+      // ===== 标题粒子化（借鉴 CapsuleTODO / Da0Mine text-particleization，MIT）：
+      // 画布接管标题视觉；光标进入窗口即排斥、离开后弹簧归位，静止自动停帧省 GPU；
+      // reduced-motion 下不初始化，保留静态文字 =====
+      function initTitleParticles() {
+        const h1 = document.querySelector(".title");
+        if (!h1 || reducedMotion.matches) return;
+        const canvas = h1.querySelector(".title-canvas");
+        const ctx = canvas.getContext("2d");
+        const card = $("win");
+        h1.classList.add("title--particles"); // 仅粒子形态：原文字透明让位
+        const TEXT = "CapsulePulse";
+        const GAP = 2; // 采样步长（离屏像素）
+        const REPEL_RADIUS = 55;
+        const REPEL_FORCE = 0.45;
+        const SPRING = 0.06;
+        const FRICTION = 0.85;
+        const MAX_OFFSET = 15;
+        const SETTLE_DIST = 0.5;
+        const FRAME_CAP = 240;
+        const MARGIN_X = 30;
+        const MARGIN_TOP = 20; // 与 .title-canvas top:-20px 联动
+        const MARGIN_BOTTOM = 30;
+        const GLOWS = [
+          { x: 0, y: 10, blur: 15, spread: 3 },
+          { x: 0, y: 4, blur: 6, spread: 4 },
+        ];
+        const SHADOW_THICK = 1.5;
+        const sCan = document.createElement("canvas"); // 影层离屏
+        const sctx = sCan.getContext("2d");
+        let particles = [];
+        let dpr = 1;
+        let raf = 0;
+        let rect = null;
+        let mouse = { x: -9999, y: -9999 };
+        let frames = 0;
+        let zone = null;
+        let shadow = { x: 1.7, y: 1.7, blur: 8, alpha: 0.35 };
+        let glowColor = "rgba(74, 168, 232, 0.35)";
+        const accent = () =>
+          (
+            getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#4aa8e8"
+          ).trim();
+
+        // 离屏 2x 采样：文字 alpha 网格扫描 → 粒子（home = 字形坐标）
+        function build() {
+          frames = 0;
+          rect = h1.getBoundingClientRect();
+          const cr = card.getBoundingClientRect();
+          zone = { left: cr.left, right: cr.right, top: cr.top, bottom: cr.bottom };
+          dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const cw = rect.width + MARGIN_X * 2;
+          const ch = rect.height + MARGIN_TOP + MARGIN_BOTTOM;
+          canvas.width = Math.round(cw * dpr);
+          canvas.height = Math.round(ch * dpr);
+          canvas.style.width = `${cw}px`;
+          canvas.style.height = `${ch}px`;
+          sCan.width = canvas.width;
+          sCan.height = canvas.height;
+          const cs = getComputedStyle(document.documentElement);
+          const raw = cs.getPropertyValue("--panel-shadow");
+          const dims = raw.match(/([\d.]+)px\s+([\d.]+)px\s+([\d.]+)px/);
+          const a = raw.match(/,\s*([\d.]+)\)/);
+          shadow = dims
+            ? {
+                x: Number(dims[1]),
+                y: Number(dims[2]),
+                blur: Number(dims[3]),
+                alpha: a ? Number(a[1]) : 0.35,
+              }
+            : { x: 1.7, y: 1.7, blur: 8, alpha: 0.35 };
+          glowColor = cs.getPropertyValue("--input-focus-glow").trim() || glowColor;
+          const style = getComputedStyle(h1);
+          const cssFont = parseFloat(style.fontSize) || 15;
+          const cssWeight = style.fontWeight || "700";
+          const sampleFont = cssFont * 2; // 2 倍采样：渲染减半呈现，密度翻倍
+          const font = `${cssWeight} ${sampleFont}px "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif`;
+          const off = document.createElement("canvas");
+          const octx = off.getContext("2d", { willReadFrequently: true });
+          octx.font = font;
+          const tw = octx.measureText(TEXT).width;
+          off.width = Math.ceil(tw + 8);
+          off.height = Math.ceil(sampleFont * 1.5);
+          octx.font = font; // 重设尺寸会重置上下文，需再赋一次
+          octx.textBaseline = "middle";
+          octx.fillStyle = "#fff";
+          octx.fillText(TEXT, 4, off.height / 2);
+          const data = octx.getImageData(0, 0, off.width, off.height).data;
+          const scale = rect.width / tw; // 粒子字形精确铺满标题宽
+          const midY = MARGIN_TOP + rect.height / 2;
+          const dots = new Set();
+          for (let y = 0; y < off.height; y += GAP)
+            for (let x = 0; x < off.width; x += GAP)
+              if (data[(y * off.width + x) * 4 + 3] > 128) dots.add(`${x},${y}`);
+          particles = [];
+          for (let y = 0; y < off.height; y += GAP) {
+            for (let x = 0; x < off.width; x += GAP) {
+              if (!dots.has(`${x},${y}`)) continue;
+              // 到字形边缘距离（CSS px）：辉光负 spread 只采深点
+              let ed = 5 * GAP * scale;
+              outer: for (let ring = 1; ring <= 5; ring++) {
+                for (let ny = y - ring * GAP; ny <= y + ring * GAP; ny += GAP) {
+                  for (let nx = x - ring * GAP; nx <= x + ring * GAP; nx += GAP) {
+                    const onRing =
+                      Math.abs(nx - x) === ring * GAP || Math.abs(ny - y) === ring * GAP;
+                    if (onRing && !dots.has(`${nx},${ny}`)) {
+                      ed = ring * GAP * scale;
+                      break outer;
+                    }
+                  }
+                }
+              }
+              const hx = MARGIN_X + (x - 4) * scale;
+              const hy = midY + (y - off.height / 2) * scale;
+              // 开场：随机撒在标题周边，靠弹簧汇聚成字
+              particles.push({
+                hx,
+                hy,
+                x: hx + (Math.random() - 0.5) * 80,
+                y: hy + (Math.random() - 0.5) * 40,
+                vx: 0,
+                vy: 0,
+                ed,
+              });
+            }
+          }
+        }
+
+        function frame() {
+          frames++;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, canvas.width, canvas.height); // 真清屏：玻璃上不留拖尾
+          let maxHome = 0;
+          for (const p of particles) {
+            const dx = p.x - mouse.x;
+            const dy = p.y - mouse.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < REPEL_RADIUS && dist > 0.01) {
+              const f = ((REPEL_RADIUS - dist) / REPEL_RADIUS) * REPEL_FORCE;
+              p.vx += (dx / dist) * f;
+              p.vy += (dy / dist) * f;
+            }
+            p.vx = (p.vx + (p.hx - p.x) * SPRING) * FRICTION;
+            p.vy = (p.vy + (p.hy - p.y) * SPRING) * FRICTION;
+            p.x += p.vx;
+            p.y += p.vy;
+            const ddx = p.x - p.hx;
+            const ddy = p.y - p.hy;
+            const homeDist = Math.hypot(ddx, ddy);
+            if (frames > 120 && homeDist > MAX_OFFSET) {
+              p.x = p.hx + (ddx / homeDist) * MAX_OFFSET;
+              p.y = p.hy + (ddy / homeDist) * MAX_OFFSET;
+            }
+            if (homeDist > maxHome) maxHome = homeDist;
+          }
+          paint();
+          const far = mouse.x < -999;
+          if (far && (maxHome < SETTLE_DIST || frames > FRAME_CAP)) {
+            for (const p of particles) {
+              p.x = p.hx;
+              p.y = p.hy;
+              p.vx = 0;
+              p.vy = 0;
+            }
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            paint();
+            raf = 0;
+            return;
+          }
+          raf = requestAnimationFrame(frame);
+        }
+
+        // 影层统一管线：同坐标暗点落进离屏 → 整层一次模糊 → 叠到主画布
+        function paintLayer(color, ox, oy, thick, blur, alpha, spread) {
+          sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          sctx.clearRect(0, 0, canvas.width, canvas.height);
+          sctx.fillStyle = color;
+          for (const p of particles) {
+            if (p.ed < spread) continue;
+            const r = 0.5 + Math.min(1, Math.hypot(p.vx, p.vy) / 3) * 0.4 + thick;
+            sctx.beginPath();
+            sctx.arc(p.x + ox, p.y + oy, r, 0, 6.2832);
+            sctx.fill();
+          }
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.filter = `blur(${blur * dpr}px)`;
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(sCan, 0, 0);
+          ctx.restore();
+        }
+
+        // 影层 + 粒子本体一次画齐：辉光两层 → 玻璃落影 → 粒子
+        function paint() {
+          for (const g of GLOWS) paintLayer(glowColor, g.x, g.y, 0, g.blur, 1, g.spread);
+          paintLayer("#000", shadow.x, shadow.y, SHADOW_THICK, shadow.blur, shadow.alpha, 0);
+          ctx.fillStyle = accent();
+          for (const p of particles) {
+            const disp = Math.min(1, Math.hypot(p.vx, p.vy) / 3);
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 0.5 + disp * 0.4, 0, 6.2832); // 粒子基础半径 0.5
+            ctx.fill();
+          }
+        }
+
+        function wake() {
+          if (!raf) raf = requestAnimationFrame(frame);
+        }
+
+        // 交互监听在 window：光标落在窗口矩形内即唤醒并施加排斥，越界视作远离
+        const track = (clientX, clientY) => {
+          if (!rect || !zone) return;
+          const cx = clientX - rect.left + MARGIN_X;
+          const cy = clientY - rect.top + MARGIN_TOP;
+          const near =
+            clientX >= zone.left &&
+            clientX <= zone.right &&
+            clientY >= zone.top &&
+            clientY <= zone.bottom;
+          if (!near) {
+            mouse.x = -9999;
+            mouse.y = -9999;
+            frames = 0; // 出区弹回按新周期计帧
+            wake();
+            return;
+          }
+          mouse.x = cx;
+          mouse.y = cy;
+          wake();
+        };
+        window.addEventListener("mousemove", (e) => track(e.clientX, e.clientY), { passive: true });
+        window.addEventListener("resize", () => {
+          build();
+          wake();
+        });
+
+        build();
+        wake(); // 开场汇聚动画
+      }
+      /** 今日明细条：以当日最长「已落定段」为基准按比例写入宽度；进行中段不参与基准
+       *  （其自身按同一基准显示，超出满宽则裁为 100%），落定后才纳入基准计算 */
+      function renderDetailBars() {
+        const bars = [...document.querySelectorAll(".detail .dl .blk")];
+        const settled = bars.filter((b) => !("ongoing" in b.dataset));
+        const max = settled.reduce((m, b) => Math.max(m, +b.dataset.secs || 0), 0);
+        if (!max) return;
+        for (const b of bars) {
+          const ratio = ((+b.dataset.secs || 0) / max) * 100;
+          b.style.width = `${Math.min(ratio, 100).toFixed(1)}%`;
+        }
+      }
+
+      initTitleParticles();
+    </script>
+  </body>
+</html>

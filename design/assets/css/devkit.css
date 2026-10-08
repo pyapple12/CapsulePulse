@@ -1,0 +1,109 @@
+/* 演示控制台（非 APP 设计）+ 玻璃滚动浮钮 + 全局动效退避（须最后加载） */
+/* ============================================================
+   演示控制台（验证用，不属于 APP 设计）
+   ============================================================ */
+.devkit {
+  width: 300px;
+  border-radius: 14px;
+  padding: 12px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  background: rgba(12, 32, 60, 0.72);
+  color: #fff;
+  font: 12px/1.4 var(--font-stack);
+  box-shadow: 0 12px 28px rgba(5, 35, 80, 0.4);
+}
+.devkit b {
+  font-weight: 700;
+  margin-right: 2px;
+}
+.devkit label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.devkit input {
+  accent-color: #4aa8e8;
+}
+.devkit .hint {
+  flex-basis: 100%;
+  opacity: 0.65;
+  font-size: 11px;
+}
+
+/* ============================================================
+   玻璃滚动浮钮（借鉴 CapsuleTODO design/assets/css/glass-bar.css）：
+   玻璃板内滚动统一隐藏原生滑杆，换 4×16 透明玻璃浮钮——轨道不拦截内容点击；
+   锚在板层（不进滚动体，否则随内容滚走），仅内容真溢出时出现
+   ============================================================ */
+.glass-scroll {
+  scrollbar-width: none; /* 隐藏原生滑杆（Firefox） */
+}
+.glass-scroll::-webkit-scrollbar {
+  display: none; /* 隐藏原生滑杆（Chromium） */
+}
+.glass-bar {
+  position: absolute;
+  width: 4px;
+  z-index: 2;
+  pointer-events: none; /* 轨道不拦截内容点击 */
+}
+.glass-thumb {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 16px; /* 浮钮高：轨道行程 = 可视高 − 此值（JS 同源） */
+  border-radius: 2px;
+  /* 取主题蓝薄纱：Pulse 的玻璃板是浅色（72% 白底），照搬参考项目的白纱会白上叠白而隐形 */
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.glass-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+/* 动效退避（PL009 纪律）：系统"减弱动态效果"时齿轮旋转 / tooltip / 玻璃板缩放 /
+   统计钮按压回弹 / 标题粒子画布 全部退化为直切 */
+@media (prefers-reduced-motion: reduce) {
+  .sideButton,
+  .sideButton svg,
+  .tooltip,
+  .board-glass,
+  .start-label .sl-fill,
+  .battery .bat-fill,
+  .date-card .dc-ic,
+  .hourglass .loader__model {
+    transition: none;
+  }
+
+  .flip .flap {
+    animation: none;
+  }
+
+  /* 翻面系统（V0.007 起）：0.6s 翻板与按压弹簧在减弱动态效果下直切；
+     周卡选中环淡入淡出（PL013.5 SVG 环版）与设置开关滑块（PL014）同退避为直切；
+     步进器双速按压（PL015）同退避——:active 特异性高于单类，须一并列入 */
+  .flip-inner,
+  .t-duty,
+  .t-duty:active,
+  .flip-back,
+  .flip-back:active,
+  #wcSelRing,
+  .switch .slider,
+  .stepper-btn svg,
+  .stepper-btn:not(:disabled):active svg {
+    transition: none;
+  }
+
+  .hourglass * {
+    animation: none;
+  }
+
+  .title-canvas {
+    display: none;
+  }
+}

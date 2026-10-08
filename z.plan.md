@@ -5,6 +5,12 @@
 
 ## 一、已完成 ✅
 
+- **PL015 设置板控件几何修正**（2026-10-08 收口，ui2.0 V0.016 + 追加修正 1 = V0.017；阈值 "50" 等宽补偿居中旋钮保留 + 加减按钮 SVG 化/stroke 2 加粗/布局级 dx0dy0 居中 + 按压双速曲线 0.07s/0.22s + devkit 退避补步进器 + 步进器整体 SVG 化：框+符号单 SVG 矢量单元/drop-shadow 软晕/动画作用于 SVG）→ 附录 PL015
+- **PL014 设置板 CT 化**（2026-10-06 收口，ui2.0 V0.015；setting-row 行解剖 + CT 开关过冲回弹 + 自动下班步进器 4~~12 + 阈值收窄 1~~99 + 删完成按钮与标题 + 文字层级与控件投影）→ 附录 PL014
+- **PL013 时间图谱绘制层 SVG 化**（2026-10-06 收口，ui2.0 V0.012–V0.014；图谱/七日柱/选中环 SVG 体系，缩放零漂移构造保证；含周卡柱 SVG 化与选中环闪现即逝、彗星出生点归位）→ 附录 PL013
+- **PL012 编号废弃**（2026-10-06 用户定案；PL013/PL014 跳号后序列留空洞，该编号永不复用，全仓引用已清理归零）——本行即唯一信源，映射期相关事项一律无编号指代
+- **A004 design/ 原型代码审计**（2026-10-04 归档，design 范围首轮；P1 计时收口与 P3 批次全数收口）→ 附录 A004
+- **ui2.0 设计原型迭代**（2026-09-16 起，ui2.0 V0.001–V0.011；玻璃配方试验场 → 计时/统计双页可交互原型 → 历史日重锚与节点彗星发射流）→ design/ 目录
 - **PL011 焦点联动材质·平时透明聚焦磨砂**（2026-09-13 收口，V0.1.1.1；平时 alpha 透明常驻 + 聚焦 Acrylic 磨砂 + 分态纱浓度）→ 附录 PL011
 - **PL010 材质重构·真实玻璃**（2026-09-13 收口，V0.1.0.14；路线三易，最终 = DWM 系统背板聚焦真磨砂 + 全窗单层 + 拖拽修复）→ 附录 PL010
 - **PL009 光与生命感**（2026-09-13 收口，V0.1.0.13）→ 附录 PL009
@@ -21,7 +27,7 @@
 
 ## 二、待完成
 
-（当前无立项任务；下一步方向由用户定）
+（当前无立项任务；已知下一步方向 = 原型映射回 ui/【映射期，未立项】）
 
 （UI 三连、PL010 材质返工与 PL011 焦点联动材质均已收口；打包分发/三端适配见计划书 Phase 6/7，未立项）
 
@@ -54,7 +60,7 @@
 11. **.arrow 第三按钮变体**（A003，StatsView）：有意保留的视觉中性小件设计决策。
 12. **refreshKey/offset 同 tick 双拉**（A002→A003）：watch 双源幂等读命令，同 #9 低概率无害。
 13. **pointermove 每帧 querySelectorAll**（A003）：rAF 节流 + 元素 ≤10，成本可忽略。
-14. **session_stats 失败静默冻结旧值**（A003）：有意降级——轮询场景冻结旧值优于报错打断，注释声明。
+14. **session\_\* 快照命令失败静默冻结旧值**（A003；A005 外延 session_status 同族）：有意降级——轮询场景冻结旧值优于报错打断，注释声明；session_status（TimerCard 100ms 计时口）与 session_stats 同款处理。
 15. **DockNav role="tab" 无 tablist 父级**（A003）：桌面小工具两页签、button 键盘可达，a11y 收益低（YAGNI）。
 16. **`saturate(1.6)` 配方遗产**（A003，--glass-blur）：浮层虹彩色彩增强仍有视觉作用，非死配置。
 17. **托盘 hide 时 Focused(false) 触发语义未实证**（A003）：PL011 用户目验已含日常显隐路径，材质终态正确自愈，中间态无观察者。
@@ -63,7 +69,7 @@
 20. **`v-model.number` 空串**（A002"其余"拆分）：Rust 侧校验兜底（1–240 / 1–72 严格夹取）。
 21. **命令命名三风格并存**（A002"其余"拆分）：改名连带全量 invoke + generate_handler，高风险低收益；破坏性 API 变更时机（若有）另议。
 
-### ② 条件豁免（13 项，按触发条件分组）
+### ② 条件豁免（14 项，按触发条件分组）
 
 **触发 = 打包分发（Phase 6，一组销 5 项）：**
 
@@ -80,15 +86,16 @@
 
 **触发 = 性能证据（db 体积/查询耗时异常，3 项）：**
 
-8. **events 无索引**（A001-O2）：`total_since` 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）。
+8. **sessions/events 无索引**（A001-O2；A005 外延 sessions.started_at 同族）：`total_since` 与今日/本周条件 SUM 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）。
 9. **week_detail 逐日取锁**（A002→A003）：7 天 14 次取锁 + 7 次查询，本地 SQLite 毫秒级、翻页触发低频。
 10. **浮层双层 backdrop-filter 并存**（A002"4 层"表述已随 PL010/011 架构更新 → A003 现状 2 层）：短暂低频态、240px 小面积。
 
-**触发 = 需求演进 / 理论缺口（3 项）：**
+**触发 = 需求演进 / 理论缺口（4 项）：**
 
 11. **跨零点段归属起点日 + as_secs 秒级截断**（A001-O8）：单表 `(started_at, seconds)` schema 固有语义（段不拆分）；引入"跨零点段拆分"需求时重评数据模型。
 12. **原子写无 fsync**（A002→A003，settings.rs:82）：断电窗口 rename 后可能旧内容，纯理论缺口；产品定位升级为关键数据可靠性时重评。
 13. **pause 回滚窗口与 async 自动下班理论竞态**（A003，commands/session.rs:93-110）：需存储失败 + 操作同毫秒多重条件交错；错账实际复现时重评（需验证）。
+14. **睡眠挂起双口径分歧**（A005-P3-2，2026-10-05 登记）：场景——Instant 单调钟在 macOS/Linux（CLOCK_MONOTONIC / mach_absolute_time）挂起期停走、墙钟照走，睡眠后 sessions 段时长（单调口径）与图谱工作块/自动下班（墙钟跨度）口径分歧；Windows QPC 文档语义通常含挂起时长，当前唯一实机平台**未实机复核**（用户无合盖条件，需验证）。降级行为——无（语义分歧非故障，归因偏差仅 macOS/Linux 可达）；触发 = macOS/Linux 适配（[problems#1] 同条件），届时实测定级：无分歧维持豁免、有分歧另立唤醒拆段任务。
 
 ---
 
@@ -1148,3 +1155,270 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 - 锁序纪律逐函数复核零违反（三路独立交叉）；生产代码零 unwrap/expect；SQL 全参数化零拼接
 - 材质路线三易其稿但废弃源码清理彻底（vibrancy/采集管线/Mica API 零源码残留），残留仅在注释与文档层——"不长期保留废弃方案"原则在代码层执行到位
 - 三方契约（12 命令 / serde 结构 / types.ts / 事件名）逐字段对齐；设置默认值单一来源（default_* 函数族）无漂移；reduced-motion 退避完整覆盖（PL011 分态纱为瞬时切换不属运动，无需退避）
+
+---
+
+## 附录 A004：design/ 原型代码审计报告（design 范围第 1 轮，2026-10-04）
+
+> 状态：✅ 已修复（2026-10-04 收口，ui2.0 V0.009；FIX004 八条勾结见 x.progress.md，反向验收记录见 .temp/fix004-verification.md——探针 TDD 3/3 PASS + live 逐项验收 + 全页回归与视觉截图；FIX004.3/4.5 各带实现偏差注记）
+> 范围：仅 design/ 原型（index.html 1918 行 + glass.css + assets/css 8 个分类文件 + README.md/RESEARCH.md，约 3991 行；基线 74fc13c，工作区干净）；不涉及 core/ 与 ui/ 正式代码。design/.mimosa/（工具生成物）与 .temp/serve.mjs（gitignore 临时件）按规则排除。
+> 方式：主会话逐文件全文通读（13 类维度逐类对照）+ 疑点 grep/Node 实证（死代码对账式 grep、todaySegsMin 负值段确定性复算）。编号取全局序列延续（A003+1 → A004/FIX004），轮次标签按实际范围标注「design 范围第 1 轮」。
+> 上轮复核：无上轮——design/ 首轮审计，主项目三轮审计（A001–A003）不覆盖 design/，无回归复核对象。
+> 观察项处置：确认环节未收到用户答复，按默认执行——7 条观察项均不提升 P 级，列于本节二；属 design 范围观察项，暂不并入第四节豁免定案清单，随 FIX004 收口视需要归并。
+
+### 一、P0-P3 修复清单（按严重度）
+
+无 P0/P2；P1 一项、P3 六项。性质均为新增（design 首轮）。
+
+| #    | 文件:行号                                                                                                                                                   | 类型 | 描述                                                                                                                                                                                                                                                                                                                                                              | 建议                                                                                                                                                        | 性质 | 影响面     |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---------- |
+| P1-1 | index.html:793-798（根因），消费方 806-813 / 830-841                                                                                                        | 1    | 今日分支不以计时态收口：段尾只按墙钟 `min(o1, nowMin)` 截断、不过滤 `end ≤ start` 空段。上班打卡（clockIn=now，confirmOk 与 devkit 计时中两入口）后各段全为负长度，renderTriple 直接求和出负数（Node 复算：打卡 30 秒后三值 = -7h-58m / -6h-27m / -13h-25m）；暂停期间墙钟继续走，工作时长仍增长（-418 → -388 实证），暂停时间被计成工作                          | 段尾收口于计时态（running=当前墙钟分钟、暂停=收段时刻分钟，需记录收段时刻）并丢弃 `end ≤ start` 空段；renderTriple/renderWeekMock/renderDetailMock 同步受益 | 新增 | 原型统计板 |
+| P3-1 | glass.css:10,15,16,37,39,41；timer.css:402-407；controls.css:79-85,168；stats.css:23-29；hourglass.css:109-126；index.html:768,1405-1414,1441,298+1447-1450 | 5    | 死代码一批：`seed` 变量、`applyState()` 函数、`S._force`、`.statline`、`.pill-cast .cv`、`.gcard h3`、`hg-sand-line-left/right` keyframes、死令牌 `--r-card/--r-pill/--mint/--shadow-r/--refract-k/--bloom`、`.banner` margin 二次定义（controls.css:168 被 197 行覆盖）、pillCast 双绑定（index.html:298 inline onclick + 1447 addEventListener 每次点击跑两遍） | 一次性清理；`.cv` 删除后 `--r-pill` 随之无引用可同删                                                                                                        | 新增 | 原型整体   |
+| P3-2 | index.html:1594-1623；boards.css:125-133,202-204                                                                                                            | 1/5  | 玻璃滚动浮钮锚层失效：makeGlassBar 的 scroller 是 `.board-glass`（无 overflow 不滚动，scrollHeight≈clientHeight → 浮钮永久 hidden）；真正滚动的 `.flip-face` 未挂 `.glass-scroll`。当前内容恰好不溢出故无症状，一旦溢出回退原生滚动条且浮钮不出现                                                                                                                 | scroller 改挂两个 `.flip-face`（浮钮 anchor 保持板层）                                                                                                      | 新增 | 统计板     |
+| P3-3 | boards.css:115-121,151-169；stats.css:169-178；devkit.css:71-94                                                                                             | 6/13 | reduced-motion 退避缺口：`.flip-inner` 0.6s 翻转、`.t-duty` 按压弹簧、`.flip-back` 未纳入 devkit.css 集中退避块，系统"减弱动态效果"下仍播动画                                                                                                                                                                                                                     | 并入 devkit.css 退避块（transition: none）                                                                                                                  | 新增 | 原型动效   |
+| P3-4 | index.html:885-897,557                                                                                                                                      | 1/11 | 明细面不随查看日：renderDetailMock 固定取 `todaySegsMin()`（offset 0），查看过去日翻面仍显示"今日明细"，与正面已切到过去日的数据不一致                                                                                                                                                                                                                            | 翻面明细改传 `S.viewDay \|\| 0`，标题随查看日更新；过去日无 ongoing 天然兼容                                                                                | 新增 | 统计板     |
+| P3-5 | index.html:625-628,713                                                                                                                                      | 3/12 | 设置板「自动下班（小时）」未接线：无 id 无监听，改动无效（S.autoOutH 恒 8），与同板已接线的提醒阈值形成不一致预期；bn-auto 文案"上班 + 8h"恒写死                                                                                                                                                                                                                  | 加 change 监听写 S.autoOutH（dial/battery/graph/文案自动跟随），或明示演示占位                                                                              | 新增 | 原型设置板 |
+| P3-6 | README.md:28-38；index.html:656,545；devkit.css:39-40                                                                                                       | 6    | 注释/文档漂移：README 映射表引用已不存在的 `.ringwrap/.gbtn/.dock` 与 ProgressRing/DockNav/SettingsPanel（彗星发射流规格未补账）；hint 仍写"页签"（已改侧角钮）；index.html:545 注释 WEEK_MOCK 应为 WEEK_PREV；devkit.css 称浮钮"可拖拽"但实现无拖拽逻辑                                                                                                          | 随 FIX004 一并更正                                                                                                                                          | 新增 | 文档       |
+
+### 二、参考级观察项（记录不修）
+
+| 文件:行号                                                | 描述                                                                                               | 回落理由                                                                   |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| index.html:1074-1082 vs 764-798                          | 暂停时段不入账：图谱画绿尾但三值/明细/周卡的休息不包含暂停时长（EV_MOCK 无运行时补段机制）         | 原型只验 UI 观感，计时保真由 Rust 侧承担（架构基线）；修 P1-1 时可顺带对齐 |
+| index.html:1233-1237                                     | 电量按工作时长（elapsed）而非在岗时长消耗，暂停即停耗                                              | 演示语义自洽（默认态两者重合），无调参场景                                 |
+| index.html:1707-1709,1872-1891                           | 标题粒子 rect/zone 为构建时快照，页面滚动后排斥映射错位直至 resize                                 | 常规桌面视口下演示页不滚动，无可达触发路径（需验证级）                     |
+| index.html:339-367；controls.css:106-108；index.html:113 | a11y：图谱箭头无 aria-label；三段式 radio `display:none` 键盘不可达；沙漏 aria-label 固定"50 分钟" | 原型验证视觉与交互，a11y 属映射回 ui/ 时的落地项                           |
+| glass.css:107-109                                        | `--k-lens` 无写入方（恒 fallback 1，透镜线常开）                                                   | 单次使用无调参场景，README 配方表有依据                                    |
+| index.html:938                                           | 10Hz `setInterval(render)` 全量刷新，板开时不暂停                                                  | 原型规模无感，性能无承诺                                                   |
+| index.html:1174-1176                                     | 查看过去日时彗星仍发射（过去日图谱带飞行白纹）                                                     | UI 观感域，保留"活感"可斟酌，属用户定案                                    |
+
+容错白名单新增：无（原型纯展示层，未引入登记制外的静默兜底）。
+
+### 三、亮点
+
+- 注释纪律优秀：全中文、解释"为什么"并留用户定案痕迹（boards.css:128 死规则覆盖、graph.css:22 弃用 width 过渡的原因），合规于 AGENTS.md 注释规则
+- `todaySegsMin` 过去日派生的末段吸收保总量（index.html:783-790）设计干净，总量零漂移
+- 彗星发射器动画钟追赶式架构（epoch/帧哨兵/负延迟相位，index.html:1181-1230）对遮挡/挂起/恢复的鲁棒性处理严谨
+- 翻面系统 CSS 3D 细节正确：翻转面各自滚动、36px 死规则显式覆盖、backface 全覆盖
+- 渲染签名（sig）机制避免无谓 DOM 重建（index.html:856-859、899-913），内容级签名含进行中段时长
+- 样式拆分后职责边界清晰，每文件头部有职责注释，加载顺序在 index.html 固定
+
+---
+
+## 附录 A005：全量代码审计报告（第4轮，2026-10-05）
+
+> 状态：✅ 已修复（2026-10-05 收口，ui2.0 V0.010——ui 分支单序列号仅入 commit 标题合并即弃，主项目版本号不推进；FIX005 八条勾结见 x.progress.md——P3-1/3/4/5/6/7 代码修复 + 门禁全绿 91 测试；P3-2 免实机走查留档，条件豁免登记为第四节 #14（需验证标注）；门禁拦出计划外缺陷一并修复：stats 周一时间敏感测试按运行日归一）
+> 范围：core/ 全部 .rs（16 文件 3927 行）+ ui/ 全部前端（12 文件 1827 行）+ Cargo.toml / tauri.conf.json / capabilities / package.json / vite.config.ts / tsconfig.json / 根 index.html / 静态资源引用；不审计 node_modules / dist / target / .temp / .agents / design/（A004 已单独覆盖）与生成代码。基线 = 6e99ea5（ui-2.0 分支，该分支对 ui/ 与 core/ 相对 main 零改动，结论对 main 同样成立）。
+> 方式：主会话回归复核（A003 十五项逐项 grep + git 行级对比）+ 三路并行逐文件通读（Rust 纯逻辑 / Tauri 集成 / 前端 explore 子任务）+ 汇总后六条 P3 主张行号 sed 实证。豁免比对以第四节（永久 21 + 条件 13）为准。
+> 观察项处置：编号经用户确认取 A005/FIX005（A004 已被 design 审计占用）；7 条观察项按默认不提升（与 A004 先例一致），其中两条带豁免条目外延建议（#8 events 无索引 → "sessions/events 无索引"；#14 session_stats 静默冻结 → "session_\* 快照命令"），待用户确认后再并入第四节，不在本轮直接修订。
+
+### 零、上轮修复复核清单（A003 → FIX003，V0.1.1.2–3）
+
+| 上轮条目                                   | 现状                                                                               | 证据                         |
+| ------------------------------------------ | ---------------------------------------------------------------------------------- | ---------------------------- |
+| P2-1 拖拽白名单补 .overlay                 | ✅ 在位，注释同步                                                                  | App.vue:65-67                |
+| P3-1 last_fired cfg(test)                  | ✅ 在位                                                                            | reminder.rs:49-50            |
+| P3-2 删 DutySpan                           | ✅ 在位（clock_out 返回 Result<()>，测试随签名同步）                               | workday.rs:98-104            |
+| P3-3 storage 三方法 cfg(test)              | ✅ 在位                                                                            | storage.rs:82/125/137        |
+| P3-4~7 过时注释四批                        | ✅ 全部更正，Mica/vibrancy 零残留                                                  | mod.rs:30、App.vue:313/347   |
+| P3-8/9 白名单⑦登记 + reminder diag 双写    | ✅ 在位（eprintln+diag 并存）                                                      | lib.rs:37、reminder.rs:35-36 |
+| P3-10 release 可观测性                     | ✅ 在位（勘误：warn_diag 为 1 处定义 + 8 处调用，A003 记"9 处调用"系把定义行计入） | lib.rs:48-215                |
+| P3-11 restart 留痕失败回滚                 | ✅ 在位，start/pause/resume/restart 四族回滚齐全                                   | commands/session.rs:75-190   |
+| P3-12 --r-ctrl                             | ✅ 零残留                                                                          | 全 ui/ grep                  |
+| P3-13 统计失败可见性                       | ✅ 在位（week 并入 loadError + 空文案门控）                                        | StatsView.vue:21-126         |
+| f4d49dd 附带补口（settings tmp 清理 diag） | ✅ 在位                                                                            | settings.rs:88               |
+
+结论：15 项全部完好；FIX003 后 core/ 唯一后续改动（f4d49dd settings.rs +1 行）本身即修复内容，零回退、零新引入回归。
+
+### 一、P0-P3 修复清单（按严重度）
+
+无 P0 / P1 / P2；P3 七项。性质：除 P3-5 为 FIX003.8 同提交收口遗漏（遗留族）外均为新增。
+
+| #    | 文件:行号                                       | 类型 | 描述                                                                                                                                                                                                                                                                                                                         | 建议                                                                                                                         | 性质                             | 影响面                  |
+| ---- | ----------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | ----------------------- |
+| P3-1 | ui/App.vue:187-206 + 240-246                    | 1    | 横幅生命周期不对称：① reminderVisible 仅经 TimerCard 动作/手动下班清除——上班打卡（clock_in，新工作日开始）不走这两条路径，昨日"已连续工作 N 分钟"提醒条跨日残留；② autoOutVisible 赋 true 后无任何置 false 点，"已自动下班"横幅滞留至重启且无手动关闭手段                                                                    | onConfirmOk 的 mode === "in" 成功分支补清两个 Visible；autoOut 可顺带评估定时消失                                            | 新增                             | Vue 前端                |
+| P3-2 | session.rs:40-44（波及 commands/session.rs:47） | 1/8  | 系统睡眠双口径分歧（需验证）：Instant 在 macOS/Linux 挂起期停走（Linux CLOCK_MONOTONIC 排除 suspend），睡眠后暂停 → sessions 段时长不含睡眠，而图谱工作块按墙钟跨度整段计入、自动下班按墙钟判定——同段"图谱 ~9h vs sessions ~10min"分歧。Windows QPC 通常含挂起时长（当前唯一实机平台或不受影响），macOS/Linux 适配前不可实证 | 先实机复核 Windows QPC 睡眠行为定级（大概率无恙）；确认后二选一：唤醒拆段，或登记条件豁免"睡眠语义"（挂 macOS/Linux 条件组） | 新增                             | 计时状态机 / 跨模块     |
+| P3-3 | ui/App.vue:229 + 238                            | 6/13 | 注释失实 + 提醒监听失败不可见：注释声称 reminder-due"注册失败必须可见"，实现只有 console.error——release GUI 下零感知（Tauri ACL 静默拒是本项目登记过的现实风险），与同文件 set_settings/打卡失败走 actionError 可见反馈不对称                                                                                                | catch 内补 actionError 可见反馈，或注释降格"仅 dev 可见"消除失实                                                             | 新增                             | Vue 前端 / 错误策略合规 |
+| P3-4 | commands/workday.rs:82-91 vs 108-131            | 4    | day/week 四步管道逐字重复：day_detail_inner 与 week_detail_inner 循环体同为 day_bounds → day_fetch_start → events_between → reduce_day，A003 亮点承诺的"口径完全一致"目前靠注释而非代码保证——改口径需两处同步，漏一处即两视图分叉                                                                                            | 抽 day_summary_inner 供两者复用                                                                                              | 新增（PL008.6 引入 week 时未抽） | 统计口径一致性          |
+| P3-5 | lib.rs:91-97                                    | 4/13 | quit 分支内联手写 diag::log + eprintln 双写（顺序还与 warn_diag 相反）——FIX003.8 在同文件、同提交引入行为等价的 warn_diag 助手却未换用，同文件两种双写写法并存                                                                                                                                                               | 一行替换为 warn_diag(...)，行为零变化                                                                                        | 遗留（FIX003.8 收口遗漏）        | 可维护性                |
+| P3-6 | storage.rs:41-44                                | 5    | Storage::open_in_memory 生产零调用，doc 已标"测试专用"但未隔离——A003 P3-3 隔离三方法时漏网的同族第 4 个                                                                                                                                                                                                                      | #[cfg(test)] 一行（与三方法同款）                                                                                            | 新增                             | 存储层封装              |
+| P3-7 | commands/mod.rs:124,130                         | 6    | test_support 内 FakeClock::new() 与 advance() 为 pub 且无 ///——同模块其余 pub 项均有文档，文件内自不一致                                                                                                                                                                                                                     | 各补一行中文 ///                                                                                                             | 新增（测试支撑代码遗留）         | 文档一致性              |
+
+### 二、参考级观察项（记录不修）
+
+| 文件:行号                             | 描述                                                                                                                        | 回落理由                                                                                                           |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| settings.rs:82-90                     | save 写失败时 tmp 大概率不存在，remove_file 报 NotFound → diag 落"清理失败"实为无可清理的噪音                               | 仅失败路径诊断噪音，主错误照常上抛                                                                                 |
+| workday.rs:203                        | 同日两个孤儿 clock_out（无 clock_in）时重叠 duty 窗口 → duty_secs 双计                                                      | 归约契约"输入仅来自本应用写入"；仅外部改库可触发（需验证级）                                                       |
+| storage.rs:115-121                    | sessions.started_at 无索引，条件 SUM 全表扫                                                                                 | 豁免 #8（events 无索引）同族兄弟；一行/暂停速率下万行级 <1ms；建议归档时把该豁免条目外延为"sessions/events 无索引" |
+| diag.rs:11-19 + paths.rs:38-42        | 每次 diag::log 解析路径 + create_dir_all                                                                                    | 低频失败通道，单次微秒级；无轮转已豁免                                                                             |
+| App.vue:24 + StatsView.vue:73-75      | 停留统计页数据不随时间更新（仅挂载/refreshKey/offset 三触发口）；App.vue:24 注释"30s 兜底"口径略宽（只覆盖 StatsCard 与环） | 切页即重拉兜底；统计页停留无产品承诺                                                                               |
+| App.vue:214-220                       | isFocused 查询失败退回默认纱态——白名单⑦场景文本未字面含此前端侧降级                                                         | ⑦ 理由（装饰层/不中断/自愈）完全覆盖，有行内注释；下次白名单修订可补一句外延                                       |
+| TimerCard.vue:40-42                   | session_status 失败仅 console，计时显示静默冻结                                                                             | 与已豁免"session_stats 静默冻结"同族；建议归档时该豁免条目外延为"session_\* 快照命令"                              |
+| SettingsPanel.vue:22,30               | number input min/max 与 Rust validate() 双维护                                                                              | HTML 属性仅 UI 提示，Rust 校验是权威门禁（saveError 可见）                                                         |
+| commands/reminder.rs:22 vs lib.rs:267 | reminder-due emit 失败严格报错 vs window-focus 落日志维持——双策略并存                                                       | A003 P3-8 已裁定上下文不同，维持原判                                                                               |
+| lib.rs:106                            | 托盘文案"开始/暂停"实际覆盖三态                                                                                             | 纯文案级惯例表意                                                                                                   |
+
+### 三、亮点
+
+- A003 十五项修复经 V0.1.1.3 至今零回退；ui-2.0 分支十次提交全程未触正式代码，分支纪律干净
+- 三方契约零漂移：六组 serde 结构与 types.ts 逐字段对齐（含 BlockKind lowercase rename、Option→number|null）；12 命令 ↔ generate_handler ↔ invoke 三方一一对账；3 事件名与 payload 类型全对
+- 生产代码零 unwrap/expect、SQL 全参数化、错误消息无路径泄漏；锁序 workday→session→storage/settings/fire 全链无反向嵌套
+- start/pause/resume/restart 四族回滚完整且互不嵌套持锁（FIX003.9 自锁教训的注释在位）
+- 豁免清单 13 项条件豁免逐条复核全部维持原判，无豁免外新静默兜底
+- 前端零 any、零 v-html、零幽灵依赖；业务零含量复核通过（blockWidth/weekBarWidth/formatDisplay 等均为注释声明的纯展示换算）
+- FIX002.1 语义在 A003 后仍成立：回滚路径裸 diag（错误可上抛）与 lib.rs warn_diag（吞错双写）分工合理——P3-5 仅 quit 一处属同族漏改
+
+---
+
+## 附录 PL013：时间图谱 SVG 化（2026-10-06 立项）
+
+> 背景：历史图谱重锚（V0.011）后用户报"放大缩小时段条与节点对不齐"——根因 = 段条（HTML div + 百分比定位）与节点（SVG 小图 + px transform）两套坐标体系在缩放/DPI 变化时各自落到不同设备像素，半像素漂移不可根除。
+> 关键洞察：①两套坐标系各自落整是漂移根源，唯一治本解 = 段/节点/彗星进同一幅 SVG——矢量内部由构造保证对齐，任何缩放整幅统一光栅化；②viewBox 必须用"实际像素宽 × 固定高 12"，不用 0-100 百分比宽（preserveAspectRatio:none 拉伸下圆会变椭圆）；③彗星白纹必须同进 SVG（出生/消失点与节点像素级同源），否则走廊又回两套坐标。
+> 目标：时间图谱绘制层整体 SVG 化——任何缩放下节点压段交界、D 贴条尾零漂移；V0.011 全部既有行为（日终 D 语义/彗星停发/形态轮换/窗口重锚）零回归；零新依赖。
+> 状态：✅ 已完成（2026-10-06 收口，ui2.0 V0.012；PL013 四条勾结见 x.progress.md，验证记录见 .temp/pl013-verification.md——结构断言改前 FAIL/改后 PASS、对齐 maxAbsDev 0.01px、今天/过去日/彗星回归全过；缩放矩阵设备像素层由用户实机复核（探针盲区已记档）；计划外缺陷：节点平移漏算 cx=6 系统性右偏，改后探针当场抓出修复）
+
+### 方向定案（2026-10-06 用户拍板）
+
+1. **整幅 SVG 同坐标系**：段条/节点/彗星全部进一幅 `<svg>`，viewBox = `0 0 W 12`（W = clientWidth 实测，每渲染读、宽变才写回），preserveAspectRatio="none" 吸收亚像素差，1 用户单位 = 1 CSS px——"固定高度"落为高 12 恒定、宽按实测，圆恒为圆
+2. **彗星一并进 SVG**：白纹 rect 夹在段与节点之间（保持 track < comet < nodes 原层级），出生/消失点与节点像素级同源；COMET 参数/动画钟/帧哨兵机制一行不动
+3. **语义层零改动**：V0.011 的窗口重锚/日终 D/三形态轮换/停发清场全部沿用，本次只换绘制输出层
+
+### 实现措施（按文件/函数拆解）
+
+#### design/index.html
+
+- **HTML**：`.graph` 内 graph-track/graph-cp 两 div 替换为单 `<svg id="graphSvg" height="12" width="100%" preserveAspectRatio="none">`，defs 五件——clipPath `#graphClip`（rect rx=6 全宽 h12，圆角统一裁）+ linearGradient `#gWork/#gRest/#gDuty`（竖直，色值 = 现 CSS 渐变原值）+ `#gStripe`（横向 透明白 22% 透明）；层序 = ghost rect（rx=6 空槽）→ g#graphBars（clip）→ g#graphComet（clip）→ g#graphNodes
+- **renderGraph**：`pct()` 换 `xpx(ts) = ((ts − clockIn) / (endTs − clockIn)) × W`；W = svg.clientWidth 每帧读、viewBox 宽 ≠ W 才 setAttribute；段条输出 rect（x/width/y=0/height=12，class work/rest/duty/active 保留，CSS `fill: url(#gWork)` 系）；节点输出 g.graph-node（circle cx=交界 cy=6 r=5.4 + text 同 x y=6 dy=-0.5），D 的 cx = W − 6（右贴边，取代 translate(-100%)）；"数量对齐复用 + setAttribute"与"数量变化整层重建"两机制原样保留（createElement 换 createElementNS）
+- **spawnStripe/launchComet**：白纹 rect（x=-24 w=24 h=12 fill=url(#gStripe) class=comet-stripe）append 目标换 #graphComet；走廊 group 每次 render 更新 transform=translate(birthX,0)；--walk = W − birthX + 24（rect 初始 x=-24，keyframes 改 translateX(0 → var(--walk))，走出 clip 即消失）；过去日停发清场与 wasHidden 满员沿用
+- **不动**：dayClockInTs/窗口重锚/D 亮灭判定/三形态合成/COMET 常量/动画钟/帧哨兵
+
+#### design/assets/css/graph.css
+
+- **删**：.graph-track/.graph-seg/.graph-cp/.graph-comet/.graph-node 的定位规则（position/left/width/overflow/transform/background）
+- **留改**：颜色规则搬家（.graph-seg.work → fill: url(#gWork) 系；.graph-node circle/text 颜色与 .lit/.end 保留——上轮已去 fill transition 直切）；keyframes cometWalk 改 translateX(0 → var(--walk))；reduced-motion 白纹 display:none 保留（SVG 元素照吃）
+- **不动**：.graph 容器、.chart-axis（仍是 HTML）、节点 text 字体规则
+
+### 验证方案（全部可执行、可断言）
+
+1. **缩放矩阵**：Ctrl± 75%/100%/125%/150% 四档（系统 DPI 禁改）逐一断言——R/W 圆心与段交界 x 差 ≤0.5px、D 圆右缘与条尾 x 差 ≤0.5px（getBoundingClientRect 实测）
+2. **功能回归**：今天（duty 占位/D 暗/彗星满员 10 条）；过去日（铺满 100/D 亮/彗星 0/轴标随日切）；5↔7 节点日切换重建无伪影
+3. **门禁**：script 语法冒烟 + prettier
+4. **反验**：缩放回 100% 后图形与改前逐项一致（层序/颜色/几何）
+
+### 验收标准
+
+- 四档缩放零漂移；V0.011 行为清单零回归；零新依赖；graph.css 定位死规则 grep 清零
+
+### 明确不做（YAGNI 边界）
+
+- ui/ 正式前端不动（映射期再落）
+- 不引 SVG 库（D3 等）；不做响应式断点重排（容器宽变化只同步 viewBox）
+- 不升级彗星动效（仍 24px 白纹线性位移）；图谱不加点击交互
+
+### 拆分 todo
+
+PL013.1–4 见 x.progress.md「PL013」任务组。
+
+---
+
+## 附录 PL014：设置板 CT 化改造（2026-10-06 立项）
+
+> 背景：用户指认 CP 设置板对照 CT（CapsuleTODO design/）设置板有四类落差——行结构单薄（单行名称紧排无描述）、开关样式自研简陋（div+on 类）、数值控件是可输入框（自动下班应为 4~12 小时档位值，不该有输入环节）、完成按钮冗余（设置本就即时生效）。
+> 参照物：`E:\CodeMission\CapsuleTODO\design\`——index.html 设置板结构 + assets/css/settings.css 全文（行解剖/步进器/两代开关）+ panels.js 点外收板机制（CP 已同构在位）。
+> 关键事实：CT 设置板**没有完成按钮**——设置即时生效、点板外即收；数值控件 = 步进器（`− 值 +`，范围约束落在按钮禁用态上）；开关 = uiverse sour-vampirebat-66（checkbox 隐藏 + slider 过冲回弹）；行 = 名称(12px/600) + 描述(8px/60%) 双行 + 分隔线。
+> 目标：设置板观感与控件形态全面对齐 CT；消灭全部可输入环节；删除冗余按钮。零功能损失（CP 设置本就即时生效，点外收板逻辑已在位）。
+> 状态：📌 待实施（PL014 任务清单见 x.progress.md）
+> 编号：PL014（PL013 已占用，顺位下一）
+
+### 方向定案（2026-10-06 用户拍板）
+
+1. 提醒阈值：**保留手动输入**，样式迭代适配新行结构，**限制 1~99**（原 1~240 收窄）
+2. 完成按钮：**删除**（CT 原味——设置即时生效 + 点板外即收，按钮冗余；点外收板 CP 已在位，零功能损失）
+3. 三枚开关（提醒声音/系统通知/自动下班）：**CT sour-vampirebat-66 原样移植**（`label > input[checkbox 隐藏] + slider`，40.5×18px，白钮过冲回弹 cubic-bezier(0.175, 0.885, 0.32, 1.275)，checked 时钮放大顶满右端）；颜色令牌化：#d4acfb/#b84fce → `--accent` 系
+4. 自动下班小时：**步进器**（CT stepper 样式：`− 8 +`，按钮 26×22 玻璃质感、数值 14px/700），范围 **4~12、步长 1**，边界按钮禁用
+5. 行结构：升格 CT 行解剖——名称 12px/600 + 描述 8px/60% 双行 + 行间分隔线 rgba(128,128,128,0.18) + `padding: 10px 0`
+
+### 实现措施（文件/函数级）
+
+#### design/index.html
+
+- 设置板 HTML 重写：5 行改 `setting-row inline` 结构（名称/描述双行居左、控件居右）；阈值 input 保留（`min=1 max=99`）；自动下班行换 stepper 三件套（dec/value/inc，id 延续 setAutoOut 语义）；**删 `.acts` 完成按钮**
+- JS：开关从 `div onclick` 改 `checkbox change` 监听（即时生效行为不变）；stepper dec/inc 按钮（4/12 边界禁用、写 `S.autoOutH`）；阈值 input 的 change 夹取同步 1~99
+
+#### design/assets/css/boards.css
+
+- 删旧 `.set-row input[type=number]` / `.switch` / `.sheet .acts button` 相关规则
+- 新增：`setting-row`（分隔线 + padding）/ `setting-name`（12px/600）/ `setting-desc`（8px、60%）/ `stepper` 三件套（CT 移植）/ `switch`（CT 移植 + 颜色令牌化：#d4acfb→`color-mix(--accent 30%, #fff)` 系、#b84fce→`var(--accent)`）
+
+### 映射期备注
+
+原型阈值上限收窄 1~99 后，映射回 ui/ 时需同步 Rust 侧 `validate` 上限（现 1..=240）——原型阶段不动 core/。
+
+### 验证方案
+
+live——开关观感（过冲回弹/令牌色/键盘可达）、步进器 4/12 边界禁用、阈值 1~99 约束与即时生效、无按钮点外收板、设置板全功能回归。
+
+### 明确不做
+
+- theme-switch（日夜太阳月亮豪华开关）不搬——CP 无对应设置项
+- 设置项增减不做（本期纯观感与控件形态改造）
+- core/ 不动（阈值上限映射期再同步）
+
+### 拆分 todo
+
+PL014.1–4 见 x.progress.md「PL014」任务组。
+
+## 附录 PL015：设置板控件几何修正（2026-10-07 立项）
+
+> 背景：PL014 落地后用户目测四缺陷，实验场实测定位（canvas 字体度量 + 截图像素级包围盒）——① 步进器 `+`/`−` 字形不居中：CSS 居中的是字体盒，而 `+`/`−` 按排版惯例画在数学轴（基线上方 ~3.5px），本机 Segoe UI Variable Display 13px 字体盒中心在基线上方 5.5px，固定下沉 `+` 1.1px / `−` 1.6px（`−` 孤杆无竖笔参照更显眼）；② 按压"文字下沉"观感：`:active` 的 scale(0.94) 以中心整体缩小无任何下移，是"字形本已偏低 + 下缘上贴 + 0.15s ease 慢曲线放大过程感"三者叠加，且 scale 重光栅化字形有 hinting 抖动（"形变"来源）；③ 按压动画曲线生硬：`transition: all 0.15s` 默认 ease；④ 阈值输入框 "50" 左偏 7.5px：原生 number 旋钮（`::-webkit-inner-spin-button`，实测预留 13.98px）占位后 `text-align: center` 只在剩余 46px 内居中。
+> 目标：四缺陷全数归位——"50" 真居中（旋钮保留）、加减按钮 SVG 几何居中 + 加粗、按压双速曲线；设置逻辑与交互行为零变化。
+> 状态：✅ 已完成（2026-10-08 收口，ui2.0 V0.016；PL015 四条勾结见 x.progress.md，验证记录见 .temp/pl015-verification.md——改前探针 FAIL 复现（"50" −7px、+/− 下沉 1.0/1.5px）、改后 A1–A4 全过（"50" delta 0、布局级双按钮 dx=0/dy=0 严格居中、双速曲线与退避扫描在位）、live 交互零回归；实验场标签页遮挡节流（rAF 0 帧）探针对策 = board-glass transition:none 注入瞬达终态，按压手感目验留待用户日常使用。**追加修正 1（同日，ui2.0 V0.017）**：步进器整体 SVG 化——框+符号整幅单 SVG 矢量单元，drop-shadow CT 软晕、按压动画作用于 SVG，根治 CSS 分层绘制的枢轴偏移观感，详见下方追加修正节）
+> 编号：PL015（PL013/PL014 已占用，PL012 永久废弃，顺位下一）
+
+### 方向定案（2026-10-07 用户拍板）
+
+1. 原生上下箭头旋钮：**保留**（不隐藏、不禁用，键盘 ↑↓ 调值继续可用）；"50" 居中走**左侧等宽 padding 补偿**（`padding-left: 14px` 配平旋钮预留宽度，编辑区对称后 `text-align: center` 即真居中）
+2. 加减按钮：**SVG 化**（内联 `<svg viewBox="0 0 12 12">` 几何线段取代文本字符 U+2212/U+002B）+ **加粗**（stroke-width 2，现字形横杆视觉粗度 ~1.4px）+ **双向几何居中**（viewBox 中心 = 图形中心，flex 居中即真居中，字体度量下沉连根拔除，缩放重光栅化零字形抖动）
+3. 按压曲线：**双速**——按下 0.07s ease-out 瞬时到位、松手 0.22s `cubic-bezier(0.23, 1, 0.32, 1)`（easeOutQuint 族）长尾柔收；与开关 slider 曲线（0.4s cubic-bezier(0.23,1,0.32,1) / 0.4s cubic-bezier(0.175,0.885,0.32,1.275)）同族，整板手感统一
+4. 线帽 `round`（与整体圆角语言一致；CT 方头 butt 不采用）
+
+### 实现措施（文件/函数级）
+
+#### design/index.html
+
+- 设置板步进器两按钮内容替换：`#setAutoOutDec` 文本 `−` → `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 6 H9"/></svg>`；`#setAutoOutInc` 文本 `+` → `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3 V9 M3 6 H9"/></svg>`；`aria-label`（减少/增加）与 `type="button"` 保留；JS 全部不动
+
+#### design/assets/css/boards.css
+
+- `.setting-row input[type="number"]`：新增 `padding-left: 14px`（配平右侧旋钮预留 13.98px；Chromium 大版本若改旋钮宽度最多偏零点几 px，映射 ui/ 后走 WebView2 固定内核更稳）
+- `.stepper-btn`：新增 `display: flex; align-items: center; justify-content: center;`；`transition: all 0.15s` 改 `transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1)`（all 收窄杜绝背景/阴影隐式动画）
+- 新增 `.stepper-btn svg`：`display: block; width: 12px; height: 12px;`
+- 新增 `.stepper-btn path`：`stroke: currentColor; stroke-width: 2; stroke-linecap: round; fill: none;`（currentColor 承接既有 `color: inherit`）
+- `.stepper-btn:not(:disabled):active`：保留 `transform: scale(0.94)`，新增 `transition-duration: 0.07s; transition-timing-function: ease-out;`
+
+#### design/assets/css/devkit.css
+
+- reduced-motion 退避清单补 `.stepper-btn`（与 `.switch .slider` 同款写法）——按压反馈属过渡动效，按项目纪律尊重 reduced-motion
+
+### 验证方案（全部可执行、可断言）
+
+- 像素探针（实验场截图页内解码）：阈值输入框 "50" 墨迹中心 vs 输入框几何中心 Δ≤0.5px；SVG `+`/`−` 墨迹 bbox 中心 vs 按钮中心，水平/垂直均 Δ≤0.25px
+- live：旋钮箭头仍在（视觉确认）、键盘 ↑↓ 可调值；步进 4/12 边界禁用、阈值 1~99 约束、点外收板零回归；按压手感按下瞬时/松手柔收
+- reduced-motion 退避走查（`.stepper-btn` 在清单）；`npx prettier --write` 三文件；纯样式无逻辑不涉 vue-tsc
+
+### 明确不做
+
+- 不隐藏/禁用原生旋钮（用户定案）
+- 按压缩小反馈保留 scale(0.94)（SVG 线段对称缩放，无字形抖动；不另做背景/内环变体）
+- 设置项增减、主题开关不做；core/ 不动
+
+### 追加修正 1：步进器整体 SVG 化（2026-10-08，ui2.0 V0.017）
+
+> 背景：用户报按压缩放"变化中心偏移"（减号右下/加号往下），两轮修正（行盒整数化、CT 投影配方）实测均无差异，用户回退全部未提交批次并澄清原意——"加减按钮 SVG 化"= **框 + 符号整幅一个 SVG**（矢量单元一体缩放），此前只符号 SVG 化，框仍是 CSS 背景/内环/box-shadow 三层分离绘制，病灶未动；CT 对照系误导（CT 同为 CSS 框 + scale(0.94)，真正差异在其投影 1.7/1.7/8 软晕配方）。
+
+做法（三文件）：① index.html 两按钮换 `<svg viewBox="0 0 26 22">`（rect.st-frame 框面+内环 / path.st-glyph 符号，currentColor）；② boards.css `.stepper-btn` 透明点击外壳，`.stepper-btn svg` 承担 `drop-shadow(1.7px 1.7px 8px rgba(0,0,0,0.35))`（CT 软晕原配方）+ 双速 transition，`:active svg` 缩放 0.94；③ devkit.css 退避选择器同步 svg 两变体。效果：框/符号/投影为单一矢量单元，缩放一体重渲染，无分离绘制层的方向性落栅伪差。本轮行盒整数化与 CT 投影两次中间尝试随回退废弃，经验沉淀：投影模糊须盖过偏移（CT 实测注释）、坐标整数化低于感知阈值。
+
+### 拆分 todo
+
+PL015.1–5 见 x.progress.md「PL015」任务组（PL015.5 = 追加修正 1）。

@@ -79,7 +79,9 @@ fn day_fetch_start<C: Clock>(ctx: &AppContext<C>, day_start: i64) -> Result<i64,
     })
 }
 
-pub(super) fn day_detail_inner<C: Clock>(
+/// 单日摘要管道（day/week 两视图单源，FIX005.4）：日界 → 在岗起点 → 事件区间 → 归约，
+/// 四步只此一处——口径调整改这里即两视图同变，杜绝逐字复制漂移。
+pub(super) fn day_summary_inner<C: Clock>(
     ctx: &AppContext<C>,
     offset: i64,
     now_secs: i64,
@@ -103,23 +105,20 @@ pub struct WeekDay {
     pub duty_secs: i64,
 }
 
-/// 周视图装配（PL008.6）：以今日为锚回溯 7 日（旧 → 新），逐日切片归约，
-/// 日界/在岗起点口径与 day_detail 完全一致；锁序按日循环 workday → storage，不跨日持锁。
+/// 周视图装配（PL008.6）：以今日为锚回溯 7 日（旧 → 新），逐日走 day_summary_inner 管道
+/// （口径与 day_detail 代码级单源，FIX005.4）；日期/星期标签在本层摘取，不跨日持锁。
 pub(super) fn week_detail_inner<C: Clock>(
     ctx: &AppContext<C>,
     now_secs: i64,
 ) -> Result<Vec<WeekDay>, CommandError> {
     (-6..=0)
         .map(|offset| {
-            let (day_start, day_end) = day_bounds(offset, now_secs)?;
+            let (day_start, _) = day_bounds(offset, now_secs)?;
             let start_dt = Local
                 .timestamp_opt(day_start, 0)
                 .single()
                 .ok_or(CommandError::Clock)?;
-            let fetch_start = day_fetch_start(ctx, day_start)?;
-            let events =
-                poison("存储", ctx.storage.lock())?.events_between(fetch_start, day_end)?;
-            let summary = reduce_day(&events, day_start, day_end, now_secs);
+            let summary = day_summary_inner(ctx, offset, now_secs)?;
             Ok(WeekDay {
                 date: start_dt.format("%m-%d").to_string(),
                 weekday: start_dt.weekday().number_from_monday(),
@@ -181,7 +180,7 @@ pub async fn day_detail(
     handle: State<'_, AppContext>,
     offset: Option<i64>,
 ) -> Result<DaySummary, CommandError> {
-    day_detail_inner(&handle, checked_offset(offset)?, wall_now_secs()?)
+    day_summary_inner(&handle, checked_offset(offset)?, wall_now_secs()?)
 }
 
 /// 周视图（PL008.6）：锚 = 今日，回溯 7 日（旧 → 新）。async：同 day_detail 移出主线程。
@@ -365,7 +364,7 @@ mod tests {
                 .insert_event(day_start + 17 * 3_600, EventKind::ClockOut)
                 .unwrap();
         }
-        let sum = day_detail_inner(&ctx, 0, now).unwrap();
+        let sum = day_summary_inner(&ctx, 0, now).unwrap();
         assert_eq!(sum.duty_secs, 8 * 3_600);
         assert_eq!(sum.work_secs, 3 * 3_600);
         assert_eq!(sum.rest_secs, 5 * 3_600);
@@ -390,8 +389,8 @@ mod tests {
                 .insert_event(yesterday_in + 3_600, EventKind::ClockOut)
                 .unwrap();
         }
-        assert_eq!(day_detail_inner(&ctx, 0, now).unwrap().duty_secs, 0);
-        assert_eq!(day_detail_inner(&ctx, -1, now).unwrap().duty_secs, 3_600);
+        assert_eq!(day_summary_inner(&ctx, 0, now).unwrap().duty_secs, 0);
+        assert_eq!(day_summary_inner(&ctx, -1, now).unwrap().duty_secs, 3_600);
     }
 
     /// 把某"今日零点 + N 日"的秒时间戳格式化为 MM-DD（周用例的期望值锚）。
