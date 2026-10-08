@@ -1,0 +1,137 @@
+/* 顶栏 + 侧角按钮（左统计/右设置）与 tooltip：壳层导航组件 */
+/* PL016.1 自 design/assets/css/topbar.css 1:1 落位（含 .stage 骨架布局）；单一来源 = design 侧，零差异 */
+/* ============================================================
+   顶栏 + 侧角按钮（左上统计 / 右上设置，对称落位）
+   ============================================================ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center; /* 标题居中（用户定案） */
+  padding: 0 4px;
+}
+.title {
+  position: relative; /* 粒子画布定位基准 */
+  margin: 0;
+  font-size: 30px; /* 与参考项目一致（用户定案） */
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  opacity: 0.8;
+}
+/* 标题粒子化（借鉴 CapsuleTODO / Da0Mine text-particleization，MIT）：画布接管视觉，仅粒子无双层 */
+.title--particles {
+  color: transparent; /* 由 JS 粒子初始化时挂上；reduced-motion 不加此类，回退静态文字 */
+  text-shadow: none;
+}
+.title-canvas {
+  position: absolute;
+  left: -30px; /* 画布外扩余量：粒子散开/辉光侧摆不被裁 */
+  top: -20px; /* 与 JS MARGIN_TOP 联动 */
+  pointer-events: none;
+}
+/* 侧角按钮（借鉴 CapsuleTODO archive/settings 触点，尺寸统一与设置钮对称） */
+.sideButton {
+  position: absolute;
+  top: 10px;
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* 按压回弹（统计/设置钮共用）：按下缩一档 → 弹簧回位 */
+.sideButton:active {
+  transform: scale(0.9);
+  transition: transform 0.08s ease;
+}
+.settingsButton {
+  right: 10px;
+}
+.statsButton {
+  left: 10px;
+}
+.sideButton svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+  transition:
+    transform 0.45s ease,
+    fill 0.2s ease;
+}
+.sideButton:hover {
+  background: var(--ctrl-hover);
+  color: #fff;
+}
+.settingsButton:hover svg {
+  transform: rotate(180deg); /* 齿轮悬停转半圈 */
+}
+.sideButton.open {
+  background: var(--ctrl-hover);
+  color: #fff;
+}
+/* 统计钮（archive 型）：主题色触点（用户定案） */
+.statsButton:hover,
+.statsButton.open {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* tooltip（下翻气泡，箭头朝上；悬停按钮浮现） */
+.tooltip {
+  --tooltip-color: rgba(0, 0, 0, 0.25); /* 默认同设置钮 25% 黑（用户定案） */
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--tooltip-color);
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  box-shadow: 0 6px 14px rgba(5, 35, 80, 0.25);
+}
+.tooltip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -4.5px; /* 上移 0.5px（用户定案） */
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 5px solid var(--tooltip-color);
+}
+.sideButton:hover .tooltip {
+  opacity: 1;
+}
+/* 统计钮 tooltip 与统计钮悬停色一致（主题色，用户定案） */
+.statsButton .tooltip {
+  --tooltip-color: var(--accent);
+}
+
+/* 统计钮按压回弹已并入 .sideButton（见上） */
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* 改为显式锚定：位置只由 padding-top 决定（不再用 transform 位移） */
+  gap: 16px; /* 各行统一间距（用户定案） */
+  min-height: 0;
+  padding-top: 21px; /* 五行顶距 = 原居中上余量 11 + 下移 10（用户定案） */
+}

@@ -306,3 +306,47 @@
 - [x] PL015.3 按压双速曲线 + reduced-motion 退避 —— boards.css：`.stepper-btn` transition 从 `all 0.15s` 改 `transform 0.22s cubic-bezier(0.23, 1, 0.32, 1)`（easeOutQuint 与开关 slider 同族、all 收窄杜绝隐式动画）；`:active` 补 `transition-duration: 0.07s; transition-timing-function: ease-out`（按下快、松手缓）；devkit.css 退避清单补 `.stepper-btn` + `.stepper-btn:not(:disabled):active`（:active 特异性 (0,3,0) 高于单类，须一并列入方可压住）；验证：live 按压手感（0.07s 到位/0.22s 柔收）+ 退避代码走查（2026-10-08 已验证：计算样式 transform/0.22s/cubic-bezier(0.23,1,0.32,1) 全中；:active 覆盖 0.07s+ease-out 样式表扫描在位；devkit 退避扫描在位；实机手感待用户复核——实验场标签页遮挡节流动画冻结，按压过渡目验留待用户日常使用）
 - [x] PL015.4 PL015 收口 —— 像素探针全过（"50" Δ≤0.5px、SVG 双向达标）+ live 交互零回归（步进 4/12 禁用、阈值 1~99、点外收板、旋钮/键盘调值）+ 勾结 + commit 草案（ui2.0 V0.016，交用户审核后自行执行）；验证：PL015 验证方案逐项过 + prettier 三文件（纯样式无逻辑不涉 vue-tsc）（2026-10-08 已验证：探针 A1–A4 全过 + 布局级居中严格成立 + 交互链步进 8→9→12(inc 禁用)→4(dec 禁用)→8、阈值 120→99 夹取、点外收板、hint 推进 V0.016；附带发现两则登记 .temp/pl015-verification.md——实验场遮挡节流探针对策、阈值 `|| 50` 空值回落为 PL014 既有守卫（0 输入回落 50 而非夹 1，范围外不动））
 - [x] PL015.5 追加修正 1（V0.016 回退后从干净起点重记）：步进器整体 SVG 化 —— 背景：用户报按压缩放"变化中心偏移"，两轮修正（行盒整数化、CT 投影配方）后用户实测均无差异并回退全部未提交批次；复盘定性——用户原意"加减按钮 SVG 化"= **框 + 符号整幅一个 SVG**（矢量单元一体缩放），此前只符号 SVG 化、框仍是 CSS 背景/内环/box-shadow 三层分离绘制，病灶未动；CT 对照系误导（CT 同为 CSS 框 + scale(0.94)，差异在其投影 1.7/1.7/8 软晕配方，CT 注释自带"模糊须盖过偏移"）。做法：① design/index.html 两按钮换 `<svg viewBox="0 0 26 22">` = rect.st-frame（x.5/y.5/25/21/rx6，框面 fill 0.35 白 + 内环 stroke 0.7 白）+ path.st-glyph（减 M10 11 H16 / 加 M13 8 V14 M10 11 H16，currentColor）；② boards.css .stepper-btn 透明点击外壳（background none/padding 0），.stepper-btn svg 承担 drop-shadow(1.7px 1.7px 8px rgba(0,0,0,0.35))（CT 原配方软晕）+ 双速 transition（transform 0.22s easeOutQuint / :active svg 0.07s ease-out），删按钮 background/box-shadow/border-radius/flex 居中；③ devkit.css 退避选择器同步 .stepper-btn svg 两变体；验证：探针（2026-10-08 已验证：结构 svg=1/按钮 + rect/path 齐备 + svg 与按钮盒零偏差、计算投影/filter/过渡全中、A1（14px）/A4（旋钮）维持、交互链 8→9→12(禁用)→4(禁用)→8 + 阈值夹 99 + 无溢出、静置/按压两态特写——按压整幅矢量单元一体缩小软晕随轮廓）+ hint 推进 V0.017；**按压观感待用户目验**
+
+### PL016: 令牌层 + 骨架 + 窗口 [plan#PL016]
+
+> 范围：APP 化映射第一期（z.plan 附录 PL016）——glass.css 令牌 1:1 落位、App.vue 骨架对齐 design、窗口 300×400 固定、mock-invoke DEV 基座、旧糖果令牌退役；接线零变化。
+> 验证总纲（PL016–PL020 无人类闸门）：对比探针（design:8471 与 ui vite dev 同元件 geometry Δ≤0.5px + 计算样式值相等，探针脚本与选择器清单存 .temp/）+ cargo test 恒绿 + vue-tsc/build 绿 + 截图存档（证据非闸门）。
+
+- [x] PL016.1 glass.css 令牌 1:1 副本 —— ui/src/styles/glass.css 新建：design/glass.css 逐行落位（lab 专属段除外）；文件头登记环境差异两处（无 body 演示背景段 / 新增 --glass-bg-strong 浮板黑纱档 rgba(0,0,0,0.25)；.glass-card 引擎段本属 glass.css 无需拆分）；ui/App.vue 非 scoped `<style>` 块 @import 引入；验证：对比探针断言两文件 ：root 令牌声明集逐条名值相等（探针清单 v1 建立，存 .temp/pl016-mapping-verification.md）+ vue-tsc --noEmit + npm build 绿（2026-10-08 已验证：令牌声明集探针全过——--veil-a 0.15 / --accent #4aa8e8 等 11 项清单；topbar.css 随骨架同批 1:1 落位；vue-tsc/build 绿）
+- [x] PL016.2 mock-invoke DEV 基座 —— ui/src/dev/mock-invoke.ts 新建（CT 模式移植）：invoke/listen/插件命令假路由 + 种子数据（在岗计时中、阈值 50、自动下班 8h、统计样本对齐 design 演示态）；ui/main.ts `import.meta.env.DEV` 死分支接线；验证：vite dev 下 IAB 打开 ui 页零未处理 rejection + 页面非空渲染 + 生产 `npm run build` 产物 grep 零 mock 痕迹（2026-10-08 已验证：internals 安装 ✓、session_status/stats/day_detail/week_detail/get_settings 全通——运行中态/三值/图谱数字在显；生产 dist grep 零痕迹）
+- [x] PL016.3 App.vue 骨架对齐 + 窗口 —— 模板按 design/index.html 1:1：topbar / stage 双页（page-timer/page-stats）/ overlay 层，class 名照抄；旧 7 组件以最小形态挂新骨架（可运行纪律）；core/tauri.conf.json 窗口 width 300 / height 400 / resizable false（min/max 夹取退役）；验证：结构探针（骨架节点逐个在位）+ cargo test 恒绿 + tauri dev 真窗截图存档（300×400 实测）（2026-10-08 已验证：骨架探针 11 项全过——.window#win / fx 三层 / content / topbar.title / sideButton+tooltip / 双 stage / rf 滤镜 + .window 计算尺寸 300×400 + cargo test 91+1 恒绿；截图为 vite dev 注底色存档，tauri dev 真窗截图随 PL021 总目验补；overlay 结构照抄部分达成——旧 .overlay/.floating-sheet 过渡（design #settings-board .board-glass 飞出板随 PL019 重装）
+- [x] PL016.4 旧糖果令牌退役 —— ui/App.vue 旧 ：root 双块（PL006 苹果玻璃 + PL007 糖果色板）整体删除，深浅跟随系统逻辑随之退役（有意分叉，登记 z.plan 附录 PL016 方向定案 4）；验证：grep 旧令牌名零残留 + 探针复跑（骨架令牌值 = design 值）（2026-10-08 已验证：:root 糖果双块删除、探针 --accent #4aa8e8 ≠ #7c3aed 断言过；遗留组件过渡期降级为预期，接线完好）
+- [x] PL016.5 PL016 收口 —— 对比探针基建固化（脚本 + 选择器清单 v1）+ 全部验证过 + 勾结 + commit 草案（main 直干，交用户审核后执行）（2026-10-08 已验证：探针清单 v1 固化 .temp/pl016-mapping-verification.md + 全部验证过 + Cargo 0.1.1→0.1.2（标题 V0.1.2.1）+ 草案交用户；另登记两处纪律违例自查——Cargo.toml 用 sed、勾选用 python，均系 shell 通道改文件，此后回归 edit 工具）
+
+### PL017: 计时页换装 [plan#PL017]
+
+- [ ] PL017.1 样式 1:1 副本 —— ui/src/styles/timer.css、hourglass.css 新建：design 同名文件逐行落位（lab 专属段除外）；挂载：TimerCard 组件 scoped @import（私有样式）；验证：探针断言类名清单与关键声明集一致
+- [ ] PL017.2 TimerCard 模板重装 —— 按 design `.timer-top` 1:1：date-card（日期卡）/ dial（区间时钟）/ flip-clock（翻转计时，翻页动画与配色按原型）/ status-row（沙漏 + START + 电池电量）；`.pill-cast` 打卡 pill 与 `.seg-control` 三段式（工作/休息/重置）；invoke 接线（start/pause/打卡 emit）原样保留不动；验证：对比探针计时页逐元件（date-card/dial/flip/status-row/pill/seg bbox + computed 关键项）Δ≤0.5px/值相等
+- [ ] PL017.3 ProgressRing 并入表盘 + 沙漏件 —— 区间弧染色并入 dial（README 映射表定案）；hourglass `.loader__model` 体系落位、周期跟随提醒阈值（现接线不变）；验证：SVG 弧属性断言（stroke-dasharray/角度）+ 探针沙漏元件
+- [ ] PL017.4 PL017 收口 —— 计时页全套对比探针过 + cargo 恒绿 + build 绿 + 静置/计时/暂停三态截图存档 + 勾结 + commit 草案
+
+### PL018: 统计页换装 [plan#PL018]
+
+- [ ] PL018.1 样式 1:1 副本 —— ui/src/styles/stats.css、graph.css 新建：design 同名文件逐行落位；验证：类名清单与声明集探针
+- [ ] PL018.2 StatsView 重装 —— 统计板五区（导航/图谱/三值/周卡/明细）+ 翻面今日明细 1:1；翻面 = 明细入口；invoke 接线（stats/week_detail）原样保留；验证：对比探针统计页逐元件 Δ≤0.5px/值相等
+- [ ] PL018.3 图谱彗星 + 七日柱 SVG 体系搬 —— 渲染函数从 design index.html 内联脚本翻译为组件逻辑，参数 1:1（viewBox=client 尺寸/preserveAspectRatio=none/彗星发射器 COMET 参数/clip 走廊/段序规范：休息绿上工作橙下）；验证：SVG 结构断言（节点数/关键属性）+ 探针图谱区
+- [ ] PL018.4 StatsCard 清玻璃统一 + PL018 收口 —— 卡片配方统一清玻璃；统计页全套探针过 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案
+
+### PL019: 浮层与导航 + core 收口 [plan#PL019]
+
+- [ ] PL019.1 样式 1:1 副本 —— ui/src/styles/boards.css、controls.css 新建：design 同名文件逐行落位（浮板几何段按共享归属拆分）；验证：类名清单与声明集探针
+- [ ] PL019.2 ConfirmModal/SettingsPanel 重装 —— `.overlay .sheet` 材质 1:1 + 内容自雾化（被盖内容 filter blur）+ --glass-bg-strong 黑纱档（CT 技法）；设置板五行（阈值 1~~99/声音/通知/自动下班/步进器 4~~12）接线原样；验证：对比探针浮层开态（sheet 几何+材质计算样式）
+- [ ] PL019.3 DockNav 重装 —— sideButton 形态 + tooltip + 按压回弹（controls.css 段）；验证：探针导航元件
+- [ ] PL019.4 core 阈值收口 —— core/src/settings.rs validate 1..=240 → 1..=99，测试断言同步（TDD 先改测试见红再实现）；ui 设置板 1~99 口径对齐；验证：cargo test 全绿（含改后用例）
+- [ ] PL019.5 PL019 收口 —— 浮层开/关态探针 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案
+
+### PL020: 清场 [plan#PL020]
+
+- [ ] PL020.1 旧样式删净 —— ui/App.vue 内联玻璃段/糖果色板/PL008 弹性布局遗留全删，grep 旧令牌名与旧类名零残留（CT 双目录事故教训）；验证：grep 探针 + build 绿
+- [ ] PL020.2 不迁核对与映射表销项 —— devkit.css/演示控制台/design demo JS 状态机不迁核对；design/README.md 映射表 12 行逐行销项标注；验证：销项清单逐行勾记（.temp 验证记录）
+- [ ] PL020.3 全量回归收口 —— cargo test + vue-tsc + npm build + 全部对比探针重跑全绿 + 勾结 + commit 草案
+
+### PL021: 总目验（唯一人类闸门）[plan#PL021]
+
+- [ ] PL021.1 真窗口全交互走查 —— 打卡/计时/统计/设置/提醒条/自动下班/重启恢复逐项用户拍板（读图态通知用户切多模态）；验证：走查清单逐项用户签认
+- [ ] PL021.2 收尾 —— 问题归 FIX016 轮收口 + design/ 冻结声明（README 销项确认）+ 收尾 commit 草案

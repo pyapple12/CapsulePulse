@@ -56,11 +56,6 @@ let unlistenAutoOut: (() => void) | undefined;
 const windowFocused = ref(false);
 let unlistenFocus: (() => void) | undefined;
 
-// —— PL009.1 指针跟随高光：rAF 节流把指针写进各材质元素的 --mx/--my（元素相对坐标），
-// 高光层位置随之移动；reduced-motion 用户直接跳过（动效全退避红线）——
-const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-let pointerRaf = 0;
-
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
 // 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）；
@@ -78,22 +73,6 @@ function onWindowDown(e: MouseEvent): void {
     return;
   }
   void getCurrentWindow().startDragging();
-}
-
-/** pointermove 节流器：一帧最多计算一次，逐材质元素换算元素相对坐标写入 CSS 变量 */
-function onPointerMove(e: PointerEvent): void {
-  if (pointerRaf !== 0 || reducedMotionQuery.matches) {
-    return;
-  }
-  const { clientX, clientY } = e;
-  pointerRaf = window.requestAnimationFrame(() => {
-    pointerRaf = 0;
-    for (const el of document.querySelectorAll<HTMLElement>(".glass-panel, .iridescent")) {
-      const rect = el.getBoundingClientRect();
-      el.style.setProperty("--mx", `${clientX - rect.left}px`);
-      el.style.setProperty("--my", `${clientY - rect.top}px`);
-    }
-  });
 }
 
 /** 拉取统计快照 + 今日工作秒（环口径：day_detail.work_secs，与统计同节奏更新） */
@@ -225,7 +204,6 @@ onMounted(() => {
   void refreshStats();
   void refreshSettings();
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
-  window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("mousedown", onWindowDown);
   // 焦点态初值兜底：错过启动期事件也不至于滞留错误纱浓度（查询失败仅记录，退回默认纱态）
   getCurrentWindow()
@@ -284,11 +262,7 @@ onUnmounted(() => {
   if (autoOutHideTimer !== undefined) {
     window.clearTimeout(autoOutHideTimer);
   }
-  window.removeEventListener("pointermove", onPointerMove);
   window.removeEventListener("mousedown", onWindowDown);
-  if (pointerRaf !== 0) {
-    window.cancelAnimationFrame(pointerRaf);
-  }
   unlistenReminder?.();
   unlistenAutoOut?.();
   unlistenFocus?.();
@@ -296,38 +270,73 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="glass-card" :class="{ focused: windowFocused }">
-    <div class="topbar">
-      <h1 class="title">CapsulePulse</h1>
-      <button class="gear" type="button" title="设置" @click="togglePanel">
-        <Settings :size="16" :stroke-width="2.2" aria-hidden="true" />
+  <main class="window" id="win" :class="{ focused: windowFocused }">
+    <!-- 位移折射滤镜（design 1:1）：真实窗口 backdrop 链不渲染（README 可行性 ❌ → 聚焦磨砂归 DWM），保留 DOM 对位 -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
+        <feImage x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m" />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="m"
+          scale="12"
+          xChannelSelector="R"
+          yChannelSelector="G"
+        />
+      </filter>
+    </svg>
+    <div class="fx mottle"></div>
+    <div class="fx grain"></div>
+    <div class="fx sweep"></div>
+
+    <div class="content">
+      <header class="topbar">
+        <h1 class="title">CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas></h1>
+      </header>
+      <button
+        class="sideButton settingsButton"
+        type="button"
+        aria-label="设置"
+        @click="togglePanel"
+      >
+        <Settings :size="17" :stroke-width="2.2" aria-hidden="true" />
+        <span class="tooltip">设置</span>
       </button>
-    </div>
-    <p v-if="reminderVisible" class="reminder">
-      已连续工作 {{ reminderThreshold }} 分钟，休息一下吧
-    </p>
-    <p v-if="autoOutVisible" class="reminder auto-out">已于 {{ hhmm(autoOutAt) }} 自动下班</p>
-    <p v-if="actionError" class="reminder action-error" role="alert">{{ actionError }}</p>
-    <StatsCard :today-secs="todaySecs" :week-secs="weekSecs" :all-secs="allSecs" />
-    <!-- 双标签均 v-show 保活：TimerCard 的 100ms tick 是提醒/自动下班评估口，切页不得中断 -->
-    <div v-show="activeTab === 'timer'" class="timer-pane">
-      <TimerCard
-        :work-secs="todayWorkSecs"
-        :target-hours="settings?.workday_auto_out_hours ?? null"
-        @changed="onTimerChanged"
-        @error="actionError = $event"
-        @clock="onPillClick"
-      />
-    </div>
-    <StatsView v-show="activeTab === 'stats'" :refresh-key="statsRefreshKey" />
-    <DockNav :active="activeTab" @change="onTabClick" />
-    <Transition name="sheet">
-      <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
-        <section class="floating-sheet iridescent" role="dialog" aria-label="设置">
-          <SettingsPanel :settings="settings" :error="saveError" @save="onSaveSettings" />
-        </section>
+
+      <!-- 文案条（提醒 / 自动下班 / 动作错误）：骨架占位，PL017 换 design .banner 配方 -->
+      <div v-if="reminderVisible" class="banner remind">
+        <span class="dot"></span><span>已连续工作 {{ reminderThreshold }} 分钟，休息一下吧</span>
       </div>
-    </Transition>
+      <div v-if="autoOutVisible" class="banner auto">
+        <span class="dot"></span><span>已于 {{ hhmm(autoOutAt) }} 自动下班</span>
+      </div>
+      <div v-if="actionError" class="banner error" role="alert">{{ actionError }}</div>
+
+      <!-- 双页 v-show 保活：TimerCard 的 100ms tick 是提醒/自动下班评估口，切页不得中断 -->
+      <section v-show="activeTab === 'timer'" class="stage" id="page-timer">
+        <TimerCard
+          :work-secs="todayWorkSecs"
+          :target-hours="settings?.workday_auto_out_hours ?? null"
+          @changed="onTimerChanged"
+          @error="actionError = $event"
+          @clock="onPillClick"
+        />
+      </section>
+      <section v-show="activeTab === 'stats'" class="stage" id="page-stats">
+        <StatsView :refresh-key="statsRefreshKey" />
+      </section>
+
+      <!-- 过渡期遗留件（PL018/PL019 换装迁走）：功能保持、观感待换 -->
+      <StatsCard :today-secs="todaySecs" :week-secs="weekSecs" :all-secs="allSecs" />
+      <DockNav :active="activeTab" @change="onTabClick" />
+
+      <Transition name="sheet">
+        <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
+          <section class="floating-sheet" role="dialog" aria-label="设置">
+            <SettingsPanel :settings="settings" :error="saveError" @save="onSaveSettings" />
+          </section>
+        </div>
+      </Transition>
+    </div>
   </main>
   <ConfirmModal
     :open="confirmMode != null"
@@ -340,140 +349,25 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* —— PL010 设计令牌（全局唯一来源）：所有组件经 var() 消费，玻璃配方全应用只此一份。
-   真实玻璃材质：高透薄纱体色 + 亮边定义形状 + 顶缘 rim + 落影；磨砂由 DWM Acrylic 背板承担（焦点联动，PL011）—— */
-:root {
-  --accent: #7c3aed;
-  --mint: #0f766e;
-  --mint-bright: #34d399;
-  --ink: #1d1d1f;
-  --ink-2: color-mix(in srgb, #1d1d1f 55%, transparent);
-  --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --glass-bg: rgba(255, 255, 255, 0.3);
-  --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.78);
-  --panel-bg: rgba(255, 255, 255, 0.38);
-  --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
-  --panel-cast: rgba(90, 70, 140, 0.1);
-  --btn-cast: rgba(90, 70, 140, 0.35);
-  --text-shadow: none;
-  --chip-bg: rgba(255, 255, 255, 0.45);
-  --glass-blur: blur(28px) saturate(1.6);
-  --glass-highlight:
-    inset 0 1px rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.16);
-  --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.9);
-  --edge-glow: 0 0 0 1px rgba(255, 255, 255, 0.55), 0 2px 12px rgba(139, 92, 246, 0.25);
-  --shadow-candy: 0 16px 40px rgba(80, 60, 120, 0.25);
-  --grad-primary: linear-gradient(165deg, #8a5cff 0%, #7448f5 55%, #6a3ae8 100%);
-  --grad-digit: linear-gradient(165deg, #7c3aed 0%, #5b21b6 100%);
-  --grad-mint: linear-gradient(165deg, #34d399 0%, #10b981 100%);
-  --iridescent: linear-gradient(135deg, #fcd9ed 0%, #e1defe 45%, #b7f5fc 100%);
-  --r-card: 20px;
-  --r-pill: 999px;
-  --r-sheet: 24px;
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+/* PL016.1 令牌唯一来源：design/glass.css 1:1 副本（差异登记见文件头）
+   + 骨架件 topbar.css 1:1（.topbar/.title/.sideButton/.tooltip/.stage 布局）。
+   旧糖果令牌（PL006/PL007）已退役——单态外观为设计定案（有意分叉，登记 z.plan 附录 PL016） */
+@import "./src/styles/glass.css";
+@import "./src/styles/topbar.css";
+
+/* —— 过渡期最小功能胶水（非设计定稿样式）：仅保可运行；PL017–PL019 换装 design
+   分类样式时逐一替换 —— */
+/* 文案条骨架（PL017 换 design .banner 配方） */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* 暗夜衍生：同一配方的低透深纱版（浅字 + 暗投影保对比），磨砂仍由 DWM Acrylic 背板承担 */
-    --accent: #c0b0fd;
-    --mint: #5eead4;
-    --mint-bright: #2dd4bf;
-    --ink: #f5f5f7;
-    --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
-    --glass-bg: rgba(0, 0, 0, 0.3);
-    --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
-    --panel-bg: rgba(255, 255, 255, 0.07);
-    --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
-    --panel-cast: rgba(0, 0, 0, 0.3);
-    --btn-cast: rgba(0, 0, 0, 0.45);
-    --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --chip-bg: rgba(255, 255, 255, 0.1);
-    --glass-highlight:
-      inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
-    --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
-    --edge-glow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 2px 16px rgba(167, 139, 250, 0.4);
-    --shadow-candy: 0 16px 40px rgba(0, 0, 0, 0.5);
-    --grad-primary: linear-gradient(165deg, #7a5cf0 0%, #5b3fd6 55%, #4c2fb8 100%);
-    --grad-digit: linear-gradient(165deg, #d8c7ff 0%, #a78bfa 100%);
-    --grad-mint: linear-gradient(165deg, #0c8a60 0%, #075e42 100%);
-    --iridescent: linear-gradient(
-      135deg,
-      rgba(52, 36, 86, 0.92) 0%,
-      rgba(38, 28, 64, 0.94) 45%,
-      rgba(22, 52, 66, 0.92) 100%
-    );
-  }
+.banner.error {
+  color: #b42318;
 }
-
-/* —— 糖果材质工具类（PL007.1）：半径由消费方自定，材质配方收敛于此 ——
-   .glass-panel 玻璃面板（PL008 布局卡的底材）/ .glass-chip 胶囊小件 / .iridescent 虹彩浮层 */
-.glass-panel {
-  background: var(--panel-bg);
-  box-shadow: var(--panel-stroke), var(--rim-light), var(--panel-cast);
-}
-
-.glass-chip {
-  background: var(--chip-bg);
-  box-shadow: var(--rim-light), var(--glass-highlight);
-}
-
-.iridescent {
-  background: var(--iridescent);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--rim-light), var(--edge-glow), var(--shadow-candy);
-}
-
-/* —— PL009.1 指针跟随高光：材质元素 ::after 叠加 radial 高光层，位置由 JS 写入的
-   --mx/--my（元素相对坐标）驱动，悬停时浮现、随指针移动 —— */
-.glass-panel,
-.iridescent {
-  position: relative;
-}
-
-.glass-panel::after,
-.iridescent::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    200px circle at var(--mx, 50%) var(--my, 0%),
-    rgba(255, 255, 255, 0.16),
-    transparent 65%
-  );
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-.glass-panel:hover::after,
-.iridescent:hover::after {
-  opacity: 1;
-}
-
-/* —— PL009.2 环境光呼吸：虹彩面渐变位 8s 缓移（放大画布再平移），环境光"活"感；
-   reduced-motion 由下方显式退避（无限动画不能只靠全局时长归零）—— */
-.iridescent {
-  background-size: 200% 200%;
-  animation: iridescent-breathe 8s ease-in-out infinite;
-}
-
-@keyframes iridescent-breathe {
-  0% {
-    background-position: 0% 0%;
-  }
-
-  50% {
-    background-position: 100% 100%;
-  }
-
-  100% {
-    background-position: 0% 0%;
-  }
-}
-
-/* —— 浮层共用形态：确认框与设置面板同规格（居中玻璃片 + 压暗遮罩）—— */
+/* 浮层结构骨架（确认框/设置板定位；糖果蒙皮已退役，PL019 换 design sheet 配方） */
 .overlay {
   position: fixed;
   inset: 0;
@@ -482,154 +376,53 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(6px);
 }
-
 .floating-sheet {
   display: flex;
   flex-direction: column;
   gap: 14px;
   width: 240px;
   padding: 20px;
-  border-radius: var(--r-sheet);
-  /* 材质（虹彩底 + 轮廓光 + 彩色泛光 + 糖果投影）由全局 .iridescent 提供（PL007.6） */
+  border-radius: 24px;
+  background: rgba(245, 250, 255, 0.92);
   color: var(--ink);
-  /* 确认框是 .glass-card 的兄弟节点，须显式继承展示级字族（FIX002：字体脱管修复） */
   font-family: var(--font-stack);
   user-select: none;
 }
-
-/* —— PL010 按钮厚度三件套（配方表）：白顶光层 + 底缘暗线 + 落影 = 立体玻璃圆柱；
-   主 = 紫渐变体色、次 = 薄荷渐变体色 —— */
-.btn-primary {
-  border: none;
-  border-radius: var(--r-pill);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 38%),
-    var(--grad-primary);
-  box-shadow:
-    var(--rim-light),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.18),
-    0 8px 20px var(--btn-cast);
-  color: #fff;
-  font-family: var(--font-stack);
-  cursor: pointer;
-  transition:
-    filter 0.15s ease,
-    transform 0.15s ease;
-}
-
-.btn-primary:hover {
-  filter: brightness(1.08);
-}
-
-.btn-primary:active {
-  filter: brightness(0.95);
-  transform: scale(0.96);
-}
-
-.btn-ghost {
-  border: 1px solid color-mix(in srgb, var(--mint) 45%, transparent);
-  border-radius: var(--r-pill);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 38%), var(--grad-mint);
-  box-shadow:
-    var(--rim-light),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.14),
-    0 6px 16px var(--btn-cast);
-  color: inherit;
-  font-family: var(--font-stack);
-  cursor: pointer;
-  transition:
-    filter 0.15s ease,
-    transform 0.15s ease;
-}
-
-.btn-ghost:hover {
-  filter: brightness(1.05) saturate(1.15);
-}
-
-.btn-ghost:active {
-  filter: brightness(0.95);
-  transform: scale(0.96);
-}
-
-/* —— PL009.3 微交互：按压涟漪（中心 radial 扩散一次）；按钮相对定位 + 裁切 —— */
+/* 按钮最小功能形态（PL019 换 design 配方） */
 .btn-primary,
 .btn-ghost {
-  position: relative;
-  overflow: hidden;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-family: var(--font-stack);
 }
-
-.btn-primary::after,
-.btn-ghost::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.35), transparent 65%);
-  opacity: 0;
-  transform: scale(0.5);
-  pointer-events: none;
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
 }
-
-.btn-primary:active::after,
-.btn-ghost:active::after {
-  opacity: 1;
-  transform: scale(1);
-  transition:
-    transform 0.25s ease-out,
-    opacity 0.25s ease-out;
-}
-
-/* 置灰（未上班）：不可点击且视觉降级，双主题可辨识；糖果光效一并退场 */
 .btn-primary:disabled,
 .btn-ghost:disabled {
-  background: rgba(128, 128, 128, 0.14);
-  border-color: rgba(128, 128, 128, 0.22);
-  box-shadow: none;
-  color: inherit;
   opacity: 0.45;
   cursor: not-allowed;
 }
-
+/* 设置板开合过渡（曲线字面量替代已退役的 --ease-spring，节奏不变） */
 .sheet-enter-active,
 .sheet-leave-active {
   transition: opacity 0.15s ease;
 }
-
 .sheet-enter-active .floating-sheet {
-  transition: transform 0.15s var(--ease-spring);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-
 .sheet-enter-from,
 .sheet-leave-to {
   opacity: 0;
 }
-
 .sheet-enter-from .floating-sheet {
   transform: scale(0.92);
 }
-
-@media (prefers-color-scheme: dark) {
-  .overlay {
-    background: rgba(0, 0, 0, 0.35);
-  }
-}
-
-/* 动效退避：系统开启"减弱动态效果"时全部退化为直切；
-   无限循环的呼吸动画显式关闭（时长归零对 infinite 动画无意义），
-   指针高光层直接不渲染（PL009 红线：reduced-motion 全退避） */
+/* 动效退避（可达性基建，非设计范围；design 侧退避随 devkit 不迁，
+   分类样式内声明式退避随各 PL 落位） */
 @media (prefers-reduced-motion: reduce) {
-  .iridescent {
-    animation: none;
-  }
-
-  .glass-panel::after,
-  .iridescent::after {
-    content: none;
-  }
-
   *,
   *::before,
   *::after {
@@ -640,129 +433,14 @@ onUnmounted(() => {
 </style>
 
 <style scoped>
-/* 玻璃板（PL010.8 全窗单层收敛 / PL011 焦点联动材质）：聚焦 = DWM Acrylic 背板真磨砂（0% 纱），
-   失焦 = 纯 alpha 透明 + 30% 纱（浅白/暗黑双主题，保可读）
-   + 亮边 + rim + 落影；内容呼吸内缩（padding 24/20）；8px 圆角对齐系统窗口圆角 */
-.glass-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  height: 100vh;
-  padding: 24px 20px;
-  box-sizing: border-box;
-  border-radius: 8px;
-  box-shadow: var(--glass-stroke), var(--rim-light), var(--shadow-candy);
-  overflow: hidden;
-  text-shadow: var(--text-shadow);
-  user-select: none;
-  color: var(--ink);
-  font-family: var(--font-stack);
-}
-
-/* 纱体色层：叠在 DWM 背板/透明底之上、内容之下（体色即玻璃自身材质的一部分）；
-   分态浓度（PL011 用户定案）——失焦透明态 30% 纱保可读，聚焦磨砂态退 0%（磨砂已足够） */
-.glass-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: inherit;
-  background: var(--glass-bg);
-  pointer-events: none;
-}
-
-.glass-card.focused::before {
-  background: transparent;
-}
-
-/* 直接子件一律浮于体色层之上（.overlay 是 fixed 全屏遮罩，排除） */
-.glass-card > :not(.overlay) {
-  position: relative;
-  z-index: 1;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 0 4px;
-}
-
-.title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
+/* PL016.3 骨架胶水：.window/.content 的定妆在 glass.css、.topbar/.stage 在 topbar.css，
+   此处仅保留过渡期旧组件的排布胶水；各页正式样式随 PL017–PL019 落位后本块收敛删除 */
+.content > .banner {
   margin: 0;
-  opacity: 0.8;
-  cursor: default;
 }
 
-.gear {
-  display: flex;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  opacity: 0.55;
+/* 过渡期遗留件（StatsCard/DockNav，PL018/PL019 迁走）：压缩自身，不与 stage 抢空间 */
+.content > :is(.stats, .dock) {
+  flex: 0 0 auto;
 }
-
-.gear:hover {
-  opacity: 0.9;
-}
-
-/* 提醒/自动下班胶囊条：tint 着色（warn 琥珀 / good 绿），插入时滑入 */
-.reminder {
-  margin: 0;
-  padding: 6px 16px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 159, 10, 0.22);
-  font-size: 13px;
-  animation: banner-in 0.18s ease;
-}
-
-/* 自动下班条（PL007.6）：绿 → 薄荷渐变半透明（统一糖果色板）；提醒条琥珀保留原样 */
-.reminder.auto-out {
-  background: linear-gradient(135deg, rgba(52, 211, 153, 0.35) 0%, rgba(110, 231, 183, 0.3) 100%);
-}
-
-/* 动作/打卡失败文案条（FIX002.3）：红 tint，命令失败对用户可见 */
-.reminder.action-error {
-  background: rgba(179, 38, 30, 0.28);
-}
-
-@keyframes banner-in {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .reminder.auto-out {
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(13, 148, 136, 0.3) 100%);
-  }
-}
-
-/* 计时页容器（PL008 定底布局）：吃掉 dock 以上全部富余高度，内容纵向居中 */
-.timer-pane {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-}
-
-/* 打卡 pill 蒙皮随组件迁移 TimerCard（PL008.4），此处不再有 pill 样式 */
 </style>

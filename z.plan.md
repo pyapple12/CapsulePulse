@@ -27,7 +27,7 @@
 
 ## 二、待完成
 
-（当前无立项任务；已知下一步方向 = 原型映射回 ui/【映射期，未立项】）
+（当前立项：PL016–PL021 APP 化映射 design/ → ui/【待实施】→ 附录 PL016；原型分支已 squash 并入 main（V0.1.1.4），ui 分支保留归档）
 
 （UI 三连、PL010 材质返工与 PL011 焦点联动材质均已收口；打包分发/三端适配见计划书 Phase 6/7，未立项）
 
@@ -1422,3 +1422,90 @@ PL014.1–4 见 x.progress.md「PL014」任务组。
 ### 拆分 todo
 
 PL015.1–5 见 x.progress.md「PL015」任务组（PL015.5 = 追加修正 1）。
+
+## 附录 PL016：APP 化映射 design/ → ui/（2026-10-08 立项，工程含 PL016–PL021）
+
+> 背景：设计原型经 ui2.0 V0.001–V0.018 迭代完毕并 squash 并入 main（f53fe9c，V0.1.1.4），design/ 成为冻结参照物；ui/ 接线全套现成（invoke 命令/事件/轮询/持久化恢复，91 测试恒绿），映射 = **皮肤与布局整体更换、接线原样保留**。CT（CapsuleTODO）同款映射先行完成（七组回归 PL 直干 main + 总目验 FIX 轮），其坑与优化已提炼为本方案红线（详见本附录红线节）。
+> 目标：ui/ **严格复刻 design/ 实验场 UI**（单态、300×400 固定窗），功能接线零变化，core 除两处微触点外零改动。
+> 状态：📌 待实施（PL016–PL021 任务清单见 x.progress.md）
+> 编号：PL016–PL021（PL015 已用；PL012 永久废弃）
+
+### 方向定案（2026-10-08 用户拍板）
+
+1. 节奏容量：对齐 CT 节奏，**6 个 PL**（PL016–PL021），每 PL 一条 commit 直干 main
+2. 窗口：**300×400 固定**（按设计；可缩放与 min 夹取退役）
+3. **严格照设计零裁定**：结构/样式/文案/数值全部 1:1 复刻实验场；数值红线清单——drop-shadow 1.7px 1.7px 8px rgba(0,0,0,0.35)、双速按压 0.07s/0.22s、glyph stroke-width 2、按钮 viewBox 26×22、rx 6、内环 0.5 锚点 + 1 描边、玻璃面 fill rgba(255,255,255,0.35)/环 stroke rgba(255,255,255,0.7) 等一律照搬
+4. **单态外观**：设计无主题分支（已验证：design 全侧零 prefers-color-scheme/data-theme），不做双块、不迁主题切换；计划书 §4"跟随系统"由设计取代——**有意分叉登记**；浅色若日后需要，先在设计侧定稿再另立 PL
+5. **验证无人类闸门**（PL016–PL020）：mock-invoke DEV 基座 + 对比探针（design:8471 与 ui vite dev 同元件 geometry/计算样式逐项断言，几何容差 ≤0.5px、样式值相等）+ cargo test 恒绿 + vue-tsc/build 绿 + 截图存档（证据非闸门）；**唯 PL021 人类总目验**
+6. design/ 即刻冻结：映射期不再改动（改则须同步 ui/）
+
+### 实现措施（按 PL 拆到文件/函数级）
+
+#### PL016 令牌层 + 骨架 + 窗口
+
+- `ui/src/styles/glass.css` 新建：design/glass.css 1:1 副本；文件头登记环境差异两处（无 body 演示背景段、新增 `--glass-bg-strong` 浮板黑纱档 rgba(0,0,0,0.25)；.glass-card 引擎段本属 glass.css 无需拆分）
+- `ui/src/styles/topbar.css` 新建：design/assets/css/topbar.css 1:1 副本（.topbar/.title/.sideButton/.tooltip/.stage 骨架布局随件）
+- `ui/App.vue`：非 scoped `<style>` 块 `@import` glass.css 与 topbar.css（:root 令牌全局生效）；旧糖果令牌 :root 双块（PL006/PL007）整体删除——**跟随系统逻辑随之退役（有意分叉）**
+- App.vue 模板骨架对齐 design/index.html：topbar / stage 双页（page-timer/page-stats）/ overlay 层，class 名照抄；旧 7 组件以最小形态挂新骨架（可运行纪律）
+- `core/tauri.conf.json`：窗口 width 300 / height 400 / resizable false（min/max 夹取退役）
+- `ui/src/dev/mock-invoke.ts` 新建（CT 模式移植）：invoke/listen 假通道 + 种子数据（在岗计时中/阈值 50/自动下班 8h/有统计），main.ts `import.meta.env.DEV` 死分支接线，生产构建零痕迹
+
+#### PL017 计时页换装
+
+- `ui/src/styles/timer.css`、`hourglass.css` 新建：design 同名文件 1:1（lab 专属段除外）
+- `ui/components/TimerCard.vue`：模板按 design `.timer-top`（date-card/dial 区间时钟/flip-clock 翻转计时/status-row）+ `.pill-cast` + `.seg-control` 1:1 重装；invoke 接线（start/pause/打卡）原样保留
+- `ui/components/ProgressRing.vue`：区间弧染色并入 dial 表盘（README 映射表定案）
+- 沙漏视觉件：hourglass.css `.loader__model` 体系落位，周期跟随提醒阈值（现接线不变）
+
+#### PL018 统计页换装
+
+- `ui/src/styles/stats.css`、`graph.css` 新建：1:1 副本
+- `ui/components/StatsView.vue`：统计板五区 + 翻面今日明细 1:1 重装；翻面 = 明细入口（现接线不变）
+- 图谱与七日柱：SVG 体系整体搬（viewBox=client 尺寸/preserveAspectRatio=none/彗星发射器参数/clip 走廊 1:1），渲染函数从 design index.html 内联脚本翻译为组件内逻辑
+- `ui/components/StatsCard.vue`：卡片配方统一清玻璃
+
+#### PL019 浮层与导航 + core 收口
+
+- `ui/src/styles/boards.css`、`controls.css` 新建：1:1 副本（浮板几何段归 archive 式共享文件按需拆分）
+- `ui/components/ConfirmModal.vue` / `SettingsPanel.vue`：`.overlay .sheet` 材质 1:1 + 内容自雾化 + 黑纱档（CT 技法）
+- `ui/components/DockNav.vue`：sideButton 形态 + tooltip + 按压回弹
+- **core 收口**：`core/src/settings.rs` validate 阈值上限 1..=240 → 1..=99 + 测试断言同步（TDD：先改测试见红再实现）；ui 侧设置板 1~99 口径对齐
+
+#### PL020 清场
+
+- 旧样式/旧令牌删净：App.vue 内联玻璃段、糖果色板、PL008 弹性布局遗留，grep 零残留（CT 双目录事故教训）
+- 不迁核对：devkit.css、演示控制台、design demo JS 状态机——映射表逐行销项（design/README.md 12 行）
+- 全量回归：cargo test + vue-tsc + build + 全部对比探针重跑
+
+#### PL021 总目验（唯一人类闸门）
+
+- 真窗口全交互走查（打卡/计时/统计/设置/提醒/自动下班/重启恢复）逐项用户拍板
+- 问题归 FIX016 轮收口；design/ 冻结声明与映射表销项确认
+
+### 映射期红线（CT 坑直译检查单）
+
+1. 令牌值/动画参数零改动（数值红线清单见方向定案 3）
+2. scoped 禁用 `.glass-card > *` 类通配符压浮层，流内子件显式列举
+3. 每个 Vue 包装层显式补布局约束（flex/min-height 链）
+4. 尺寸间距 IAB 实测 design DOM，不发明数值
+5. 材质/观感定案只认真窗口（原型 backdrop 近似不算数）；backdrop 对窗外桌面不可复现，由 PL010/011 DWM 承担
+6. 动画容器 `will-change: transform` 防末帧 pop；显式 duration 替代 transitionend
+7. 新命令必须 generate_handler + 真机冒烟（mock 覆盖 ≠ 真机注册面）
+
+### 验证方案（全部可执行、可断言）
+
+- **对比探针**（核心闸门，PL016 建立逐 PL 扩充）：IAB 同时打开 design:8471 与 ui vite dev，同选择器取 getBoundingClientRect + 计算样式关键项（fill/stroke/shadow/font/line-height/filter），几何容差 ≤0.5px、样式值相等逐项断言；探针脚本与选择器清单存 .temp/
+- **恒绿哨兵**：cargo test 全绿（零 core 改动预期；PL019 validate 除外）+ vue-tsc + npm build
+- **截图存档**：每 PL 静置/交互态并排截图入 .temp 验证记录（证据，非闸门）
+- **PL021 人类闸门**：真窗口走查清单逐项用户拍板
+
+### 明确不做
+
+- 浅色主题/主题切换（设计单态；日后设计侧定稿另立 PL）
+- devkit.css、演示控制台、design demo JS 状态机迁入（ui/ 用真命令）
+- core 功能变更（仅 PL016 窗口配置 + PL019 validate 两处微触点）
+- mock 层生产化（import.meta.env.DEV 死分支，生产构建零痕迹）
+
+### 拆分 todo
+
+PL016.1–PL021.2 见 x.progress.md「PL016」–「PL021」任务组。

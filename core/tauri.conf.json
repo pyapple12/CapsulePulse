@@ -10,11 +10,9 @@
     "windows": [
       {
         "title": "CapsulePulse",
-        "width": 380,
-        "height": 560,
-        "minWidth": 320,
-        "minHeight": 540,
-        "resizable": true,
+        "width": 300,
+        "height": 400,
+        "resizable": false,
         "transparent": true,
         "decorations": false
       }
