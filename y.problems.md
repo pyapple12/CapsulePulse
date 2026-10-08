@@ -66,3 +66,11 @@
    - ✅ 诊断先行（已随 PL007.8 落地，2026-09-13）：lib.rs setup 挂 `std::panic::set_hook`（链式保留默认 hook），panic 消息 + 位置 + 线程名写入 diag::log（data/pulse.log）——下次复现即可从日志直接定位持锁 panic 源
    - ✅ 误差修正（已随 PL007.8 落地，2026-09-13）：`Poisoned` 变体改为 `Poisoned(&'static str)` 携带锁名（会话/存储/工作日/设置/提醒），错误文案如实反映是哪把锁；FIX002.1 四用例断言已升级为带锁名变体
    - 根因修复（待复现取证后定向）：复现时读 pulse.log 的 PANIC 行定位持锁 panic 源；排查方向包括持锁临界区内的算术 panic（session.rs:13 模块注释已声明时间倒流会触发 Duration 减法 panic，虽然生产用 Instant 单调钟不应倒流）与 storage/workday 命令临界区
+
+6. **周卡"与上周相比"delta 行无数据源（映射期占位）**（2026-10-08 记录，PL020 评估定案暂缓）：
+
+   当前问题：design 周卡头部有"日均 + 与上周相比 delta"双元素，映射后 ui 只渲染日均——week_detail 命令只返回本周数据，上周均值（delta 的分母）后端无数据源；设计 demo 由客户端状态机假数据支撑，映射期 core 冻结（z.plan 附录 PL016"明确不做 core 功能变更"），不做假数据填充（错误策略主线）。
+
+   暂缓理由：delta 行是纯增值展示，缺位不影响三值/图谱/明细全部既有功能；PL020 评估（2026-10-08）定案保持结构占位注释（StatsView.vue wc-head），不为此破 core 冻结。
+
+   未来方案：若用户需要"与上周相比"，另立 PL 扩展 week_detail（如 offset 参数取上周）+ 前端 delta 行接线，与后端语义一并设计；不属于映射期范围。

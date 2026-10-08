@@ -25,20 +25,29 @@ cd .temp && node serve.mjs     # 端口 8471
 
 ## 映射表（原型 → APP 回归路径）
 
-| 原型区块                                               | 对应 Vue 组件                                 | 映射落点                                        |
-| ------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------- |
-| `.window` 五层纱 + 位移折射 + 阴影系统                 | `App.vue`（.glass-card 根）                   | :root 令牌换血 + backdrop-filter 链 + fx 层     |
-| `--blur:5px` 清玻璃                                    | 聚焦态 DWM 磨砂观感基准                       | 真实窗口失焦=纯纱（alpha 路线），聚焦=PL011 DWM |
-| `.timer-top`（`.date-card` 日期卡 + `.dial` 区间时钟） | `TimerCard.vue` + `ProgressRing.vue`          | 日期卡样式微调；区间弧染色搬进表盘              |
-| `.flip-clock` 翻转计时                                 | `TimerCard.vue`                               | 翻页动画与配色按原型                            |
-| `.status-row`（沙漏 + START + 电量）                   | `TimerCard.vue`（沙漏为新增视觉件）           | 沙漏周期跟随提醒阈值；START 即主按钮态          |
-| `.pill-cast` 打卡 pill                                 | `TimerCard.vue`（pill）                       | 配色换玻璃钮配方（同色系描边 + 底缘透光）       |
-| `.seg-control` 三段式（工作/休息/重置）                | `TimerCard.vue`                               | 选中=按下玻璃语汇；重置=瞬时按钮                |
-| `.sideButton` 侧角钮（统计/设置）+ tooltip             | `App.vue` / `DockNav.vue`（导航形态落地时定） | 悬停 tooltip + 按压回弹                         |
-| `#stats-board` 统计板（正面五区 + 翻面今日明细）       | `StatsView.vue` / `StatsCard.vue`             | 卡片配方统一为清玻璃；翻面=今日明细入口         |
-| `.graph` 时间图谱 + 节点彗星                           | `StatsView.vue`                               | 彗星发射流规格见下节                            |
-| `.overlay .sheet` 确认框 / `#settings-board` 设置板    | `ConfirmModal.vue` / `SettingsPanel.vue`      | sheet 材质按原型                                |
-| `.banner` 文案条                                       | `App.vue`（提醒/自动下班条）                  | 样式微调                                        |
+> PL020.2 清场销项（2026-10-08）：12 行全部映射完成——对照批次见「销项」列；映射终点 = ui/src/styles/*.css 1:1 副本 + 组件重装，探针与截图档案见 `.temp/pl016-mapping-verification.md`、`.temp/pl019-pl020-verification.md`。
+
+| 原型区块                                               | 对应 Vue 组件                                 | 映射落点                                        | 销项                                                                         |
+| ------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------- |
+| `.window` 五层纱 + 位移折射 + 阴影系统                 | `App.vue`（.glass-card 根）                   | :root 令牌换血 + backdrop-filter 链 + fx 层     | ✓ PL016（glass.css 1:1；真窗 backdrop 不渲染→自雾化+DWM，glass.css 差异③）   |
+| `--blur:5px` 清玻璃                                    | 聚焦态 DWM 磨砂观感基准                       | 真实窗口失焦=纯纱（alpha 路线），聚焦=PL011 DWM | ✓ PL016 令牌 1:1 落位；聚焦磨砂归 PL011 DWM（README 可行性 ❌ 分工不变）     |
+| `.timer-top`（`.date-card` 日期卡 + `.dial` 区间时钟） | `TimerCard.vue` + `ProgressRing.vue`          | 日期卡样式微调；区间弧染色搬进表盘              | ✓ PL017（timer.css 1:1；区间弧并入 dial，ProgressRing 删净）                 |
+| `.flip-clock` 翻转计时                                 | `TimerCard.vue`                               | 翻页动画与配色按原型                            | ✓ PL017（7 格 flap 插拔 + --flip-dur 0.09s 1:1）                             |
+| `.status-row`（沙漏 + START + 电量）                   | `TimerCard.vue`（沙漏为新增视觉件）           | 沙漏周期跟随提醒阈值；START 即主按钮态          | ✓ PL017（hourglass.css 1:1 + 沙漏状态机移植，周期=阈值）                     |
+| `.pill-cast` 打卡 pill                                 | `TimerCard.vue`（pill）                       | 配色换玻璃钮配方（同色系描边 + 底缘透光）       | ✓ PL017（controls.css 1:1，打卡确认接线原样）                                |
+| `.seg-control` 三段式（工作/休息/重置）                | `TimerCard.vue`                               | 选中=按下玻璃语汇；重置=瞬时按钮                | ✓ PL017（三段 radio 态驱动 + session_restart 接线）                          |
+| `.sideButton` 侧角钮（统计/设置）+ tooltip             | `App.vue` / `DockNav.vue`（导航形态落地时定） | 悬停 tooltip + 按压回弹                         | ✓ PL019（DockNav 退役提前至 PL018；侧钮 = App 骨架 + 设计齿轮 SVG）          |
+| `#stats-board` 统计板（正面五区 + 翻面今日明细）       | `StatsView.vue` / `StatsCard.vue`             | 卡片配方统一为清玻璃；翻面=今日明细入口         | ✓ PL018（StatsView 飞出板重装；StatsCard 设计无对应位移除；翻面=今日明细）   |
+| `.graph` 时间图谱 + 节点彗星                           | `StatsView.vue`                               | 彗星发射流规格见下节                            | ✓ PL018（COMET 18/14、clip 走廊、纪元回拨+帧哨兵整段照搬）                   |
+| `.overlay .sheet` 确认框 / `#settings-board` 设置板    | `ConfirmModal.vue` / `SettingsPanel.vue`      | sheet 材质按原型                                | ✓ PL019（结构/文案/几何 1:1；真窗自雾化+黑纱档，设计第五行开关常开禁用登记） |
+| `.banner` 文案条                                       | `App.vue`（提醒/自动下班条）                  | 样式微调                                        | ✓ PL017（controls.css .banner 1:1；error 红字为 ui 功能胶水保留）            |
+
+## 不迁清单（PL020.2 核对）
+
+- `assets/css/devkit.css` + `index.html` 演示控制台（`.devkit`）：验证专用，不迁（ui/ 无对应物）
+- `index.html` demo JS 状态机（S 状态/applyStateCall/演示数据）：由 ui/ 真实 invoke 接线 + dev/mock-invoke（DEV-only）取代
+- `assets/lab-bg.jpg` 等演示背景：真窗口恒透明，不迁
+- 磨砂对比滑杆、背景切换等 devkit 联动：不迁
 
 ## 真实窗口可行性标注
 

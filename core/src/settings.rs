@@ -10,7 +10,7 @@ use thiserror::Error;
 /// 提醒设置（serde 结构单一来源，前端经 get/set 命令读写）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReminderSettings {
-    /// 连续工作提醒阈值（分钟，1–240）。
+    /// 连续工作提醒阈值（分钟，1–99；上限与设计设置板输入框 max=99 同源，PL019.4）。
     #[serde(default = "default_threshold")]
     pub threshold_min: u32,
     /// 提示音开关。
@@ -49,9 +49,9 @@ impl Default for ReminderSettings {
 }
 
 impl ReminderSettings {
-    /// 校验：提醒阈值 1–240 分钟；自动下班 1–72 小时。
+    /// 校验：提醒阈值 1–99 分钟；自动下班 1–72 小时。
     pub fn validate(&self) -> Result<(), SettingsError> {
-        if !(1..=240).contains(&self.threshold_min) {
+        if !(1..=99).contains(&self.threshold_min) {
             return Err(SettingsError::InvalidThreshold(self.threshold_min));
         }
         if !(1..=72).contains(&self.workday_auto_out_hours) {
@@ -102,8 +102,8 @@ pub enum SettingsError {
     /// 文件读写错误。
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// 提醒阈值越界（合法范围 1–240 分钟）。
-    #[error("提醒阈值非法：{0} 分钟（应为 1–240）")]
+    /// 提醒阈值越界（合法范围 1–99 分钟）。
+    #[error("提醒阈值非法：{0} 分钟（应为 1–99）")]
     InvalidThreshold(u32),
     /// 自动下班小时数越界（合法范围 1–72 小时）。
     #[error("自动下班小时数非法：{0}（应为 1–72）")]
@@ -237,7 +237,7 @@ mod tests {
         let _ = std::fs::remove_file(&p);
     }
 
-    /// 文件内阈值越界（0 / 241）载入即拒绝。
+    /// 文件内阈值越界（0 / 100）载入即拒绝（合法 1–99，PL019.4 与设计设置板 1~99 口径对齐）。
     #[test]
     fn out_of_range_threshold_rejected_on_load() {
         let p = temp_path("range");
@@ -249,7 +249,7 @@ mod tests {
         assert!(ReminderSettings::load(&p).is_err());
         std::fs::write(
             &p,
-            r#"{"threshold_min":241,"sound_enabled":true,"notify_enabled":true}"#,
+            r#"{"threshold_min":100,"sound_enabled":true,"notify_enabled":true}"#,
         )
         .unwrap();
         assert!(ReminderSettings::load(&p).is_err());

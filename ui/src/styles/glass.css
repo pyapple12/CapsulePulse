@@ -5,10 +5,16 @@
    阴影100%/范围200%/角度140° · Bloom80% · 透镜线开 · 漏光/色溢关
    ------------------------------------------------------------
    PL016.1 自 design/glass.css 1:1 落位；单一来源 = design/glass.css。
-   相对实验场的差异（两处，均为 APP 运行环境必需）：
+   相对实验场的差异（四处，均为 APP 运行环境必需）：
    ① body 演示背景段不迁（APP 真窗口恒透明底，style.css 承担；
       其消费点 --bg-photo 令牌保留 1:1，落位后无消费方）
    ② 新增 --glass-bg-strong 浮板黑纱档 rgba(0,0,0,0.25)（PL019 浮板自雾化消费）
+   ③ 板开自雾化块（文末 :has 规则组）：backdrop 对窗外桌面不可用（README 可行性 ❌ →
+      聚焦磨砂归 DWM），被盖内容 filter blur + 板上黑纱组合出毛玻璃（CT 技法；
+      topbar 豁免与 design #win.board-open 语义对齐）
+   ④ .window overflow hidden→clip（PL019.5）：hidden 挡不住程序化滚动，
+      板内聚焦控件（步进钮/输入框）触发 scrollIntoView 会把整窗内容永久带偏
+      （实测横滚 19.2px）；clip 彻底禁止滚动且圆角裁切语义不变
    ============================================================ */
 :root {
   /* —— 基础令牌（与 ui/App.vue 同源）—— */
@@ -91,7 +97,7 @@ button {
     var(--sx, 23px) var(--sy, 28px) var(--b1, 66px) rgb(12 32 60 / calc(var(--shadow-o, 1) * 0.5)),
     calc(var(--sx, 23px) * 0.3) calc(var(--sy, 28px) * 0.3) var(--b2, 22px)
       rgb(12 32 60 / calc(var(--shadow-o, 1) * 0.36));
-  overflow: hidden;
+  overflow: clip; /* 差异④（见文件头）：hidden 挡不住 scrollIntoView 的程序化滚动，clip 彻底禁滚 */
 }
 /* 五层结构化纱（定稿子集：云纹/颗粒/光带；漏光与色溢关闭未纳入） */
 .fx {
@@ -142,11 +148,13 @@ button {
 /* ============================================================
    差异③ APP 真窗口：backdrop 对窗外桌面不可用（README 可行性 ❌ → 聚焦磨砂归 DWM）。
    板开时被盖内容自雾化 + 板上黑纱（--glass-bg-strong）组合出毛玻璃（CT 同款技法）。
-   过渡与板飞出同步；:has 由 WebView2 现代引擎支持
+   过渡与板飞出同步；:has 由 WebView2 现代引擎支持。
+   雾化目标 = .content > :not(.topbar)，标题豁免与 design #win.board-open 语义对齐
+   （design 同名规则随 boards.css 1:1 保留但 board-open 类无人挂，惰性）
    ============================================================ */
-.window:has(#stats-board.open) > .content,
-.window:has(#settings-board.open) > .content,
-.window:has(.overlay) > .content {
+.window:has(#stats-board.open) > .content > :not(.topbar),
+.window:has(#settings-board.open) > .content > :not(.topbar),
+.window:has(.overlay) > .content > :not(.topbar) {
   filter: blur(4px);
   transition: filter 0.35s ease;
 }

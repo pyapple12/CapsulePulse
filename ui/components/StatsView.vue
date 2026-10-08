@@ -30,12 +30,14 @@ async function refresh(): Promise<void> {
   }
 }
 
-// 开板即刷（design：开板时强制重绘）
+// 开板即刷（design：开板时强制重绘）；关板复位到统计面（design setStats(false) 移除 flipped）
 watch(
   () => props.open,
   (open) => {
     if (open) {
       void refresh();
+    } else {
+      flipped.value = false;
     }
   },
 );

@@ -3,8 +3,6 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-// PL008.3：dock 时代 ⚙ 换 lucide 线性图标（与 DockNav 同源图标库）
-import { Settings } from "lucide-vue-next";
 
 import ConfirmModal from "./components/ConfirmModal.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
@@ -14,10 +12,12 @@ import TimerCard from "./components/TimerCard.vue";
 import type { DaySummary, ReminderSettings } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
+// 标题粒子化视觉件（design initTitleParticles 1:1，reduced-motion 内部退避静态文字）
+import { initTitleParticles } from "./src/title-particles";
 // 提示音经 vite 打包（哈希进 dist）——不用 public/ 目录（publicDir 默认在根，曾有 404 教训）
 import chimeUrl from "../assets/house_alarm-clock_loud.mp3";
 
-// 玻璃卡片 + 拖动区沿用 PL001 阶段 B 判定形态；计时在 TimerCard，统计聚合/提醒判定在 Rust
+// 统计聚合/提醒判定在 Rust；本组件只做展示与命令转发
 
 // 统计为低频数据：挂载 + 动作后（TimerCard changed 事件）+ 30s 兜底，不进 100ms tick
 const STATS_TICK_MS = 30_000;
@@ -34,7 +34,7 @@ const saveError = ref("");
 // 动作/打卡失败的可见反馈（FIX002.3：命令失败不再只进 console）；动作成功即清除
 const actionError = ref("");
 const chimeRef = ref<HTMLAudioElement | null>(null);
-// PL005：打卡确认框 + 双标签视图（pill 移入 TimerCard 后，在岗态由其自有轮询驱动）
+// PL005：打卡双向确认框（pill 在 TimerCard，方向经 clock 事件上抛，不直接执行）
 const confirmMode = ref<"in" | "out" | null>(null);
 // 两板互斥（design：统计板/设置板飞出，开一关一）
 const statsOpen = ref(false);
@@ -47,25 +47,57 @@ let statsTimer: number | undefined;
 let autoOutHideTimer: number | undefined;
 let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
-// PL011 分态纱浓度：聚焦磨砂态 0% 纱（磨砂已足够）、失焦透明态 30% 纱（保可读）——
-// 初值经 isFocused 查询兜底，此后随 Rust 的 window-focus 事件翻转
-const windowFocused = ref(false);
-let unlistenFocus: (() => void) | undefined;
+// 标题粒子视觉件清理句柄（组件卸载时解绑 window 监听并停帧）
+let destroyTitleParticles: (() => void) | undefined;
 
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
 // 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）；
-// .overlay 不可拖（FIX003.1）：遮罩 @click.self 点外关闭依赖 click，拖拽循环会吞掉它——
+// 浮层件全部在列（PL019：板区不拖不收、确认遮罩不拖，design 无拖拽语义）
 const DRAG_INTERACTIVE =
-  "button, input, textarea, select, a, .dock, .floating-sheet, .pill, .detail-panel, .overlay";
+  "button, input, textarea, select, a, .sideButton, #stats-board, #settings-board, .overlay";
 
-/** 非交互区按下即启动窗口拖拽 */
+// —— design flyBoard（PL019.2）：把开板按钮中心换算成板内坐标写入 transform-origin，
+// 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = boards.css 板位常量（design 同名）——
+const BOARD_TOP = 54;
+const BOARD_LEFT = 12;
+const winEl = ref<HTMLElement | null>(null);
+const statsBtnEl = ref<HTMLElement | null>(null);
+const gearBtnEl = ref<HTMLElement | null>(null);
+const statsViewEl = ref<InstanceType<typeof StatsView> | null>(null);
+const settingsPanelEl = ref<InstanceType<typeof SettingsPanel> | null>(null);
+
+/** 开板飞出原点：按钮中心 → 板内坐标，取整写 --origin-x/y（design flyBoard 1:1） */
+function flyBoard(board: HTMLElement | null, btn: HTMLElement | null): void {
+  const win = winEl.value;
+  if (win == null || board == null || btn == null) {
+    return;
+  }
+  const cr = win.getBoundingClientRect();
+  const br = btn.getBoundingClientRect();
+  board.style.setProperty(
+    "--origin-x",
+    `${Math.round(br.left + br.width / 2 - cr.left - BOARD_LEFT)}px`,
+  );
+  board.style.setProperty(
+    "--origin-y",
+    `${Math.round(br.top + br.height / 2 - cr.top - BOARD_TOP)}px`,
+  );
+}
+
+/** 非交互区按下：板开着先收板（design 点板外收板，PL019.6；板区/开合钮在白名单不收），
+ * 收板动作消费本次按下不抢拖拽；无板时启动窗口拖拽 */
 function onWindowDown(e: MouseEvent): void {
   if (e.button !== 0) {
     return;
   }
   const target = e.target as HTMLElement | null;
   if (target?.closest(DRAG_INTERACTIVE)) {
+    return;
+  }
+  if (statsOpen.value || panelVisible.value) {
+    statsOpen.value = false;
+    panelVisible.value = false;
     return;
   }
   void getCurrentWindow().startDragging();
@@ -99,13 +131,13 @@ function playChime(): void {
   });
 }
 
-/** 保存设置（Rust 侧校验 + 持久化 + 即时生效）：成功收起面板；失败错误态传入面板可见反馈 */
+/** 保存设置（Rust 侧校验 + 持久化 + 即时生效）：设计模型 = 即时生效且板保持常开
+ * （PL014 定案，点板外收板），成功仅清错误；失败错误态传入面板可见反馈 */
 async function onSaveSettings(s: ReminderSettings): Promise<void> {
   try {
     await invoke("set_settings", { settings: s });
     settings.value = s;
     saveError.value = "";
-    panelVisible.value = false;
   } catch (err) {
     // CommandError 经 IPC 序列化为文案字符串；面板内展示 + console 留痕
     saveError.value = `设置保存失败：${String(err)}`;
@@ -113,7 +145,7 @@ async function onSaveSettings(s: ReminderSettings): Promise<void> {
   }
 }
 
-/** ⚙ 开合设置板（与统计板互斥）；打开时清掉上一轮保存失败的错误提示；settings 未就绪时可见反馈不静默（FIX002.3） */
+/** ⚙ 开合设置板（与统计板互斥）：开板自齿轮中心飞出（flyBoard）；settings 未就绪时可见反馈不静默（FIX002.3） */
 function togglePanel(): void {
   if (settings.value == null) {
     actionError.value = "设置加载失败，请重启应用重试";
@@ -123,14 +155,18 @@ function togglePanel(): void {
   if (panelVisible.value) {
     statsOpen.value = false;
     saveError.value = "";
+    const board = settingsPanelEl.value?.$el as HTMLElement | undefined;
+    flyBoard(board ?? null, gearBtnEl.value);
   }
 }
 
-/** 统计板开合（与设置板互斥） */
+/** 统计板开合（与设置板互斥）：开板自统计钮中心飞出（flyBoard） */
 function toggleStats(): void {
   statsOpen.value = !statsOpen.value;
   if (statsOpen.value) {
     panelVisible.value = false;
+    const board = statsViewEl.value?.$el as HTMLElement | undefined;
+    flyBoard(board ?? null, statsBtnEl.value);
   }
 }
 
@@ -193,21 +229,10 @@ onMounted(() => {
   void refreshSettings();
   statsTimer = window.setInterval(() => void refreshStats(), STATS_TICK_MS);
   window.addEventListener("mousedown", onWindowDown);
-  // 焦点态初值兜底：错过启动期事件也不至于滞留错误纱浓度（查询失败仅记录，退回默认纱态）
-  getCurrentWindow()
-    .isFocused()
-    .then((focused) => {
-      windowFocused.value = focused;
-    })
-    .catch((err) => console.error("isFocused 查询失败", err));
-  // window-focus：Rust Focused 事件转发（payload = 聚焦与否），驱动分态纱与 focused class
-  listen<boolean>("window-focus", (event) => {
-    windowFocused.value = event.payload;
-  })
-    .then((un) => {
-      unlistenFocus = un;
-    })
-    .catch((err) => console.error("window-focus 监听注册失败", err));
+  // 标题粒子视觉件（reduced-motion 或缺件时内部返回 undefined，静态文字兜底）
+  if (winEl.value != null) {
+    destroyTitleParticles = initTitleParticles(winEl.value);
+  }
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
     reminderThreshold.value = event.payload;
@@ -253,12 +278,12 @@ onUnmounted(() => {
   window.removeEventListener("mousedown", onWindowDown);
   unlistenReminder?.();
   unlistenAutoOut?.();
-  unlistenFocus?.();
+  destroyTitleParticles?.();
 });
 </script>
 
 <template>
-  <main class="window" id="win" :class="{ focused: windowFocused }">
+  <main ref="winEl" class="window" id="win">
     <!-- 位移折射滤镜（design 1:1）：真实窗口 backdrop 链不渲染（README 可行性 ❌ → 聚焦磨砂归 DWM），保留 DOM 对位 -->
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
       <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
@@ -281,7 +306,7 @@ onUnmounted(() => {
         <h1 class="title">CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas></h1>
       </header>
 
-      <!-- 文案条（提醒 / 自动下班 / 动作错误）：骨架占位，PL017 换 design .banner 配方 -->
+      <!-- 文案条（提醒 / 自动下班 / 动作错误）：配方 = controls.css .banner 1:1，error 红字为 ui 功能胶水 -->
       <div v-if="reminderVisible" class="banner remind">
         <span class="dot"></span><span>已连续工作 {{ reminderThreshold }} 分钟，休息一下吧</span>
       </div>
@@ -290,7 +315,7 @@ onUnmounted(() => {
       </div>
       <div v-if="actionError" class="banner error" role="alert">{{ actionError }}</div>
 
-      <!-- 计时页（设计单页常驻；统计/设置 = 侧角钮飞出板） -->
+      <!-- 计时页（设计单页常驻；统计/设置 = 侧角钮飞出板，浮层件均在 .window 直下与 .content 平级） -->
       <section class="stage" id="page-timer">
         <TimerCard
           :day="day"
@@ -301,18 +326,19 @@ onUnmounted(() => {
           @clock="onPillClick"
         />
       </section>
-
-      <Transition name="sheet">
-        <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
-          <section class="floating-sheet" role="dialog" aria-label="设置">
-            <SettingsPanel :settings="settings" :error="saveError" @save="onSaveSettings" />
-          </section>
-        </div>
-      </Transition>
     </div>
+
+    <!-- 统计板（design：自统计钮飞出的玻璃板，翻面 = 今日明细；DOM 序先于侧钮，照抄 design） -->
+    <StatsView
+      ref="statsViewEl"
+      :open="statsOpen"
+      :refresh-key="statsRefreshKey"
+      :auto-out-hours="settings?.workday_auto_out_hours ?? null"
+    />
 
     <!-- 侧角按钮（左统计 · 右设置，对称落位）：两板互斥飞出 -->
     <button
+      ref="statsBtnEl"
       class="sideButton statsButton"
       :class="{ open: statsOpen }"
       type="button"
@@ -325,30 +351,44 @@ onUnmounted(() => {
       <span class="tooltip">统计</span>
     </button>
     <button
+      ref="gearBtnEl"
       class="sideButton settingsButton"
       :class="{ open: panelVisible }"
       type="button"
       aria-label="设置"
       @click="togglePanel"
     >
-      <Settings :size="17" :stroke-width="2.2" aria-hidden="true" />
+      <svg viewBox="0 -960 960 960" aria-hidden="true">
+        <path
+          d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"
+        />
+      </svg>
       <span class="tooltip">设置</span>
     </button>
 
-    <!-- 统计板（design：从统计钮飞出的玻璃板，翻面 = 今日明细） -->
-    <StatsView
-      :open="statsOpen"
-      :refresh-key="statsRefreshKey"
-      :auto-out-hours="settings?.workday_auto_out_hours ?? null"
+    <!-- 打卡双向确认框（design .overlay .sheet；DOM 序照抄：侧钮后、设置板前） -->
+    <ConfirmModal
+      :open="confirmMode != null"
+      :title="confirmMode === 'in' ? '确认上班打卡' : '确认下班打卡'"
+      :message="
+        confirmMode === 'in'
+          ? '开始记录今日在岗时长；班内计时 = 工作、空隙 = 休息。'
+          : '班内计时将收段落库，并结算今日在岗 / 工作 / 休息三值。'
+      "
+      @confirm="onConfirmOk"
+      @cancel="onConfirmCancel"
+    />
+
+    <!-- 设置板（design：自齿轮中心缩放飞出，覆于内容之上；settings 就绪才挂载） -->
+    <SettingsPanel
+      v-if="settings"
+      ref="settingsPanelEl"
+      :open="panelVisible"
+      :settings="settings"
+      :error="saveError"
+      @save="onSaveSettings"
     />
   </main>
-  <ConfirmModal
-    :open="confirmMode != null"
-    :title="confirmMode === 'in' ? '上班打卡' : '下班打卡'"
-    :message="confirmMode === 'in' ? '开始一天工作吗？' : '结束一天工作吗？'"
-    @confirm="onConfirmOk"
-    @cancel="onConfirmCancel"
-  />
   <audio ref="chimeRef" :src="chimeUrl" preload="auto"></audio>
 </template>
 
@@ -364,38 +404,10 @@ onUnmounted(() => {
 @import "./src/styles/graph.css";
 @import "./src/styles/boards.css";
 
-/* —— 过渡期最小功能胶水（非设计定稿样式）：仅保可运行；对应分类样式落位后逐一删除 —— */
+/* —— 最小功能胶水（非设计定稿样式）：错误条红字 + 动效退避，仅此两件 —— */
 /* 文案条错误条红字（remind/auto 配方在 controls.css） */
 .banner.error {
   color: #b42318;
-}
-/* 设置/确认浮层盒骨架（.overlay 已由 boards.css 提供；此盒 PL019 换 design sheet） */
-.floating-sheet {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  width: 240px;
-  padding: 20px;
-  border-radius: 24px;
-  background: rgba(245, 250, 255, 0.92);
-  color: var(--ink);
-  font-family: var(--font-stack);
-  user-select: none;
-}
-/* 设置板开合过渡（曲线字面量替代已退役的 --ease-spring，节奏不变） */
-.sheet-enter-active,
-.sheet-leave-active {
-  transition: opacity 0.15s ease;
-}
-.sheet-enter-active .floating-sheet {
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.sheet-enter-from,
-.sheet-leave-to {
-  opacity: 0;
-}
-.sheet-enter-from .floating-sheet {
-  transform: scale(0.92);
 }
 /* 动效退避（可达性基建，非设计范围；design 侧退避随 devkit 不迁，
    分类样式内声明式退避随各 PL 落位） */
@@ -406,18 +418,5 @@ onUnmounted(() => {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
-}
-</style>
-
-<style scoped>
-/* PL016.3 骨架胶水：.window/.content 的定妆在 glass.css、.topbar/.stage 在 topbar.css，
-   此处仅保留过渡期旧组件的排布胶水；各页正式样式随 PL017–PL019 落位后本块收敛删除 */
-.content > .banner {
-  margin: 0;
-}
-
-/* 过渡期遗留件（StatsCard/DockNav，PL018/PL019 迁走）：压缩自身，不与 stage 抢空间 */
-.content > .dock {
-  flex: 0 0 auto;
 }
 </style>
