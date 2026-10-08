@@ -138,3 +138,21 @@ button {
   display: flex;
   flex-direction: column;
 }
+
+/* ============================================================
+   差异③ APP 真窗口：backdrop 对窗外桌面不可用（README 可行性 ❌ → 聚焦磨砂归 DWM）。
+   板开时被盖内容自雾化 + 板上黑纱（--glass-bg-strong）组合出毛玻璃（CT 同款技法）。
+   过渡与板飞出同步；:has 由 WebView2 现代引擎支持
+   ============================================================ */
+.window:has(#stats-board.open) > .content,
+.window:has(#settings-board.open) > .content,
+.window:has(.overlay) > .content {
+  filter: blur(4px);
+  transition: filter 0.35s ease;
+}
+#stats-board.open .board-glass,
+#settings-board.open .board-glass {
+  background:
+    linear-gradient(var(--glass-bg-strong), var(--glass-bg-strong)),
+    rgba(245, 250, 255, var(--veil-a));
+}

@@ -1,0 +1,398 @@
+/* 统计面内容：日期行 / 图谱区 / 三值卡 / 周卡（屏幕使用时间风格）/ 今日明细（背面） */
+/* PL018.1 自 design/assets/css/stats.css 1:1 落位；单一来源 = design 侧，零差异 */
+/* ============================================================
+   统计板内容（五卡纵流，自板内滚动）
+   ============================================================ */
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-block);
+}
+.gcard {
+  border-radius: 14px;
+  padding: var(--card-pad-y) var(--card-pad-x);
+  background: rgba(255, 255, 255, 0.1); /* 卡玻璃 0.1 白透（用户定案，叠在 0.25 底玻璃上） */
+  backdrop-filter: blur(8px) saturate(1.4);
+  -webkit-backdrop-filter: blur(8px) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.85),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1.5px 0 rgba(40, 90, 150, 0.05),
+    0 0 0 1px rgba(40, 90, 150, 0.07),
+    0 8px 20px rgb(18 58 108 / calc(var(--shadow-o, 1) * 0.22));
+}
+.daynav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--card-pad-x); /* 与虚拟框同缩进：日期行与进度条左缘对齐 */
+}
+.daynav .day {
+  font-size: 13px;
+  font-weight: 700;
+}
+.arrow {
+  width: 13px; /* 直径 = 日期字号（用户定案：在岗中 13px，钮即 13px） */
+  height: 13px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
+    0 4px 10px rgba(18, 58, 108, 0.14);
+}
+.arrow:disabled {
+  opacity: 0.35;
+}
+/* 三值 chips */
+/* 图谱区虚拟框：进度条/时间轴直接挂统计板上，仅用与玻璃卡同宽的缩进维持内容宽度 */
+.graph-block {
+  padding: 0 var(--card-pad-x);
+  /* 日期行 → 进度条的专属调节入口：flex gap 已供 --gap-block，margin 补差值，
+     令牌值 = 视觉总距离（设 0 即回到纯卡间距） */
+  margin-top: calc(var(--gap-title-graph) - var(--gap-block));
+}
+/* 三值：三块独立正方形玻璃卡（继承 .gcard 真玻璃配方） */
+.triple-row {
+  display: flex;
+  gap: var(--gap-block);
+}
+/* 三值卡 = Uiverse 卡片模式的玻璃化缩小版（用户定案）：
+   徽章图标 + 标题 + 较昨日升降 + 大数字 + 占比进度条（分母 = 工作 + 休息）；
+   阴影照搬 Uiverse，白底换成现有玻璃（0.1 白 + blur），长宽比照搬（320×176 ≈ 20/11）；
+   在岗卡无进度条；三卡三色（accent / work / rest） */
+.t-card {
+  flex: 1;
+  min-width: 0; /* 压掉头部内容的最小宽度撑卡：严格回到 flex 均分的 76px */
+  aspect-ratio: 12 / 11; /* 长宽比照搬参考截图（≈1.09，近方形），非之前的 20/11 扁条 */
+  border-radius: 10px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -2px rgba(0, 0, 0, 0.05); /* 阴影照搬 Uiverse 卡 */
+}
+.tc-head {
+  display: flex;
+  align-items: center;
+  gap: 2px; /* 收紧：保证头部行在 60px 内容宽内放得下，百分比右缘能贴齐内容右缘 */
+}
+/* 徽章 = 圆底 + 图标一枚自包含 SVG（方案 A，用户定案）：同一坐标系一次光栅化，
+   内部相对位置与缩放比无关，永不错位；光学偏移烘焙在 HTML 的 g transform 里 */
+.tc-icon {
+  flex: none;
+  width: 16px; /* = 圆直径 14 + 边缘呼吸 1px×2（viewBox 同步 16），偶数不破坏取整对称 */
+  height: 16px;
+  color: #fff; /* 图标描边色（currentColor） */
+}
+.tc-icon svg {
+  display: block;
+}
+.tc-title {
+  display: flex;
+  align-items: center;
+}
+.tc-title svg {
+  display: block;
+}
+.tc-title text {
+  font-family: var(--font-stack);
+  font-size: 9.5px;
+  font-weight: 600;
+  fill: var(--ink-2);
+}
+.tc-percent {
+  margin-left: auto; /* 百分比右缘 = 进度条右缘（同内容右缘，用户定案） */
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px; /* 与徽章同高（同为偶数），盒子中心线重合 */
+  font-variant-numeric: tabular-nums;
+}
+.tc-percent svg {
+  width: 6px;
+  height: 6px;
+}
+.t-card b {
+  display: block;
+  margin: auto 0; /* 数字是主角：垂直居中于标题行与进度条之间（参考图内部空间比） */
+  font-size: 18px; /* 用户定案 */
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  -webkit-text-stroke: 0.1px #000; /* 黑色外描边 0.1px（用户定案） */
+  text-align: left;
+}
+.tc-range {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #e5e7eb; /* 进度槽灰照搬 Uiverse */
+}
+.tc-range .fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+}
+.t-duty .tc-icon circle {
+  fill: var(--accent);
+}
+.t-duty .tc-percent {
+  color: var(--accent);
+}
+.t-duty b {
+  color: var(--accent);
+  text-shadow: 1px 1px 2px color-mix(in srgb, var(--accent) 55%, #000);
+}
+/* 在岗卡没有进度条：尾部垫等高垫片，让数字与工作/休息卡（有进度条）同一水平线 */
+.t-duty::after {
+  content: "";
+  height: 4px;
+  flex: none;
+}
+/* 今日明细入口：仅 在岗 卡生效（hover 浮现小字 + 点击整卡翻转，用户定案） */
+.t-duty {
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1); /* 松手弹簧回位 */
+}
+.t-duty:active {
+  /* 按压回弹（沿 CT/sideButton 配方）：按下 0.08s 快缩一档 */
+  transform: scale(0.9);
+  transition: transform 0.08s ease;
+}
+.tc-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 5px; /* 7 - 2：下挪 2px（用户定案） */
+  text-align: center;
+  font-size: 8.5px;
+  font-weight: 700; /* 粗体（用户定案） */
+  color: #d4af37; /* 金色文字（用户定案） */
+  text-shadow:
+    1px 1px 1px #000,
+    0 0 4px #d4af37,
+    0 0 8px rgba(212, 175, 55, 0.55); /* 黑影 + 金色双层发光（用户定案） */
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.t-duty:hover .tc-hint {
+  opacity: 1;
+  animation: tc-hint-breath 1.6s ease-in-out 0.2s infinite; /* 出现后呼吸（用户定案） */
+}
+@keyframes tc-hint-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-duty:hover .tc-hint {
+    animation: none; /* 呼吸属动效，reduced-motion 下静态显示 */
+  }
+}
+.t-work b {
+  color: var(--work);
+  text-shadow: 1px 1px 2px color-mix(in srgb, var(--work) 55%, #000);
+}
+.t-rest b {
+  color: var(--rest);
+  text-shadow: 1px 1px 2px color-mix(in srgb, var(--rest) 55%, #000);
+}
+.t-work .tc-icon circle {
+  fill: var(--work);
+}
+.t-work .tc-percent {
+  color: var(--work);
+}
+.t-work .tc-range .fill {
+  background: var(--work);
+}
+.t-rest .tc-icon circle {
+  fill: var(--rest);
+}
+.t-rest .tc-percent {
+  color: var(--rest);
+}
+.t-rest .tc-range .fill {
+  background: var(--rest);
+}
+/* 周视图（屏幕使用时间风格，用户定案）：日均工作大数字 + 与上周相比徽章
+   + 七日堆叠柱（下段工作橙 / 上段休息绿）+ 日均工作虚线；类目明细与总时不做 */
+.stats > .gcard:last-child {
+  flex: 1; /* 高度自适应：撑满正面剩余空间，底缘与统计板下缘保持间距 */
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  box-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -2px rgba(0, 0, 0, 0.05); /* 玻璃样式与三值卡同款 */
+}
+.wc-head {
+  display: flex;
+  align-items: center; /* 左右两组中心线对齐（用户定案） */
+}
+.wc-left {
+  display: flex;
+  flex-direction: column; /* 日均 在 小时数 上方（用户定案） */
+}
+.wc-label {
+  font-size: 9.5px;
+  color: var(--ink-2);
+}
+.wc-num {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.wc-delta {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.wc-delta .l {
+  font-size: 8px;
+  color: var(--ink-2);
+}
+.wc-delta .v {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0.5px 0.5px 2px color-mix(in srgb, currentColor 55%, #000); /* 实色同系投影（用户定案：位移 0.5/0.5，模糊 2px） */
+}
+.wc-delta .v svg {
+  width: 7px;
+  height: 7px;
+}
+.wc-delta .v.up {
+  color: #e5484d; /* 涨 = 纯红（用户定案，非橙红） */
+}
+.wc-delta .v.down {
+  color: var(--rest); /* 跌绿 */
+}
+.wc-chart {
+  flex: 1;
+  position: relative;
+  min-height: 96px; /* 84 + 顶部 12px「平均」标签条 */
+  margin-top: 6px;
+}
+.wc-plot {
+  position: absolute;
+  inset: 12px 0 12px 0; /* 顶部 12px「平均」标签条 + 底部 12px 星期标签行，柱区与均线共用同一坐标系 */
+}
+/* 七日堆叠柱 SVG（PL013.5 追加）：柱缘坐标 JS 取整，杜绝 flex 均分非整列宽的小数左缘 */
+.wc-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.wc-svg .seg.work {
+  fill: var(--work);
+}
+.wc-svg .seg.rest {
+  fill: var(--rest);
+}
+/* 选中环：常驻 rect 闪现 opacity（亮 0.3s / 熄 0.5s，transition 取目标态时长）；
+   不用 box-shadow——环不再改变柱的视觉宽度，亦无小数左缘问题 */
+#wcSelRing {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+#wcSelRing.on {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+.wc-avg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--ink) 45%, transparent);
+}
+.wc-days {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 7px;
+}
+.wc-days span {
+  flex: 1;
+  text-align: center;
+  font-size: 8.5px;
+  color: var(--ink-2);
+}
+.wc-days span.today {
+  color: var(--accent);
+  font-weight: 700;
+}
+/* 明细 */
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.dl .time {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  width: 86px;
+}
+.dl .track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+}
+.dl .blk {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  min-width: 3px;
+}
+.dl .blk.work {
+  background: linear-gradient(90deg, #ff9d82, var(--work));
+}
+.dl .blk.rest {
+  background: linear-gradient(90deg, #6ee7b7, var(--rest));
+}
+.dl .dur {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.dl .ongoing {
+  font-size: 10.5px;
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+/* 查看日柱高亮已上移至 #wcSelRing（PL013.5 SVG 环版），旧 .wc-col.sel 规则随 HTML 柱退役 */

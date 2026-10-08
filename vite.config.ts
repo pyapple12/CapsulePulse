@@ -6,5 +6,7 @@ export default defineConfig({
   plugins: [vue()],
   clearScreen: false,
   server: { port: 5173, strictPort: true },
+  // cargo 编译句柄锁会使 chokidar EBUSY 崩掉 dev 服务（CT 同款坑）：watch 忽略 core/target
+  watch: { ignored: ["**/core/target/**"] },
   envPrefix: ["VITE_", "TAURI_ENV_"],
 });

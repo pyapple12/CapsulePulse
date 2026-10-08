@@ -19,13 +19,16 @@ function routeCommand(cmd: string): unknown {
     case "session_stats":
       return { today_secs: 12_600, week_secs: 54_300, all_secs: 93_600 };
     case "day_detail":
+      // 单位对齐真实后端：时间戳一律秒（SessionStatus.total_ms 例外为毫秒）
       return {
-        duty_started_at: todayStart.getTime(),
+        duty_started_at: Math.floor(todayStart.getTime() / 1000),
         duty_ended_at: null,
         duty_secs: Math.floor(elapsedMs / 1000),
         work_secs: Math.floor(elapsedMs / 1000),
         rest_secs: 0,
-        blocks: [{ start: todayStart.getTime(), end: now, kind: "work" }],
+        blocks: [
+          { start: Math.floor(todayStart.getTime() / 1000), end: Math.floor(now / 1000), kind: "work" },
+        ],
       };
     case "week_detail":
       // 近五日相对今天生成（硬编码日期会随时间失真）；样式：越近工作越多，今日为部分累计

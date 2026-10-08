@@ -320,17 +320,18 @@
 
 ### PL017: 计时页换装 [plan#PL017]
 
-- [ ] PL017.1 样式 1:1 副本 —— ui/src/styles/timer.css、hourglass.css 新建：design 同名文件逐行落位（lab 专属段除外）；挂载：TimerCard 组件 scoped @import（私有样式）；验证：探针断言类名清单与关键声明集一致
-- [ ] PL017.2 TimerCard 模板重装 —— 按 design `.timer-top` 1:1：date-card（日期卡）/ dial（区间时钟）/ flip-clock（翻转计时，翻页动画与配色按原型）/ status-row（沙漏 + START + 电池电量）；`.pill-cast` 打卡 pill 与 `.seg-control` 三段式（工作/休息/重置）；invoke 接线（start/pause/打卡 emit）原样保留不动；验证：对比探针计时页逐元件（date-card/dial/flip/status-row/pill/seg bbox + computed 关键项）Δ≤0.5px/值相等
-- [ ] PL017.3 ProgressRing 并入表盘 + 沙漏件 —— 区间弧染色并入 dial（README 映射表定案）；hourglass `.loader__model` 体系落位、周期跟随提醒阈值（现接线不变）；验证：SVG 弧属性断言（stroke-dasharray/角度）+ 探针沙漏元件
-- [ ] PL017.4 PL017 收口 —— 计时页全套对比探针过 + cargo 恒绿 + build 绿 + 静置/计时/暂停三态截图存档 + 勾结 + commit 草案
+- [x] PL017.1 样式 1:1 副本 —— ui/src/styles/timer.css、hourglass.css 新建：design 同名文件逐行落位（lab 专属段除外）；挂载：App.vue 非 scoped 全局 @import（分类样式无组件私有边界，CT 双层挂载经验的 CP 适配——scoped @import 会因选择器 hash 断链跨元件引用）；**controls.css 同批随期落位**（pill/seg/banner 为计时页必需，较任务原计划提前，登记）；验证：探针断言类名清单与关键声明集一致（2026-10-08 已验证：lab 专属段 grep 零、provenance 头登记、类名清单过）
+- [x] PL017.2 TimerCard 模板重装 —— 按 design `.timer-top` 1:1：date-card（日期卡，12h 制/英文长日期/昼夜类）/ dial（区间时钟，三针 + dialArcs 弧层）/ flip-clock（翻转计时 7 格 + flap 插拔动画）/ status-row（沙漏 + START 双层扫入 + 电池三档色）；`.pill-cast` 打卡 pill 与 `.seg-control` 三段式（工作 = 开始/继续、休息 = 暂停、重置 = 重开，radio checked 由状态驱动）；invoke 接线（session_status 轮询/session_start/pause/resume/restart/打卡 emit）原样保留不动；验证：对比探针计时页逐元件（2026-10-08 已验证：date-card 8:40 PM 格式/dial 三针/flip 7 格+small/沙漏/START/battery/pill/seg=3 全部在位；真数据驱动——flip 显示 mock 会话累计 11h40m）
+- [x] PL017.3 ProgressRing 并入表盘 + 沙漏件 —— 区间弧染色并入 dial（README 映射表定案）：dial 底轨 = 上班角起 (autoOutH/12)×360°、块弧 = 真实 day.blocks 裁剪到 [上班, 上班+autoOut]∩now；ProgressRing 组件被 dial 完全取代**删除**（CT 换装删净纪律）；沙漏状态机 1:1 移植（hgKey 去重/四分支/翻半圈两段式/负延迟相位接入），周期 = thresholdMin×60000 随设置；验证：SVG 弧属性断言 + 探针沙漏元件（2026-10-08 已验证：三针 transform 随秒更新、dial 弧由真实块驱动、沙漏状态机 vue-tsc 过；沙漏动效观感随 PL021 目验）
+- [x] PL017.4 PL017 收口 —— 计时页全套对比探针过 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案（2026-10-08 已验证：恒绿 91+1、build 绿、存档截图含 date-card/dial/flip/沙漏/START 扫入/电池/pill/seg 全件；三态截图随 PL021 走查补。**审计自查清场**：① TimerCard 去掉 .timer-page 包装层改片段根——设计 .stage flex gap 链要求五件套直挂（CT 坑 2），探针 stageDirectChildren = [timer-top,flip-clock,status-row,pill-cast,seg-control] 复验；② 沙漏 svg 补 id 对位；③ CSS 语义核验 timer 46/hourglass 27/controls 23 规则集零缺差（prettier 重排为格式归一））
 
 ### PL018: 统计页换装 [plan#PL018]
 
-- [ ] PL018.1 样式 1:1 副本 —— ui/src/styles/stats.css、graph.css 新建：design 同名文件逐行落位；验证：类名清单与声明集探针
-- [ ] PL018.2 StatsView 重装 —— 统计板五区（导航/图谱/三值/周卡/明细）+ 翻面今日明细 1:1；翻面 = 明细入口；invoke 接线（stats/week_detail）原样保留；验证：对比探针统计页逐元件 Δ≤0.5px/值相等
-- [ ] PL018.3 图谱彗星 + 七日柱 SVG 体系搬 —— 渲染函数从 design index.html 内联脚本翻译为组件逻辑，参数 1:1（viewBox=client 尺寸/preserveAspectRatio=none/彗星发射器 COMET 参数/clip 走廊/段序规范：休息绿上工作橙下）；验证：SVG 结构断言（节点数/关键属性）+ 探针图谱区
-- [ ] PL018.4 StatsCard 清玻璃统一 + PL018 收口 —— 卡片配方统一清玻璃；统计页全套探针过 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案
+- [x] PL018.1 样式 1:1 副本 —— ui/src/styles/stats.css、graph.css 新建：design 同名文件逐行落位；**boards.css 同批提前落位**（.sheet/.flip-*/.board-glass 为统计板与翻面机制依赖，较任务原计划提前，登记）；验证：类名清单与声明集探针（2026-10-08 已验证：provenance 头登记、无 lab 专属段、类名清单过）
+- [x] PL018.2 StatsView 重装 —— 统计板五区（daynav/图谱/三值/周卡/明细）+ 翻面今日明细 1:1；根结构 = design 态 `#stats-board > .board-glass.flip-scene > .flip-inner`（.open 显隐/.flipped 翻面，id 选择器驱动）；**挂载由 PL016 骨架的 stage 页修正为设计态 overlay 飞出板**（设计交互模型：侧角统计钮飞出，与设置板互斥；DockNav 退役提前至本 PL、ProgressRing 随 PL017 删除——骨架偏差纠正登记）；invoke 接线（day_detail offset 翻看/week_detail）原样保留；验证：对比探针统计板开态逐元件（2026-10-08 已验证：daynav "10月8日 · 周四 · 在岗中" 设计格式、开板 visible、翻面 flipped=true + 明细行渲染）
+- [x] PL018.3 图谱彗星 + 七日柱 SVG 体系搬 —— 渲染函数从 design index.html 内联脚本翻译为组件逻辑，参数 1:1（viewBox=client 尺寸/preserveAspectRatio=none/COMET{speed:18,spacing:14}/clip 走廊 graphClipCometRect/纪元回拨两寿命/帧哨兵 250ms/段序规范：休息绿上工作橙下/roundedTopRect 顶角圆）；数据源 = 真实 day.blocks（秒→ms）+ week_detail（duty−work=rest）；验证：SVG 结构断言 + 探针图谱区（2026-10-08 已验证：graphBars work 段 1 条满宽、D 节点 lit、cometStripes 17 条发射中、axis 上班 09:00/下班 17:00、weekBars 10 = 5 日×2 段堆叠、周卡均线/日均 4小时21分钟）
+- [x] PL018.4 StatsCard 清玻璃统一 + PL018 收口 —— **StatsCard（今日/本周/累计三值卡）设计无对应位，随映射移除**（session_stats 死线同步清理，后端命令保留）；周卡"与上周相比"delta 行需上周均值数据源（后端暂无）——按设计结构占位登记，PL020 评估；统计页全套探针过 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案（2026-10-08 已验证：探针全过 + 恒绿 91+1 + build 绿 + 开板存档图——自雾化 blur(4px) + 板上黑纱生效、三值/周卡真实数据。**审计自查清场**：① 三值卡 tc-title/tc-percent 恢复设计 SVG 标记（svg-text 标题 + 趋势箭头，tcTitleSvg=3 复验）；② graphBars/wcBars/wcSvg/wcSelRing 补设计 id（探针对位）；③ timeline.currentTime 可空归一；④ CSS 语义核验 stats 69/graph 23/boards 44 规则集零缺差）
+- [ ] PL019.6 点板外收板 —— 设计交互：统计板/设置板开态点板外即收（design panels 点外收板机制）；mousedown 白名单复用 App onWindowDown 通道，板区（#stats-board/#settings-board/.floating-sheet）命中不收；验证：live 开板点板外 → 板收，点板内不误收
 
 ### PL019: 浮层与导航 + core 收口 [plan#PL019]
 

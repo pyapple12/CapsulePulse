@@ -1,0 +1,104 @@
+/* 时间图谱：分段进度条 + R/W/D 节点 + 节点彗星发射流（PL013 起整幅 SVG 同坐标系：
+   段/节点/白纹同一次光栅化，缩放/DPI 变化零漂移；viewBox = 实际像素宽 × 12，JS 每帧同步）
+   PL018.1 自 design/assets/css/graph.css 1:1 落位；单一来源 = design 侧，零差异 */
+#graphSvg {
+  display: block;
+  width: 100%;
+  height: 12px;
+}
+/* 空槽（未推进段） */
+#graphSvg .ghost {
+  fill: rgba(255, 255, 255, 0.35);
+}
+/* 段条渐变端色：stop 走 CSS 类（var() 在 CSS 里可用，属性里不可）；渐变 objectBoundingBox 逐段竖直 */
+#graphSvg stop.sw-from {
+  stop-color: #ff9d82;
+}
+#graphSvg stop.sw-to {
+  stop-color: var(--work);
+}
+#graphSvg stop.sr-from {
+  stop-color: #6ee7b7;
+}
+#graphSvg stop.sr-to {
+  stop-color: var(--rest);
+}
+#graphSvg stop.sd-from {
+  stop-color: #7cc0ec;
+}
+#graphSvg stop.sd-to {
+  stop-color: var(--accent);
+}
+/* 白纹端色（135° 斜带硬边复刻：透明 0–0.375 / 白 22% 0.375–0.583 / 透明 0.583–1，沿对角轴） */
+#graphSvg stop.ss-edge {
+  stop-color: #fff;
+  stop-opacity: 0;
+}
+#graphSvg stop.ss-mid {
+  stop-color: #fff;
+  stop-opacity: 0.22;
+}
+/* 段条着色（work 橙红 / rest 绿 / duty 在岗蓝占位） */
+#graphSvg .graph-seg.work {
+  fill: url(#gWork);
+}
+#graphSvg .graph-seg.rest {
+  fill: url(#gRest);
+}
+#graphSvg .graph-seg.duty {
+  fill: url(#gDuty);
+}
+/* 【节点彗星·逐条发射·2026-09-26 定稿，PL013 迁 SVG】白纹一条条独立发射：从进入节点
+   中心出生，匀速走到 D 中心消失；发射频率固定（每走 14px 发一条，参数在 index.html 的
+   COMET 常量），同屏条数随走廊宽自适应。白纹 = 走廊 group 内 x=-24 的 rect（24px 出生
+   潜行段），CSS 位移动画走出 clip 即消失；reduced-motion 整体停飞 */
+#graphSvg .comet-stripe {
+  fill: url(#gStripe);
+  animation: cometWalk linear forwards;
+}
+@keyframes cometWalk {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--walk, 116px));
+  }
+}
+/* 节点（circle+text 由 JS 按交界 x 平移定位；D 由 cx=W−6 右贴边） */
+#graphSvg .graph-node circle {
+  fill: rgba(120, 132, 146, 0.5);
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1;
+  /* 不挂 fill 过渡：节点按位复用时 R/W/D 身份互换会让旧色渐变到新色
+     （绿 R 被改派成蓝 D 的「先绿后蓝」伪影），点亮改直切；reduced-motion 缺口随之闭合 */
+}
+#graphSvg .graph-node text {
+  font-family: var(--font-stack);
+  font-size: 8px;
+  font-weight: 700;
+  fill: rgba(255, 255, 255, 0.72); /* 未到达：暗字母 */
+}
+#graphSvg .graph-node.lit text {
+  fill: #fff;
+}
+#graphSvg .graph-node.lit.rest circle {
+  fill: var(--rest);
+}
+#graphSvg .graph-node.lit.work circle {
+  fill: var(--work);
+}
+#graphSvg .graph-node.lit.end circle {
+  fill: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  #graphSvg .comet-stripe {
+    display: none;
+  }
+}
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px; /* 原 10.5px 的 75%，取整（用户定案） */
+  color: var(--ink-2);
+  margin-top: var(--gap-caption);
+}

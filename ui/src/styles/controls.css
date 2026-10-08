@@ -1,0 +1,193 @@
+/* 计时区控件：统一按钮 / 打卡 pill / 三段式控制 / 文案条 */
+/* PL017.1 自 design/assets/css/controls.css 1:1 落位（pill/seg/banner 为计时页必需，较任务原计划随计时页提前）；单一来源 = design 侧，零差异 */
+/* ============================================================
+   统一按钮（UI 打磨）——基座取 uiverse shadow__btn（theme 实底 + 白粗字 + 4px 字距 +
+   同色辉光：静息 0 0 25px，悬停四段扩散），悬停放大 / 按压回弹取 uiverse milegelu .button；
+   颜色全部走 --btn-accent（主题色适配，改一处全局换色）
+   ============================================================ */
+.pill-cast,
+.sheet .acts button {
+  --btn-accent: var(--accent);
+  --btn-glow: color-mix(in srgb, var(--btn-accent) 70%, transparent);
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  background: var(--btn-accent);
+  box-shadow: 0 0 12.5px var(--btn-glow); /* 辉光 = 原 25px 的一半 */
+  transition:
+    box-shadow 0.5s,
+    transform 0.12s cubic-bezier(0.22, 0.61, 0.36, 1),
+    letter-spacing 0.12s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.pill-cast:hover,
+.sheet .acts button:hover {
+  transform: scale(1.07);
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 0 2.5px var(--btn-glow),
+    0 0 12.5px var(--btn-glow),
+    0 0 25px var(--btn-glow),
+    0 0 50px var(--btn-glow);
+}
+.pill-cast:active,
+.sheet .acts button:active {
+  transform: scale(1);
+  letter-spacing: 6px; /* 按压：字距微张（milegelu 按压语汇） */
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.95);
+  box-shadow:
+    inset 0 0.5px 8px rgba(255, 255, 255, 0.75),
+    0 0 4px var(--btn-glow);
+}
+
+/* 打卡 pill（双向确认入口，PL005）：缩为原尺寸 60% × 75%，皮肤由统一按钮提供 */
+.pill-cast {
+  width: 126px; /* 210 × 60% */
+  height: 39px; /* 52 × 75% */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+}
+/* pill：在辉光之外叠加"计时同款"阴影（base / hover / active 三态都保留，用户定案） */
+.pill-cast {
+  box-shadow:
+    0 0 12.5px var(--btn-glow),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+.pill-cast:hover {
+  box-shadow:
+    0 0 2.5px var(--btn-glow),
+    0 0 12.5px var(--btn-glow),
+    0 0 25px var(--btn-glow),
+    0 0 50px var(--btn-glow),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+.pill-cast:active {
+  box-shadow:
+    inset 0 0.5px 8px rgba(255, 255, 255, 0.75),
+    0 0 4px var(--btn-glow),
+    2px 2px 4px rgba(42, 42, 42, 0.2),
+    -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+
+/* 三段式控制（借鉴 uiverse laksh_7112 radio-input：换玻璃质感，保留抬起/按下投影）：
+   未选中 = 抬起（带投影）→ 选中 = 按下（投影消失 + 内发光 + 主题色字） */
+.seg-control {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.75),
+    0 8px 18px rgba(18, 58, 108, 0.14);
+}
+.seg-control.off {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.seg-control input {
+  display: none;
+}
+.seg-control .seg {
+  position: relative;
+  width: 62px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none; /* 重置段是 <button>，清掉 UA 边框 */
+  border-top: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: inherit;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.24));
+  box-shadow: 0 6px 2px 1px rgba(0, 0, 0, 0.18); /* 抬起投影（保留） */
+  transition: all 0.1s linear;
+}
+.seg-control .seg:first-child {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+.seg-control .seg:last-child {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+.seg-control .seg:has(input:checked) {
+  /* 按下：投影消失，改内发光（主题色）；顶缘线用"透明"而非 border-top:none——
+     后者会把 border-top-color 重置为 currentColor（近黑），在 transition:all 下插值出黑条闪现 */
+  box-shadow: inset 0 0 10px var(--accent);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.14));
+  border-top-color: transparent;
+}
+.seg-control .seg .text {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: all 0.1s linear;
+  text-shadow: 0 2px 3px rgba(0, 0, 0, 0.18);
+}
+.seg-control .seg:has(input:checked) .text {
+  color: var(--accent);
+  text-shadow: 0 0 12px var(--accent);
+}
+/* 重置段（瞬时按钮，非 radio）：按下缩一档 → 自然回弹，不保持选中 */
+.seg-control .seg-reset {
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.seg-control .seg-reset:active {
+  transform: scale(0.9);
+  transition: transform 0.08s ease;
+}
+
+/* 文案条（提醒 / 自动下班） */
+.banner {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 2px 6px; /* 纵向落位（原页面级微调块归并，用户定案） */
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
+    0 8px 18px rgba(18, 58, 108, 0.14);
+}
+.banner.show {
+  display: flex;
+}
+.banner .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.banner.remind .dot {
+  background: var(--accent);
+}
+.banner.auto .dot {
+  background: var(--mint-bright);
+}
+
+/* 页面级微调（原 index.html 内联块）：打卡 pill 的纵向落位 */
+.stage .pill-cast {
+  margin-top: -1px; /* pill + 三段控制一起上移 3px（用户定案） */
+}

@@ -7,13 +7,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Settings } from "lucide-vue-next";
 
 import ConfirmModal from "./components/ConfirmModal.vue";
-import DockNav from "./components/DockNav.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
-import StatsCard from "./components/StatsCard.vue";
 import StatsView from "./components/StatsView.vue";
 import TimerCard from "./components/TimerCard.vue";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
-import type { DaySummary, ReminderSettings, SessionStats } from "./types";
+import type { DaySummary, ReminderSettings } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
 // 提示音经 vite 打包（哈希进 dist）——不用 public/ 目录（publicDir 默认在根，曾有 404 教训）
@@ -24,11 +22,8 @@ import chimeUrl from "../assets/house_alarm-clock_loud.mp3";
 // 统计为低频数据：挂载 + 动作后（TimerCard changed 事件）+ 30s 兜底，不进 100ms tick
 const STATS_TICK_MS = 30_000;
 
-const todaySecs = ref(0);
-const weekSecs = ref(0);
-const allSecs = ref(0);
-// 今日工作秒（PL008.4 环口径：day_detail.work_secs，daywork 口径，随统计刷新节奏更新）
-const todayWorkSecs = ref(0);
+// 当日明细（PL017 dial 弧段 + 电池上班时刻的数据源；30s 兜底 + 动作后即刷）
+const day = ref<DaySummary | null>(null);
 const settings = ref<ReminderSettings | null>(null);
 const panelVisible = ref(false);
 const reminderVisible = ref(false);
@@ -41,7 +36,8 @@ const actionError = ref("");
 const chimeRef = ref<HTMLAudioElement | null>(null);
 // PL005：打卡确认框 + 双标签视图（pill 移入 TimerCard 后，在岗态由其自有轮询驱动）
 const confirmMode = ref<"in" | "out" | null>(null);
-const activeTab = ref<"timer" | "stats">("timer");
+// 两板互斥（design：统计板/设置板飞出，开一关一）
+const statsOpen = ref(false);
 const autoOutVisible = ref(false);
 const autoOutAt = ref(0);
 // 统计视图刷新信号：计时/打卡动作后自增，StatsView watch 重拉（保持 Rust 不推送定案）
@@ -75,21 +71,12 @@ function onWindowDown(e: MouseEvent): void {
   void getCurrentWindow().startDragging();
 }
 
-/** 拉取统计快照 + 今日工作秒（环口径：day_detail.work_secs，与统计同节奏更新） */
+/** 拉取当日明细（dial 弧段 + 电池数据源；统计的详细刷新在 StatsView 自持） */
 async function refreshStats(): Promise<void> {
   try {
-    const s = await invoke<SessionStats>("session_stats");
-    todaySecs.value = s.today_secs;
-    weekSecs.value = s.week_secs;
-    allSecs.value = s.all_secs;
+    day.value = await invoke<DaySummary>("day_detail", { offset: 0 });
   } catch (err) {
-    console.error("session_stats 调用失败", err);
-  }
-  try {
-    const day = await invoke<DaySummary>("day_detail", { offset: 0 });
-    todayWorkSecs.value = day.work_secs;
-  } catch (err) {
-    console.error("day_detail 调用失败（环口径沿用上次取值）", err);
+    console.error("day_detail 调用失败", err);
   }
 }
 
@@ -126,7 +113,7 @@ async function onSaveSettings(s: ReminderSettings): Promise<void> {
   }
 }
 
-/** ⚙ 开合面板；打开时清掉上一轮保存失败的错误提示；settings 未就绪时可见反馈不静默（FIX002.3） */
+/** ⚙ 开合设置板（与统计板互斥）；打开时清掉上一轮保存失败的错误提示；settings 未就绪时可见反馈不静默（FIX002.3） */
 function togglePanel(): void {
   if (settings.value == null) {
     actionError.value = "设置加载失败，请重启应用重试";
@@ -134,7 +121,16 @@ function togglePanel(): void {
   }
   panelVisible.value = !panelVisible.value;
   if (panelVisible.value) {
+    statsOpen.value = false;
     saveError.value = "";
+  }
+}
+
+/** 统计板开合（与设置板互斥） */
+function toggleStats(): void {
+  statsOpen.value = !statsOpen.value;
+  if (statsOpen.value) {
+    panelVisible.value = false;
   }
 }
 
@@ -144,14 +140,6 @@ function onTimerChanged(): void {
   statsRefreshKey.value++;
   reminderVisible.value = false;
   actionError.value = "";
-}
-
-/** 切到统计页：单日明细即时重拉（动作后的快照可能已是旧账，如开始计时当秒的工作块） */
-function onTabClick(tab: "timer" | "stats"): void {
-  activeTab.value = tab;
-  if (tab === "stats") {
-    statsRefreshKey.value++;
-  }
 }
 
 /** 打卡 pill（TimerCard 上抛方向）→ 弹对应方向确认框（双向确认，不直接执行） */
@@ -292,15 +280,6 @@ onUnmounted(() => {
       <header class="topbar">
         <h1 class="title">CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas></h1>
       </header>
-      <button
-        class="sideButton settingsButton"
-        type="button"
-        aria-label="设置"
-        @click="togglePanel"
-      >
-        <Settings :size="17" :stroke-width="2.2" aria-hidden="true" />
-        <span class="tooltip">设置</span>
-      </button>
 
       <!-- 文案条（提醒 / 自动下班 / 动作错误）：骨架占位，PL017 换 design .banner 配方 -->
       <div v-if="reminderVisible" class="banner remind">
@@ -311,23 +290,17 @@ onUnmounted(() => {
       </div>
       <div v-if="actionError" class="banner error" role="alert">{{ actionError }}</div>
 
-      <!-- 双页 v-show 保活：TimerCard 的 100ms tick 是提醒/自动下班评估口，切页不得中断 -->
-      <section v-show="activeTab === 'timer'" class="stage" id="page-timer">
+      <!-- 计时页（设计单页常驻；统计/设置 = 侧角钮飞出板） -->
+      <section class="stage" id="page-timer">
         <TimerCard
-          :work-secs="todayWorkSecs"
+          :day="day"
+          :threshold-min="settings?.threshold_min ?? 50"
           :target-hours="settings?.workday_auto_out_hours ?? null"
           @changed="onTimerChanged"
           @error="actionError = $event"
           @clock="onPillClick"
         />
       </section>
-      <section v-show="activeTab === 'stats'" class="stage" id="page-stats">
-        <StatsView :refresh-key="statsRefreshKey" />
-      </section>
-
-      <!-- 过渡期遗留件（PL018/PL019 换装迁走）：功能保持、观感待换 -->
-      <StatsCard :today-secs="todaySecs" :week-secs="weekSecs" :all-secs="allSecs" />
-      <DockNav :active="activeTab" @change="onTabClick" />
 
       <Transition name="sheet">
         <div v-if="panelVisible && settings" class="overlay" @click.self="panelVisible = false">
@@ -337,6 +310,37 @@ onUnmounted(() => {
         </div>
       </Transition>
     </div>
+
+    <!-- 侧角按钮（左统计 · 右设置，对称落位）：两板互斥飞出 -->
+    <button
+      class="sideButton statsButton"
+      :class="{ open: statsOpen }"
+      type="button"
+      aria-label="统计"
+      @click="toggleStats"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 13h4v7H4zM10 8h4v12h-4zM16 4h4v16h-4z" />
+      </svg>
+      <span class="tooltip">统计</span>
+    </button>
+    <button
+      class="sideButton settingsButton"
+      :class="{ open: panelVisible }"
+      type="button"
+      aria-label="设置"
+      @click="togglePanel"
+    >
+      <Settings :size="17" :stroke-width="2.2" aria-hidden="true" />
+      <span class="tooltip">设置</span>
+    </button>
+
+    <!-- 统计板（design：从统计钮飞出的玻璃板，翻面 = 今日明细） -->
+    <StatsView
+      :open="statsOpen"
+      :refresh-key="statsRefreshKey"
+      :auto-out-hours="settings?.workday_auto_out_hours ?? null"
+    />
   </main>
   <ConfirmModal
     :open="confirmMode != null"
@@ -349,34 +353,23 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* PL016.1 令牌唯一来源：design/glass.css 1:1 副本（差异登记见文件头）
-   + 骨架件 topbar.css 1:1（.topbar/.title/.sideButton/.tooltip/.stage 布局）。
+/* PL016.1/PL017.1/PL018.1 令牌与分类样式唯一来源：design 侧 1:1 副本（差异登记见各文件头）。
    旧糖果令牌（PL006/PL007）已退役——单态外观为设计定案（有意分叉，登记 z.plan 附录 PL016） */
 @import "./src/styles/glass.css";
 @import "./src/styles/topbar.css";
+@import "./src/styles/timer.css";
+@import "./src/styles/hourglass.css";
+@import "./src/styles/controls.css";
+@import "./src/styles/stats.css";
+@import "./src/styles/graph.css";
+@import "./src/styles/boards.css";
 
-/* —— 过渡期最小功能胶水（非设计定稿样式）：仅保可运行；PL017–PL019 换装 design
-   分类样式时逐一替换 —— */
-/* 文案条骨架（PL017 换 design .banner 配方） */
-.banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
+/* —— 过渡期最小功能胶水（非设计定稿样式）：仅保可运行；对应分类样式落位后逐一删除 —— */
+/* 文案条错误条红字（remind/auto 配方在 controls.css） */
 .banner.error {
   color: #b42318;
 }
-/* 浮层结构骨架（确认框/设置板定位；糖果蒙皮已退役，PL019 换 design sheet 配方） */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.25);
-}
+/* 设置/确认浮层盒骨架（.overlay 已由 boards.css 提供；此盒 PL019 换 design sheet） */
 .floating-sheet {
   display: flex;
   flex-direction: column;
@@ -388,22 +381,6 @@ onUnmounted(() => {
   color: var(--ink);
   font-family: var(--font-stack);
   user-select: none;
-}
-/* 按钮最小功能形态（PL019 换 design 配方） */
-.btn-primary,
-.btn-ghost {
-  border-radius: 999px;
-  padding: 8px 18px;
-  font-family: var(--font-stack);
-}
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-}
-.btn-primary:disabled,
-.btn-ghost:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 /* 设置板开合过渡（曲线字面量替代已退役的 --ease-spring，节奏不变） */
 .sheet-enter-active,
@@ -440,7 +417,7 @@ onUnmounted(() => {
 }
 
 /* 过渡期遗留件（StatsCard/DockNav，PL018/PL019 迁走）：压缩自身，不与 stage 抢空间 */
-.content > :is(.stats, .dock) {
+.content > .dock {
   flex: 0 0 auto;
 }
 </style>
