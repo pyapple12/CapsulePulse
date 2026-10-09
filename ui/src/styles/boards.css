@@ -1,5 +1,6 @@
 /* 板骨架：设置/统计板定位与飞入、翻面系统、sheet 玻璃、浮层确认框 */
-/* PL018.1 自 design/assets/css/boards.css 1:1 落位（翻面机制依赖，较任务原计划随统计板提前）；单一来源 = design 侧，零差异 */
+/* PL021.4 CT 化换血（2026-10-08 用户定案）：板材质 = CT archive/settings 板配方
+   （0.25 黑纱 + 四件影 + backdrop blur40），文字照 CT settings.css；单一来源 = CT ui/src/styles */
 /* ============================================================
    浮层：打卡确认框 + 设置面板
    ============================================================ */
@@ -10,27 +11,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(18, 45, 80, 0.22);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  background: rgba(0, 0, 0, 0.32); /* CT 黑纱系中性遮罩（被盖内容自雾化由 glass.css :has 承担） */
 }
 .sheet {
   width: calc(100% - 36px);
-  border-radius: 18px;
-  padding: 16px;
-  background: rgba(248, 252, 255, 0.25); /* 底玻璃 0.25 白透（用户定案）；雾化由内容自雾化承担 */
-  box-shadow:
-    inset 0 0 0 1.5px rgba(255, 255, 255, 0.9),
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
-    0 22px 44px rgba(12, 40, 78, 0.32);
+  border-radius: var(--radius-board);
+  padding: 12px;
+  background: var(--glass-bg-strong); /* 浮板补偿档（CT 定案，深浅同值） */
+  box-shadow: var(--glass-stroke), var(--rim-light), var(--panel-shadow), var(--shadow-candy);
+  -webkit-backdrop-filter: blur(40px) saturate(1.6);
+  backdrop-filter: blur(40px) saturate(1.6); /* 板下内容糊到不可辨（CT 实证定案） */
   font-family: var(--font-stack);
 }
-.sheet h4 {
+/* 确认框文字（作用域收窄到 .overlay：通用 .sheet p 会压制设置板行的 ink 继承——
+   CT 板内文字统一继承板级 ink 白，无此通用规则） */
+.overlay .sheet h4 {
   font-size: 15px;
   font-weight: 700;
   margin-bottom: 6px;
 }
-.sheet p {
+.overlay .sheet p {
   font-size: 12.5px;
   color: var(--ink-2);
   line-height: 1.6;
@@ -46,9 +46,10 @@
   height: 44px;
   font-size: 14px;
 }
-/* 设置面板行（CT 移植）：名称+描述双行居左、控件居右；行间分隔线 */
+/* 设置面板行（CT settings.css 照抄）：名称/描述继承板级 ink 与 text-shadow；
+   行间分隔线 */
 .setting-row {
-  padding: 6px 0; /* 压缩行距使五行不溢出板高（无滚动条，用户定案） */
+  padding: 6px 0;
 }
 .setting-row + .setting-row {
   border-top: 1px solid rgba(128, 128, 128, 0.18);
@@ -61,21 +62,13 @@
 }
 .setting-row .setting-name {
   margin: 0;
-  font-size: 13px;
-  font-weight: 800;
-  color: #333; /* 名称 333 灰（用户定案）；两级类选择器压过 .sheet p 的 --ink-2 */
-  text-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5); /* 右1 下1 模糊5 浓度50%（用户定案） */
+  font-size: 12px;
+  font-weight: 600;
 }
 .setting-row .setting-desc {
   margin: 2px 0 0;
-  /* Chrome 中文环境最小字号钳制会把小 px 中文抬回 ~12px（与名称同大）——
-     以 12px 排版再 scale 输出缩小视觉（transform 不受字号钳制，scale 用户手调）；
-     中灰加粗、无描边无阴影无透明度（用户定案） */
-  font-size: 12px;
-  transform: scale(0.8);
-  transform-origin: left top;
-  color: #555; /* 中灰再灰一档（用户定案） */
-  font-weight: 700; /* 加粗（用户定案） */
+  font-size: 8px; /* CT 同款直排（字号钳制行为与 CT 实机一致，不用 scale hack） */
+  opacity: 0.6;
 }
 .setting-row input[type="number"] {
   width: 60px;
@@ -88,10 +81,8 @@
   text-align: center;
   font-family: inherit;
   font-size: 13px;
-  background: rgba(255, 255, 255, 0.8);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.9),
-    1px 1px 2px rgba(42, 42, 42, 0.2); /* 右1 下1 模糊2（用户定案） */
+  background: var(--panel-bg); /* CT panel 配方（暗适配） */
+  box-shadow: var(--panel-stroke), var(--panel-shadow);
   color: var(--ink);
 }
 .setting-row input[type="number"]:focus {
@@ -130,8 +121,13 @@
   transition-timing-function: ease-out;
 }
 .stepper-btn .st-frame {
-  fill: rgba(255, 255, 255, 0.35); /* 框面（原按钮 background） */
-  stroke: rgba(255, 255, 255, 0.7); /* 内环（原 inset 0 0 0 1px）；0.5 锚点 + 1 描边 = 内贴 1px */
+  fill: var(--panel-bg); /* 框面随主题（E 定案：SVG 结构保留只换色） */
+  stroke: rgba(
+    255,
+    255,
+    255,
+    0.14
+  ); /* 内环随主题（CT panel-stroke 暗值；0.5 锚点 + 1 描边 = 内贴 1px） */
   stroke-width: 1;
 }
 .stepper-btn .st-glyph {
@@ -201,8 +197,9 @@
    设置板自齿轮、统计板自统计钮缩放飞出，覆于内容之上。揭示动画只用 transform scale——
    clip-path 会破坏 backdrop 采样（Chromium 渲染层边界）。
    内层复用 .sheet 皮肤（h4 / setting-row / acts 一行不重写），此处只作布局与缩放覆盖 */
-/* 翻转页（用户定案：左右翻）：正面 = 统计，背面 = 今日明细；
-   玻璃面不带 backdrop-filter（3D 变换下 backdrop 采样不可靠），雾化由内容自雾化承担 */
+/* 翻转页（design 原版逻辑）：透视与旋转都在内容链——玻璃卡（.sheet）贴在两个翻面上，
+   .flip-inner 转 180° 时两面各带整卡转过去/转进来，视觉 = 整张玻璃板翻面，翻后是今日明细；
+   玻璃面 backdrop 在 3D 变换中不可靠（design 注释原话），雾化由内容自雾化承担 */
 .flip-scene {
   perspective: 1200px;
 }
@@ -247,8 +244,8 @@
   margin-top: 12px;
   padding: 8px 0;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-stroke), var(--panel-shadow);
   color: var(--ink);
   font-family: var(--font-stack);
   font-size: 12px;
@@ -267,22 +264,14 @@
   position: absolute;
   z-index: 20;
   top: 54px;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
+  left: 14px; /* CT 浮板几何（14/14/14，design 12 已随 CT 化退役） */
+  right: 14px;
+  bottom: 14px;
+  color: var(--ink);
   visibility: hidden;
-  transition: visibility 0s linear 0.38s;
+  transition: visibility 0s linear 0.4s; /* 收板时等玻璃缩完再隐（CT 同款） */
 }
 
-/* 统计板打开时直接雾化被盖的计时区内容：backdrop-filter 对合成层兄弟内容
-   （翻页卡 transform 动画、canvas 表盘）采样不可靠，改为内容自雾化 +
-   板上白纱组合出真毛玻璃；过渡与统计板飞出/收回同步；标题（topbar）豁免 */
-#win .content > :not(.topbar) {
-  transition: filter 0.35s ease;
-}
-#win.board-open .content > :not(.topbar) {
-  filter: blur(4px); /* 3 → 4（用户定案） */
-}
 #settings-board.open,
 #stats-board.open {
   visibility: visible;
@@ -292,9 +281,13 @@
 #settings-board .board-glass {
   overflow-y: auto; /* 设置板无翻转面，滚动留在原层 */
 }
+/* 玻璃本体层：飞出/收回的动画与透视承载层（design 原版，自身无视觉——
+   玻璃卡贴在两个翻面的 .sheet 上随转）；will-change 防开板末帧 pop */
 .board-glass {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
+  will-change: transform;
   /* 滚动移至各翻转面（.flip-face）：perspective 父级不裁切，3D 翻转不穿帮 */
   transform-origin: var(--origin-x, 92%) var(--origin-y, -20px);
   transform: scale(0);

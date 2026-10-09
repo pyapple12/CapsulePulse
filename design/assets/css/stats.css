@@ -121,12 +121,12 @@
 .t-card b {
   display: block;
   margin: auto 0; /* 数字是主角：垂直居中于标题行与进度条之间（参考图内部空间比） */
-  font-size: 18px; /* 用户定案 */
+  font-size: 16px; /* 统一 16px（用户定案，与 ui 同步：两位小时数溢出卡宽的居中配套） */
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   -webkit-text-stroke: 0.1px #000; /* 黑色外描边 0.1px（用户定案） */
-  text-align: left;
+  text-align: center; /* 三值数字居中（用户定案，与 ui 同步） */
 }
 .tc-range {
   position: relative;

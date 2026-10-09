@@ -58,7 +58,7 @@
 .pill-cast {
   box-shadow:
     0 0 12.5px var(--btn-glow),
-    2px 2px 4px rgba(42, 42, 42, 0.2),
+    2px 2px 4px rgba(0, 0, 0, 0.45),
     -2px -2px 4px rgba(255, 255, 255, 0.5);
 }
 .pill-cast:hover {
@@ -67,14 +67,14 @@
     0 0 12.5px var(--btn-glow),
     0 0 25px var(--btn-glow),
     0 0 50px var(--btn-glow),
-    2px 2px 4px rgba(42, 42, 42, 0.2),
+    2px 2px 4px rgba(0, 0, 0, 0.45),
     -2px -2px 4px rgba(255, 255, 255, 0.5);
 }
 .pill-cast:active {
   box-shadow:
     inset 0 0.5px 8px rgba(255, 255, 255, 0.75),
     0 0 4px var(--btn-glow),
-    2px 2px 4px rgba(42, 42, 42, 0.2),
+    2px 2px 4px rgba(0, 0, 0, 0.45),
     -2px -2px 4px rgba(255, 255, 255, 0.5);
 }
 
@@ -86,12 +86,12 @@
   gap: 2px;
   padding: 4px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.1); /* 暗面板协调（CT 化：白玻璃底转淡） */
   backdrop-filter: blur(10px) saturate(1.4);
   -webkit-backdrop-filter: blur(10px) saturate(1.4);
   box-shadow:
     inset 0 0 0 1.5px rgba(255, 255, 255, 0.75),
-    0 8px 18px rgba(18, 58, 108, 0.14);
+    0 8px 18px rgba(0, 0, 0, 0.3); /* 外层白光影恢复（用户定案）；外影暗底加深 */
 }
 .seg-control.off {
   opacity: 0.45;
@@ -109,13 +109,17 @@
   justify-content: center;
   padding: 4px;
   border: none; /* 重置段是 <button>，清掉 UA 边框 */
-  border-top: 1px solid rgba(255, 255, 255, 0.85);
+  border-top: 1px solid rgba(255, 255, 255, 0.85); /* 顶缘白光影恢复（用户定案） */
   border-radius: 6px;
   cursor: pointer;
-  color: var(--ink);
+  color: var(--ink); /* 未选中文字白（暗色 ink，用户定案 C） */
   font-family: inherit;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.24));
-  box-shadow: 0 6px 2px 1px rgba(0, 0, 0, 0.18); /* 抬起投影（保留） */
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.14),
+    rgba(255, 255, 255, 0.06)
+  ); /* 暗面板（白字成立的前提，CT panel 系） */
+  box-shadow: 0 6px 2px 1px rgba(0, 0, 0, 0.35); /* 抬起投影（保留） */
   transition: all 0.1s linear;
 }
 .seg-control .seg:first-child {
@@ -127,10 +131,10 @@
   border-bottom-right-radius: 6px;
 }
 .seg-control .seg:has(input:checked) {
-  /* 按下：投影消失，改内发光（主题色）；顶缘线用"透明"而非 border-top:none——
+  /* 按下：投影消失，改内发光（主题色，B 决策保留蓝）；顶缘线用"透明"而非 border-top:none——
      后者会把 border-top-color 重置为 currentColor（近黑），在 transition:all 下插值出黑条闪现 */
   box-shadow: inset 0 0 10px var(--accent);
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.14));
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
   border-top-color: transparent;
 }
 .seg-control .seg .text {
@@ -164,12 +168,13 @@
   border-radius: 14px;
   font-size: 12.5px;
   font-weight: 500;
-  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink); /* 白字（暗色 ink） */
+  background: var(--panel-bg); /* 暗面板（CT 化） */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
-    0 8px 18px rgba(18, 58, 108, 0.14);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    0 8px 18px rgba(0, 0, 0, 0.3);
 }
 .banner.show {
   display: flex;

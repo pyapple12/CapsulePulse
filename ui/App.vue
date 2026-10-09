@@ -49,6 +49,10 @@ let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
 // 标题粒子视觉件清理句柄（组件卸载时解绑 window 监听并停帧）
 let destroyTitleParticles: (() => void) | undefined;
+// 分态纱焦点态（CT 定案）：失焦 30% 纱、聚焦 0% 纱桌面直透——Rust 转发 window-focus 驱动
+// focused class；初值经 isFocused 查询兜底，错过启动期事件也不滞留错误纱态
+const windowFocused = ref(false);
+let unlistenFocus: (() => void) | undefined;
 
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
@@ -233,6 +237,21 @@ onMounted(() => {
   if (winEl.value != null) {
     destroyTitleParticles = initTitleParticles(winEl.value);
   }
+  // 焦点态初值兜底：错过启动期事件也不至于滞留错误纱态（查询失败仅记录，退回常纱）
+  getCurrentWindow()
+    .isFocused()
+    .then((focused) => {
+      windowFocused.value = focused;
+    })
+    .catch((err) => console.error("isFocused 查询失败", err));
+  // window-focus：Rust 焦点态转发（payload = 聚焦与否），驱动分态纱 focused class
+  listen<boolean>("window-focus", (event) => {
+    windowFocused.value = event.payload;
+  })
+    .then((un) => {
+      unlistenFocus = un;
+    })
+    .catch((err) => console.error("window-focus 监听注册失败", err));
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
     reminderThreshold.value = event.payload;
@@ -278,29 +297,13 @@ onUnmounted(() => {
   window.removeEventListener("mousedown", onWindowDown);
   unlistenReminder?.();
   unlistenAutoOut?.();
+  unlistenFocus?.();
   destroyTitleParticles?.();
 });
 </script>
 
 <template>
-  <main ref="winEl" class="window" id="win">
-    <!-- 位移折射滤镜（design 1:1）：真实窗口 backdrop 链不渲染（README 可行性 ❌ → 聚焦磨砂归 DWM），保留 DOM 对位 -->
-    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
-      <filter id="rf-window" filterUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
-        <feImage x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m" />
-        <feDisplacementMap
-          in="SourceGraphic"
-          in2="m"
-          scale="12"
-          xChannelSelector="R"
-          yChannelSelector="G"
-        />
-      </filter>
-    </svg>
-    <div class="fx mottle"></div>
-    <div class="fx grain"></div>
-    <div class="fx sweep"></div>
-
+  <main ref="winEl" class="window" id="win" :class="{ focused: windowFocused }">
     <div class="content">
       <header class="topbar">
         <h1 class="title">CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas></h1>

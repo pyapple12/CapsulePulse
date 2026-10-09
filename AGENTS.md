@@ -6,15 +6,15 @@
 
 ## 技术栈
 
-| 组件     | 选型                                                                                                                           |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 框架     | Tauri 2（Rust 后端 + 系统 WebView）                                                                                            |
-| 前端 UI  | Vue 3 + TypeScript + Vite（只做展示，业务零含量）                                                                              |
-| 核心逻辑 | 纯 Rust（状态机/统计/持久化/提醒调度，cargo test 直测）                                                                        |
-| 存储     | rusqlite（SQLite，`data/pulse.db`，双落址见目录规划）                                                                          |
-| 玻璃效果 | DWM 焦点联动材质（extern dwmapi 直连：平时 alpha 透明、聚焦 DWMSBT_TRANSIENTWINDOW Acrylic；macOS vibrancy / Linux blur 延后） |
-| 通知提醒 | tauri-plugin-notification + 前端 `<audio>` 提示音                                                                              |
-| 常驻     | Tauri 内置 tray API + 全局快捷键                                                                                               |
+| 组件     | 选型                                                                                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 框架     | Tauri 2（Rust 后端 + 系统 WebView）                                                                                                                             |
+| 前端 UI  | Vue 3 + TypeScript + Vite（只做展示，业务零含量）                                                                                                               |
+| 核心逻辑 | 纯 Rust（状态机/统计/持久化/提醒调度，cargo test 直测）                                                                                                         |
+| 存储     | rusqlite（SQLite，`data/pulse.db`，双落址见目录规划）                                                                                                           |
+| 玻璃效果 | CT 分态纱（PL021.4 照抄 CapsuleTODO：恒纯 alpha 透明窗 + 前端 ::before 纱层失焦 30%/聚焦 0%，双主题三态令牌锁暗；DWM 背板退役；macOS/Linux 天然同构，仅需验证） |
+| 通知提醒 | tauri-plugin-notification + 前端 `<audio>` 提示音                                                                                                               |
+| 常驻     | Tauri 内置 tray API + 全局快捷键                                                                                                                                |
 
 ## 启动命令（规划）
 
@@ -34,7 +34,7 @@ npm run build          # 前端构建校验（含 vue-tsc；产物 dist/ 内嵌�
 - **会话落库时机 = 暂停时**（计划书 §2.2 定案）：崩溃最多丢当前段；单表 sessions(started_at, seconds)，v1 只做今日/本周/累计 SUM 聚合
 - **工作日/打卡双口径**（PL005 定案）：统计行"今日/本周/累计"走 sessions 自然日口径不动；工作日三值（在岗/工作/休息）与时间图谱走 workdays/events 打卡区间口径，两口径并存不混算；自动下班按"上班 + N"回填记账（发现可迟到、账目准时）；段起止事件收口于 start/resume/pause（按下时间点留痕）；锁序恒 workday → session → storage/settings/fire 单向禁反向嵌套
 - **提醒调度**（计划书 §2.3）：阈值可配置（默认 50 分钟，设置界面修改、持久化）；tauri_plugin_notification 系统通知 + 前端 `<audio>` 提示音；通知与声音降级互不依赖
-- **玻璃效果三端**（计划书 §2.4）：Windows 焦点联动材质（PL011：平时纯 alpha 透明常驻，聚焦瞬间 `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)` 挂 Acrylic、失焦撤回，extern dwmapi 直连零新依赖，当前实机验证平台）/ macOS `apply_vibrancy` / Linux `apply_blur` + 半透明妥协（延后，随三端适配落地）；编译期 `#[cfg(target_os)]` 分支互不影响；前端玻璃卡片用 CSS `backdrop-filter` 叠加（浮层内容之上仍有效）；macOS/Linux 适配延后至 Windows 版成熟后 [problems#1]
+- **玻璃效果三端**（计划书 §2.4；PL021.4 CT 化定案）：恒纯 alpha 透明窗（tauri.conf transparent）+ 前端 CT 分态纱（::before 纱层失焦 30%/聚焦 0% 桌面直透，双主题三态令牌锁暗）——纯 CSS 实现**三端天然同构**，无 OS 材质依赖（原 DWM/vibrancy/blur 三分支随换血退役）；Rust 仅转发 window-focus 焦点态；浮板毛玻璃 = 板上 0.25 黑纱 + backdrop blur40（窗内采样有效）+ 被盖内容自雾化 blur4；macOS/Linux 适配项收敛为常规回归验证 [problems#1]
 - **常驻形态**：托盘/菜单栏常驻、关闭最小化到托盘、全局快捷键唤起、后台持续计时
 - **运行时数据**：config.json 落 `configs/`、pulse.db 落 `data/`——dev=项目根、release=exe 同级（双落址，2026-09-10 热更新定案杜绝机器用户目录）；备份 = 直接拷 configs/ + data/（计划书 Phase 4）
 
@@ -179,7 +179,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **退出前落库失败仍退出**（A002-P3-7 登记，2026-09-12）：场景——托盘退出时 persist_before_quit 失败（存储故障等）；降级行为——错误落诊断日志（data/pulse.log）后照常 `app.exit(0)`；理由——退出意图优先，落库失败多为持久性故障（db 损坏/被锁）重试无门，不能因数据保存把用户困在应用里。
 - **设置既有文件字段缺失回退默认**（A002-P3-16 登记，2026-09-12）：场景——config.json 存在但缺个别字段（旧版本残留/手改丢失，如缺 threshold_min）；降级行为——该字段经 serde default 补默认值（auto_out_hours 有 PL005.4 注释依据），其余字段照常读入；理由——与"文件不存在回退默认"同义外延，属开箱即用而非错误；字段类型非法仍严格报错不在此列。
 - **诊断日志写失败静默忽略**（FIX002.7 登记，2026-09-12）：场景——diag::log 写 data/pulse.log 失败（磁盘满/目录不可写）；降级行为——静默忽略不报错；理由——日志自身不得引发二次故障，否则"记录错误"反成新错误源。
-- **焦点联动材质切换失败维持前态**（FIX003.7 登记，2026-09-13）：场景——窗口焦点切换时 DWM 背板设置失败（DwmSetWindowAttribute 非零）或 window-focus 事件发送失败；降级行为——错误落诊断日志（data/pulse.log），材质/纱态维持切换前状态；理由——材质为纯装饰层，运行时焦点事件不可中断主流程，下次焦点切换自动重试自愈。
+- **焦点联动分态纱事件失败维持前态**（FIX003.7 登记，2026-09-13；PL021.4 修订——DWM 背板随 CT 化退役，剩余适用面收窄为事件转发）：场景——窗口焦点切换时 window-focus 事件发送失败；降级行为——错误落诊断日志（data/pulse.log），纱态维持切换前状态；理由——分态纱为纯装饰层，运行时焦点事件不可中断主流程，下次焦点切换自动重试自愈。
 
 ## 素材与环境陷阱
 

@@ -61,7 +61,9 @@ function routeCommand(cmd: string): unknown {
     case "session_start":
     case "session_pause":
       return null;
-    /* 窗口/事件插件面：拖拽空操作、listen/unlisten 发假 id（isFocused 随前端死链清理退役） */
+    /* 窗口/事件插件面：isFocused 恒真（分态纱初值兜底）、拖拽空操作、listen/unlisten 发假 id */
+    case "plugin:window|is_focused":
+      return true;
     case "plugin:window|start_dragging":
     case "plugin:event|unlisten":
       return null;

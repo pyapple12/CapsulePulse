@@ -37,7 +37,7 @@
   box-shadow:
     inset 0 0 0 1.5px rgba(255, 255, 255, 0.6),
     inset 0 1.5px 0 rgba(255, 255, 255, 0.7),
-    2px 2px 4px rgba(42, 42, 42, 0.2),
+    2px 2px 4px rgba(0, 0, 0, 0.45),
     -2px -2px 4px rgba(255, 255, 255, 0.5); /* 与翻转卡同款阴影（用户定案） */
 }
 .date-card .dc-time-row {
@@ -127,7 +127,7 @@
     );
   box-shadow:
     inset 0 0 20px #0007,
-    5px 5px 10px rgba(42, 42, 42, 0.2),
+    5px 5px 10px rgba(0, 0, 0, 0.45),
     -5px -5px 10px rgba(255, 255, 255, 0.5); /* 与日期卡同款阴影（face 缩放 0.4，×2.5 换算） */
   transform: scale(0.4);
 }
@@ -269,7 +269,7 @@
   border-radius: 5px;
   perspective: 1000px;
   box-shadow:
-    2px 2px 4px rgba(42, 42, 42, 0.2),
+    2px 2px 4px rgba(0, 0, 0, 0.45),
     -2px -2px 4px rgba(255, 255, 255, 0.5);
 }
 .flip.small {

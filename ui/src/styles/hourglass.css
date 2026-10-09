@@ -140,12 +140,12 @@
   height: 24px;
   padding: 3px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--panel-bg); /* 暗面板（CT 化） */
   box-shadow:
-    inset 0 0 0 1.5px rgba(255, 255, 255, 0.8),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
     inset 0 0 0 2.5px color-mix(in srgb, var(--accent) 22%, transparent),
-    2px 2px 4px rgba(42, 42, 42, 0.2),
-    -2px -2px 4px rgba(255, 255, 255, 0.5); /* 计时同款阴影（用户定案） */
+    2px 2px 4px rgba(0, 0, 0, 0.35),
+    -2px -2px 4px rgba(255, 255, 255, 0.25); /* 白光晕收敛（用户定案：小件减半，仅电池） */
 }
 .battery .bat-fill {
   width: 100%;
@@ -160,7 +160,7 @@
   width: 3px;
   height: 10px;
   border-radius: 0 2px 2px 0;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.4);
 }
 .battery .bat-pct {
   min-width: 34px;

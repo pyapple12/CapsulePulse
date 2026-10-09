@@ -1,62 +1,96 @@
 /* ============================================================
-   CapsulePulse 玻璃引擎 · design 版
-   配方来源：试验场 E 定稿读数（2026-09-16）
-   纱浓度15% · 颗粒10 · 云纹15 · 光带60% · 磨砂5px · 折射25%
-   阴影100%/范围200%/角度140° · Bloom80% · 透镜线开 · 漏光/色溢关
+   CapsulePulse 玻璃令牌层 · CT 化换血（PL021.4，2026-10-08 用户定案）
+   单一来源 = CapsuleTODO ui/src/styles/glass.css（暗色配色全套照抄）；
+   唯一例外 = accent 保留 CP 蓝 #4aa8e8（CT 紫不进）；--work/--rest 等
+   CP 语义色不在 CT 体系，照旧保留。
+   双主题三态结构照 CT：浅色默认块 + prefers-color-scheme 跟随块 +
+   data-theme 手动块；当前 index.html 锁 data-theme="dark" 恒暗运行，
+   浅色块机制就位不启动（启动时另行走查精调）。
+   design/ 定稿配方（五层纱/云纹/颗粒/光带/透镜线/折射）整体退役。
    ------------------------------------------------------------
-   PL016.1 自 design/glass.css 1:1 落位；单一来源 = design/glass.css。
-   相对实验场的差异（四处，均为 APP 运行环境必需）：
-   ① body 演示背景段不迁（APP 真窗口恒透明底，style.css 承担；
-      其消费点 --bg-photo 令牌保留 1:1，落位后无消费方）
-   ② 新增 --glass-bg-strong 浮板黑纱档 rgba(0,0,0,0.25)（PL019 浮板自雾化消费）
-   ③ 板开自雾化块（文末 :has 规则组）：backdrop 对窗外桌面不可用（README 可行性 ❌ →
-      聚焦磨砂归 DWM），被盖内容 filter blur + 板上黑纱组合出毛玻璃（CT 技法；
-      topbar 豁免与 design #win.board-open 语义对齐）
-   ④ .window overflow hidden→clip（PL019.5）：hidden 挡不住程序化滚动，
-      板内聚焦控件（步进钮/输入框）触发 scrollIntoView 会把整窗内容永久带偏
-      （实测横滚 19.2px）；clip 彻底禁止滚动且圆角裁切语义不变
+   相对 CT 的差异（均为 CP 运行环境必需）：
+   ① accent 三处填 CP 蓝（CT 为紫 #7c3aed/#c0b0fd）
+   ② .window 引擎承载（CT 为 .glass-card）：CP 尺寸 300×400、
+      overflow clip 防 scrollIntoView 带偏（原差异④，保留）
+   ③ 组件布局令牌段（--card-pad-* 等）为 CP 统计板自有，保留
    ============================================================ */
 :root {
-  /* —— 基础令牌（与 ui/App.vue 同源）—— */
-  --accent: #4aa8e8; /* 主题色 = 淡天蓝（比天蓝略深；全站单一来源） */
-  --mint-bright: #34d399;
+  /* —— CT 浅色令牌（accent 差异①：CP 蓝）—— */
+  --accent: #4aa8e8;
   --ink: #1d1d1f;
-  --ink-2: rgba(29, 29, 31, 0.55);
+  --ink-2: color-mix(in srgb, #1d1d1f 55%, transparent);
   --font-stack: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  /* —— APP 侧新增（浮板黑纱档，CT 同款技法）：被盖内容自雾化 + 板上黑纱组合毛玻璃 —— */
-  --glass-bg-strong: rgba(0, 0, 0, 0.25);
-  /* —— 控件交互令牌（UI 打磨：右上角齿轮设置钮 + tooltip + 飞出玻璃板）—— */
-  --ctrl-hover: rgba(0, 0, 0, 0.25); /* 设置钮悬停/开板底 = 25% 黑（用户定案） */
-  /* —— 计时区令牌（重构）—— */
+  --glass-bg: rgba(255, 255, 255, 0.3); /* 纱浓度 30%（基准） */
+  --glass-bg-strong: rgba(0, 0, 0, 0.25); /* 浮板黑纱档（深浅主题同值） */
+  --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.78);
+  --panel-bg: rgba(255, 255, 255, 0.76); /* 玻璃板深度 ×2（REC 配方推广） */
+  --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+  --panel-shadow: rgba(0, 0, 0, 0.35) 1.7px 1.7px 8px; /* 模糊须盖过偏移防贴边暗环 */
+  --text-shadow: none;
+  --glass-highlight:
+    inset 0 1px rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.16);
+  --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.9);
+  --shadow-candy: 0 16px 40px rgba(80, 60, 120, 0.25);
+  --focus-blur: 14px; /* 聚焦磨砂近似（CT 同名令牌；CP 当前无 CSS 近似消费方，随令牌保留） */
+  --radius-board: 8px;
+  --radius-panel: 10px;
+  --danger: #e5484d;
+  --input-focus-ring: var(--accent);
+  --input-focus-glow: color-mix(in srgb, var(--accent) 35%, transparent);
+
+  /* —— CP 组件令牌（自有，非 CT 体系）—— */
+  --ctrl-hover: rgba(0, 0, 0, 0.5); /* 设置钮悬停/开板底 = 50% 黑透（CT 定案） */
   --work: #ff6b4a; /* 工作段（时钟弧）橙红 */
   --rest: #34d399; /* 休息段（时钟弧）绿 */
+  --mint-bright: #34d399;
   /* —— 统计卡布局间距令牌（单一来源，改一处全局生效）—— */
-  --card-pad-y: 9px; /* 卡上下内边距（药丸条上间隙 = 左右 12px 的补偿值：9 + 行内 3 = 12） */
-  --card-pad-x: 12px; /* 卡左右内边距 */
-  --gap-caption: 1px; /* 进度条 → 时间轴：标注关系，紧 */
-  --gap-title-graph: 16px; /* 日期行（在岗中）→ 进度条：内容到内容的距离 = 板内边距（用户定案） */
-  --gap-block: 8px; /* 块与块：时间轴 → 三值、统计卡与卡，共用一值 */
+  --card-pad-y: 9px;
+  --card-pad-x: 12px;
+  --gap-caption: 1px;
+  --gap-title-graph: 16px;
+  --gap-block: 8px;
+}
 
-  /* —— 时间图谱节点彗星：发射参数在 index.html 的 COMET 常量（speed / spacing）—— */
+/* —— CT 暗色令牌（跟随系统块；⚠️ 与下方 data-theme 块保持一致；accent 差异①：CP 蓝）—— */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #4aa8e8;
+    --ink: #f5f5f7;
+    --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
+    --glass-bg: rgba(0, 0, 0, 0.3);
+    --glass-bg-strong: rgba(0, 0, 0, 0.25);
+    --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
+    --panel-bg: rgba(255, 255, 255, 0.14);
+    --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+    --panel-shadow: rgba(0, 0, 0, 0.566) 1.7px 1.7px 4px;
+    --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --glass-highlight:
+      inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
+    --shadow-candy: 0 16px 40px rgba(0, 0, 0, 0.5);
+    --input-focus-ring: var(--accent);
+    --input-focus-glow: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+}
 
-  /* —— 定稿配方令牌（试验场读数直换）—— */
-  --veil-a: 0.15; /* 纱浓度 15% */
-  --grain-o: 0.1; /* 颗粒 10 */
-  --mottle-o: 0.15; /* 云纹 15 */
-  --sweep-o: 0.6; /* 光带 60% */
-  --blur: 5px; /* 磨砂 5px（清玻璃方向） */
-  --shadow-o: 1; /* 阴影浓度 100% */
-  --edge-dir: 140deg; /* 阴影角度 140°（右下偏下） */
-  /* 由角度与定稿读数（范围200%/Bloom80%）推得的影子偏移与虚影模糊 */
-  --sx: 23.1px;
-  --sy: 27.6px;
-  --b1: 66px;
-  --b2: 22px;
-  /* 背景照片（试验台可切换） */
-  --bg-photo: url("assets/lab-bg.jpg");
-
-  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)'/></svg>");
-  --mottle: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='900'><filter id='m'><feTurbulence type='fractalNoise' baseFrequency='0.012' numOctaves='3' seed='7' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='900' height='900' filter='url(%23m)'/></svg>");
+/* 手动暗色（当前 index.html 锁定此态；⚠️ 与上方 @media 块保持一致） */
+:root[data-theme="dark"] {
+  --accent: #4aa8e8;
+  --ink: #f5f5f7;
+  --ink-2: color-mix(in srgb, #f5f5f7 55%, transparent);
+  --glass-bg: rgba(0, 0, 0, 0.3);
+  --glass-bg-strong: rgba(0, 0, 0, 0.25);
+  --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
+  --panel-bg: rgba(255, 255, 255, 0.14);
+  --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --panel-shadow: rgba(0, 0, 0, 0.566) 1.7px 1.7px 4px;
+  --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --glass-highlight:
+    inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
+  --shadow-candy: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --input-focus-ring: var(--accent);
+  --input-focus-glow: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 * {
@@ -76,91 +110,60 @@ button {
 }
 
 /* ============================================================
-   APP 窗口（300×400，与参考项目同尺寸）：五层纱 + 位移折射 + 三件套
+   APP 窗口（300×400）：CT .glass-card 引擎承载（差异②）——
+   恒纯 alpha 透明底 + ::before 纱层（分态：失焦 30% 纱、聚焦 0% 桌面直透）
+   + 三件影（stroke/rim/candy）+ 板级文字影；DWM 系统背板已退役
    ============================================================ */
 .window {
   position: relative;
   width: 300px;
   height: 400px;
-  border-radius: 8px;
   padding: 18px 16px 12px;
-  background: rgba(245, 250, 255, var(--veil-a));
-  backdrop-filter: blur(var(--blur)) saturate(1.35) url(#rf-window);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35) url(#rf-window);
-  box-shadow:
-    inset 0 0 0 1.5px rgba(255, 255, 255, 0.62),
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 0 14px 2px rgb(255 255 255 / calc(var(--k-lens, 1) * 0.4)),
-    inset 0 0 3px 1px rgb(255 255 255 / calc(var(--k-lens, 1) * 0.75)),
-    inset 0 0 0 2.5px rgb(70 120 180 / calc(var(--k-lens, 1) * 0.05)),
-    var(--sx, 23px) var(--sy, 28px) var(--b1, 66px) rgb(12 32 60 / calc(var(--shadow-o, 1) * 0.5)),
-    calc(var(--sx, 23px) * 0.3) calc(var(--sy, 28px) * 0.3) var(--b2, 22px)
-      rgb(12 32 60 / calc(var(--shadow-o, 1) * 0.36));
-  overflow: clip; /* 差异④（见文件头）：hidden 挡不住 scrollIntoView 的程序化滚动，clip 彻底禁滚 */
+  border-radius: var(--radius-board);
+  box-shadow: var(--glass-stroke), var(--rim-light), var(--shadow-candy);
+  text-shadow: var(--text-shadow);
+  user-select: none;
+  color: var(--ink);
+  font-family: var(--font-stack);
+  overflow: clip; /* 差异②（见文件头）：clip 彻底禁程序化滚动，圆角裁切语义不变 */
 }
-/* 五层结构化纱（定稿子集：云纹/颗粒/光带；漏光与色溢关闭未纳入） */
-.fx {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-.fx.mottle {
-  background-image: var(--mottle);
-  background-size: cover;
-  opacity: var(--mottle-o);
-  mix-blend-mode: soft-light;
-}
-.fx.grain {
-  background-image: var(--grain);
-  background-size: 180px 180px;
-  opacity: var(--grain-o);
-  mix-blend-mode: overlay;
-}
-.fx.sweep {
-  background: linear-gradient(
-    115deg,
-    transparent 28%,
-    rgba(255, 255, 255, 0.55) 45%,
-    transparent 60%
-  );
-  opacity: var(--sweep-o);
-}
-/* 窗缘透光带：随阴影角度（140° 定稿） */
-.window::after {
+/* 纱体色层：叠在透明底之上、内容之下；分态浓度（CT 定案）——
+   失焦 30% 纱保可读，聚焦态退 0%（恒纯 alpha，无背板磨砂，桌面直透） */
+.window::before {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   border-radius: inherit;
+  background: var(--glass-bg);
   pointer-events: none;
-  z-index: 3;
-  background: linear-gradient(var(--edge-dir), transparent 80%, rgba(255, 255, 255, 0.4) 96%);
 }
+.window.focused::before {
+  background: transparent;
+}
+
+/* ============================================================
+   浮板开合·内容自雾化（CT 同款方法）：WebView2 透明窗口下 backdrop 对
+   窗外桌面不渲染，被盖内容自挂 filter: blur + 板上黑纱组合毛玻璃；
+   被盖主体 = .content 流内件，topbar 豁免（CT 标题豁免同构）；
+   4px 沿 CT 用户定案值，过渡与浮板飞出/收回同步
+   ============================================================ */
+.window .content > :not(.topbar) {
+  transition: filter 0.35s ease;
+}
+.window:has(#stats-board.open) > .content > :not(.topbar),
+.window:has(#settings-board.open) > .content > :not(.topbar),
+.window:has(.overlay) > .content > :not(.topbar) {
+  filter: blur(4px);
+}
+
+/* ============================================================
+   APP 侧内容层：.content 浮于纱层（::before z-1）之上
+   ============================================================ */
 .window > .content {
   position: relative;
   z-index: 2;
   height: 100%;
   display: flex;
   flex-direction: column;
-}
-
-/* ============================================================
-   差异③ APP 真窗口：backdrop 对窗外桌面不可用（README 可行性 ❌ → 聚焦磨砂归 DWM）。
-   板开时被盖内容自雾化 + 板上黑纱（--glass-bg-strong）组合出毛玻璃（CT 同款技法）。
-   过渡与板飞出同步；:has 由 WebView2 现代引擎支持。
-   雾化目标 = .content > :not(.topbar)，标题豁免与 design #win.board-open 语义对齐
-   （design 同名规则随 boards.css 1:1 保留但 board-open 类无人挂，惰性）
-   ============================================================ */
-.window:has(#stats-board.open) > .content > :not(.topbar),
-.window:has(#settings-board.open) > .content > :not(.topbar),
-.window:has(.overlay) > .content > :not(.topbar) {
-  filter: blur(4px);
-  transition: filter 0.35s ease;
-}
-#stats-board.open .board-glass,
-#settings-board.open .board-glass {
-  background:
-    linear-gradient(var(--glass-bg-strong), var(--glass-bg-strong)),
-    rgba(245, 250, 255, var(--veil-a));
 }

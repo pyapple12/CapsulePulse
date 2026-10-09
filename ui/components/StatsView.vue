@@ -324,6 +324,11 @@ function fmtCN(min: number): string {
   return `${Math.floor(min / 60)}小时${Math.round(min) % 60}分钟`;
 }
 
+/** 分钟 → "XhYYm"（design fmtHM 1:1：三值卡数字制式，分钟两位补零；周卡日均仍用 fmtCN） */
+function fmtHM(min: number): string {
+  return `${Math.floor(min / 60)}h${String(Math.round(min) % 60).padStart(2, "0")}m`;
+}
+
 /** 周卡整帧渲染（design renderWeekMock 1:1；数据 = 真实 week_detail，秒 → 分钟） */
 function renderWeek(): void {
   const svg = wcSvg.value;
@@ -648,7 +653,7 @@ onUnmounted(() => {
                   {{ pct(day?.duty_secs ?? 0) }}%</span
                 >
               </div>
-              <b>{{ fmtCN((day?.duty_secs ?? 0) / 60) }}</b>
+              <b>{{ fmtHM((day?.duty_secs ?? 0) / 60) }}</b>
               <span class="tc-hint">今日明细</span>
             </div>
             <div class="gcard t-card t-work">
@@ -690,7 +695,7 @@ onUnmounted(() => {
                   {{ pct(day?.work_secs ?? 0) }}%</span
                 >
               </div>
-              <b>{{ fmtCN((day?.work_secs ?? 0) / 60) }}</b>
+              <b>{{ fmtHM((day?.work_secs ?? 0) / 60) }}</b>
               <div class="tc-range">
                 <i class="fill" :style="{ width: `${pct(day?.work_secs ?? 0)}%` }"></i>
               </div>
@@ -738,7 +743,7 @@ onUnmounted(() => {
                   {{ pct(day?.rest_secs ?? 0) }}%</span
                 >
               </div>
-              <b>{{ fmtCN((day?.rest_secs ?? 0) / 60) }}</b>
+              <b>{{ fmtHM((day?.rest_secs ?? 0) / 60) }}</b>
               <div class="tc-range">
                 <i class="fill" :style="{ width: `${pct(day?.rest_secs ?? 0)}%` }"></i>
               </div>

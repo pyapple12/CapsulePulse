@@ -1,5 +1,6 @@
 /* 顶栏 + 侧角按钮（左统计/右设置）与 tooltip：壳层导航组件 */
-/* PL016.1 自 design/assets/css/topbar.css 1:1 落位（含 .stage 骨架布局）；单一来源 = design 侧，零差异 */
+/* PL021.4 CT 化换血（2026-10-08）：侧钮配色/tooltip 照抄 CT archive.css（静息 #b5bac1、
+   统计钮 DodgerBlue、设置钮 50% 黑 + 齿轮旋转）；几何沿 CP sideButton（CT 同源） */
 /* ============================================================
    顶栏 + 侧角按钮（左上统计 / 右上设置，对称落位）
    ============================================================ */
@@ -29,7 +30,7 @@
   top: -20px; /* 与 JS MARGIN_TOP 联动 */
   pointer-events: none;
 }
-/* 侧角按钮（借鉴 CapsuleTODO archive/settings 触点，尺寸统一与设置钮对称） */
+/* 侧角按钮（CT archive/settings 钮同源）：静息透明底灰图标，悬停/开板各自上底翻白 */
 .sideButton {
   position: absolute;
   top: 10px;
@@ -42,7 +43,7 @@
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: var(--ink-2);
+  color: #b5bac1; /* CT 静息灰（固定值不随主题） */
   cursor: pointer;
   transition:
     background 0.2s ease,
@@ -68,48 +69,47 @@
     transform 0.45s ease,
     fill 0.2s ease;
 }
-.sideButton:hover {
-  background: var(--ctrl-hover);
+/* 设置钮（CT settingsButton）：悬停/开板 50% 黑透 + 齿轮翻白旋转半圈 */
+.settingsButton:hover,
+.settingsButton.open {
+  background: rgba(0, 0, 0, 0.5);
   color: #fff;
 }
 .settingsButton:hover svg {
   transform: rotate(180deg); /* 齿轮悬停转半圈 */
 }
-.sideButton.open {
-  background: var(--ctrl-hover);
-  color: #fff;
-}
-/* 统计钮（archive 型）：主题色触点（用户定案） */
+/* 统计钮（CT deleteButton/archive 钮）：悬停/开板 DodgerBlue 翻白（CT 定案） */
 .statsButton:hover,
 .statsButton.open {
-  background: var(--accent);
+  background: #1e90ff;
   color: #fff;
 }
 
-/* tooltip（下翻气泡，箭头朝上；悬停按钮浮现） */
+/* tooltip（下翻气泡，箭头朝上；悬停按钮浮现）——CT archive.css 照抄 */
 .tooltip {
-  --tooltip-color: rgba(0, 0, 0, 0.25); /* 默认同设置钮 25% 黑（用户定案） */
+  --tooltip-color: rgba(0, 0, 0, 0.25); /* 25% 黑透（CT 定案）；箭头同 var 联动 */
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2.5px;
+  font-size: 8px; /* 字号定案 8px（CT 同值） */
+  line-height: 1;
   font-weight: 600;
   white-space: nowrap;
   background: var(--tooltip-color);
   color: #fff;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.25s ease;
-  box-shadow: 0 6px 14px rgba(5, 35, 80, 0.25);
+  transition: all 0.5s;
+  box-shadow: 0px 5px 5px rgba(0, 0, 0, 0.105);
 }
 .tooltip::before {
   content: "";
   position: absolute;
   left: 50%;
-  top: -4.5px; /* 上移 0.5px（用户定案） */
+  top: -4.5px; /* 沿定案上移 0.5px：防三角与气泡叠出加深带 */
   transform: translateX(-50%);
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
@@ -118,9 +118,9 @@
 .sideButton:hover .tooltip {
   opacity: 1;
 }
-/* 统计钮 tooltip 与统计钮悬停色一致（主题色，用户定案） */
+/* 统计钮 tooltip 与统计钮悬停色一致（CT 同语义：气泡色跟钮色） */
 .statsButton .tooltip {
-  --tooltip-color: var(--accent);
+  --tooltip-color: #1e90ff;
 }
 
 /* 统计钮按压回弹已并入 .sideButton（见上） */
