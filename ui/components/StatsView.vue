@@ -5,13 +5,15 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { DaySummary, WeekDay } from "../types";
+import type { DaySummary, WeekDay, WorkdayTotal } from "../types";
 const props = defineProps<{ refreshKey: number; autoOutHours: number | null; open: boolean }>();
 
 const offset = ref(0);
 const day = ref<DaySummary | null>(null);
-// 周视图（PL008.6）：锚 = 今日回溯 7 日（旧 → 新），Rust 侧归约，本组件零聚合
+// 周视图（PL022）：查看日所在自然周（周一~周日，恒 7 行），Rust 侧归约，本组件零聚合
 const week = ref<WeekDay[]>([]);
+// 总日均（PL022）：全历史工作时长总和 ÷ 有数据天数（后端聚合，前端只做除法展示）
+const total = ref<WorkdayTotal>({ work_secs: 0, days: 0 });
 const loadError = ref("");
 
 async function refresh(): Promise<void> {
@@ -23,7 +25,13 @@ async function refresh(): Promise<void> {
     console.error("day_detail 调用失败", err);
   }
   try {
-    week.value = await invoke<WeekDay[]>("week_detail");
+    total.value = await invoke<WorkdayTotal>("workday_total");
+  } catch (err) {
+    loadError.value = String(err);
+    console.error("workday_total 调用失败", err);
+  }
+  try {
+    week.value = await invoke<WeekDay[]>("week_detail", { offset: offset.value });
   } catch (err) {
     loadError.value = String(err);
     console.error("week_detail 调用失败", err);
@@ -308,12 +316,25 @@ const wcSvg = ref<SVGSVGElement | null>(null);
 const wcBars = ref<SVGGElement | null>(null);
 const wcSelRing = ref<SVGPathElement | null>(null);
 const wcAvgLine = ref<HTMLElement | null>(null);
-const avgWorkMin = ref(0);
 const flipped = ref(false);
 let selTimer = 0;
 let destroyed = false;
 let lastViewDay = 0;
 let weekSig = "";
+
+/** 周卡七格单字标签（行序 = 周一~周日，PL022） */
+const WEEKDAY_SINGLE = ["一", "二", "三", "四", "五", "六", "日"];
+
+/** 今天的 MM-DD（"今"标记判定 = 周卡行 date 与之一致） */
+const todayMmdd = computed(() => {
+  const d = new Date();
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+});
+
+/** 总日均（分钟）：全历史工作总和 ÷ 有数据天数（PL022；无数据为零） */
+const avgWorkMin = computed(() =>
+  total.value.days > 0 ? total.value.work_secs / 60 / total.value.days : 0,
+);
 
 function roundedTopRect(x: number, y: number, w: number, h: number, r: number): string {
   const rr = Math.min(r, h / 2, w / 2);
@@ -341,8 +362,7 @@ function renderWeek(): void {
     rest: (d.duty_secs - d.work_secs) / 60,
   }));
   const maxTotal = Math.max(...days.map((d) => d.work + d.rest), 1);
-  const avgWork = days.reduce((a, d) => a + d.work, 0) / days.length;
-  avgWorkMin.value = avgWork;
+  const avgWork = avgWorkMin.value;
 
   const W = svg.clientWidth;
   const H = svg.clientHeight;
@@ -354,10 +374,10 @@ function renderWeek(): void {
 
   let inner = "";
   days.forEach((d, i) => {
-    const total = d.work + d.rest;
-    const barH = total ? (total / maxTotal) * plotH : 0;
-    const restH = total ? (d.rest / total) * barH : 0;
-    const workH = total ? (d.work / total) * barH : 0;
+    const barTotal = d.work + d.rest;
+    const barH = barTotal ? (barTotal / maxTotal) * plotH : 0;
+    const restH = barTotal ? (d.rest / barTotal) * barH : 0;
+    const workH = barTotal ? (d.work / barTotal) * barH : 0;
     const x = Math.round(i * slot + (slot - 20) / 2); // 柱缘取整（根治小数左缘）
     const y = H - 1.5 - barH;
     const r = Math.min(3, 20 / 2);
@@ -371,24 +391,30 @@ function renderWeek(): void {
       inner += `<path class="seg rest" d="${roundedTopRect(x, y, 20, restH, r)}"/>`;
     }
   });
-  const sig = `${days.length}|${Math.round(days[days.length - 1]!.work)}|${offset.value}`;
+  // 内容签名：查看周 + 逐柱总高变化才重建（避免每秒整层重建）
+  const sig = `${offset.value}|${days.map((d) => Math.round(d.work + d.rest)).join(",")}`;
   if (sig !== weekSig) {
     weekSig = sig;
     bars.innerHTML = inner;
   }
 
-  // 均线（design 1:1）
+  // 均线（design 1:1；高度 = 总日均占本周峰值的比例，越顶夹取 100%）
   if (wcAvgLine.value) {
-    wcAvgLine.value.style.bottom = `${((avgWork / maxTotal) * 100).toFixed(1)}%`;
+    wcAvgLine.value.style.bottom = `${Math.min(100, (avgWork / maxTotal) * 100).toFixed(1)}%`;
   }
 
-  // 选中环闪现：查看日偏移变化时触发（design flashSel 1:1）
+  // 选中环闪现：查看日偏移变化时触发（design flashSel 1:1）——
+  // PL022：查看日所在格由真实日期定位（自然周下不再是"末列 + offset"）
   if (offset.value !== lastViewDay) {
+    const viewed = new Date(Date.now() + offset.value * 86_400_000);
+    const key = `${String(viewed.getMonth() + 1).padStart(2, "0")}-${String(viewed.getDate()).padStart(2, "0")}`;
+    const i = week.value.findIndex((d) => d.date === key);
+    if (i < 0) {
+      return; // 周数据未跟上（跨周刷新途中）：不记 lastViewDay，待新数据到位再闪现
+    }
     lastViewDay = offset.value;
-    const viewIdx = Math.max(0, Math.min(days.length - 1, days.length - 1 + offset.value));
-    const i = viewIdx;
-    const total = days[i]!.work + days[i]!.rest;
-    const barH = total ? (total / maxTotal) * plotH : 0;
+    const barTotal = days[i]!.work + days[i]!.rest;
+    const barH = barTotal ? (barTotal / maxTotal) * plotH : 0;
     const x = Math.round(i * slot + (slot - 20) / 2);
     const y = H - 1.5 - barH;
     const r = 3;
@@ -767,8 +793,9 @@ onUnmounted(() => {
                 </svg>
               </div>
               <div class="wc-days">
-                <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span
-                ><span>六</span><span class="today">今</span>
+                <span v-for="(d, i) in week" :key="i" :class="{ today: d.date === todayMmdd }">{{
+                  d.date === todayMmdd ? "今" : WEEKDAY_SINGLE[i]
+                }}</span>
               </div>
             </div>
           </div>

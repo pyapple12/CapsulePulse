@@ -162,6 +162,20 @@ impl Storage {
         }
     }
 
+    /// 全历史最早记录时刻（workdays.clock_in_at 与 events.at 取最小；空库 None）——
+    /// 总日均聚合的窗口起点（PL022；数据自首日全量在库，无窗口/清理逻辑）。
+    pub fn first_record_at(&self) -> Result<Option<i64>, StorageError> {
+        Ok(self.conn.query_row(
+            "SELECT MIN(t) FROM (
+                SELECT MIN(clock_in_at) AS t FROM workdays
+                UNION ALL
+                SELECT MIN(at) AS t FROM events
+            )",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     /// 写一条打卡/段事件（kind 经 as_str 编码为 TEXT）。
     pub fn insert_event(
         &self,

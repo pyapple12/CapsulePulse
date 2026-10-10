@@ -54,3 +54,11 @@ export interface WeekDay {
   /** 当日在岗秒数 */
   duty_secs: number;
 }
+
+/** workday_total 返回体（镜像 core/src/commands/workday.rs WorkdayTotal）：总日均聚合 */
+export interface WorkdayTotal {
+  /** 全历史工作总秒数 */
+  work_secs: number;
+  /** 有数据天数（当日存在打卡/计时记录） */
+  days: number;
+}

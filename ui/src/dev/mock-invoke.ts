@@ -5,13 +5,20 @@
  * 种子数据对齐 design 实验场演示态（在岗计时中 / 阈值 50 / 自动下班 8h / 有统计）。
  */
 
+/** MM-DD 标签（周卡日期列，与后端 WeekDay.date 同格式） */
+function mmdd(d: Date): string {
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** 命令路由表：cmd → 返回值（同步值直接返回，异步语义由 invoke 包装） */
-function routeCommand(cmd: string): unknown {
+function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
   // 今日起点 09:00（本地时区），运行中累计到当前时刻
   const now = Date.now();
   const todayStart = new Date();
   todayStart.setHours(9, 0, 0, 0);
   const elapsedMs = Math.max(0, now - todayStart.getTime());
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
 
   switch (cmd) {
     case "session_status":
@@ -34,20 +41,32 @@ function routeCommand(cmd: string): unknown {
           },
         ],
       };
-    case "week_detail":
-      // 近五日相对今天生成（硬编码日期会随时间失真）；样式：越近工作越多，今日为部分累计
-      return [0, 1, 2, 3, 4].map((i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (4 - i));
-        const label = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        const work = i === 4 ? Math.floor(elapsedMs / 1000) : 7_200 + i * 1_200;
+    case "week_detail": {
+      // 自然周（PL022）：查看日所在周固定周一~周日 7 行，"今"随真实星期、未来日零值
+      const offset = Number(args?.offset ?? 0);
+      const view = new Date(todayMidnight);
+      view.setDate(view.getDate() + offset);
+      const monday = new Date(view);
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      const todayKey = mmdd(todayMidnight);
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(monday);
+        d.setDate(d.getDate() + i);
+        const key = mmdd(d);
+        const isFuture = d.getTime() > todayMidnight.getTime();
+        const isToday = key === todayKey;
+        const work = isFuture ? 0 : isToday ? Math.floor(elapsedMs / 1000) : 7_200 + i * 1_200;
         return {
-          date: label,
-          weekday: ((d.getDay() + 6) % 7) + 1,
+          date: key,
+          weekday: i + 1,
           work_secs: work,
-          duty_secs: work + 1_800,
+          duty_secs: isFuture ? 0 : isToday ? work : work + 1_800,
         };
       });
+    }
+    case "workday_total":
+      // 总日均（PL022）：全历史工作总和 ÷ 有数据天数（演示态常数）
+      return { work_secs: 93_600, days: 12 };
     case "get_settings":
       return {
         threshold_min: 50,
@@ -86,7 +105,7 @@ export function installMockIpc(): void {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
     plugins: {},
     nextSeq: 0,
-    invoke: async (cmd: string) => routeCommand(cmd),
+    invoke: async (cmd: string, args?: Record<string, unknown>) => routeCommand(cmd, args),
     transformCallback: (cb: unknown) => {
       seq += 1;
       (window as unknown as Record<string, unknown>)[`_${seq}`] = cb;

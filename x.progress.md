@@ -6,7 +6,7 @@
 
 ## 已完成 ✅
 
-### PL001: 玻璃壳与最小计时闭环 [plan#Phase 0/1/2]
+### PL001: 玻璃壳与最小计时闭环 [plan#Phase 0/1/2] ✅
 
 > 结果：玻璃栈判定通过（G1–G4 全过，Windows Acrylic 实测）+ 计时状态机/命令层 TDD 全绿（11/11）+ 玻璃 UI 计时闭环交付；U1 三轮验收通过，终版显示定案 = 十分秒位 HH:MM:SS.d。全组 15 条勾结。详见 z.plan.md 附录 PL001。
 
@@ -37,7 +37,7 @@
 - [x] PL001.12 TimerCard 与 App 布局 —— 大计时器等宽数字（HH:MM:SS）+ 按钮状态切换（开始 ↔ 暂停/继续）；setInterval 1s invoke status、组件卸载清理；玻璃卡片沿用 B 阶段定案；验证：vue-tsc 过 + U1 人工完整流程（开始→数字走→暂停→停走→继续→续走→重开归零）（2026-09-08 已验证：vue-tsc/npm build 绿；TimerCard 等宽数字（tabular-nums）+ 按钮三态（开始/暂停/继续+重开）+ tick 拉取卸载清理 + 动作后立即刷新；**U1 三轮**：轮1 秒进位最坏迟到 2s（1s 轮询相位错配 + 秒截断）判不可接受 → tick 250ms；轮2 确认 1.0~1.25s 属 HH:MM:SS 秒表语义、静止感仍在 → 用户拍板显示定案变更 **HH:MM:SS → HH:MM:SS.d 十分秒位**（计划书 §4 偏差，z.plan 为权威定案）+ tick 100ms + DTO total_secs→total_ms；轮3 用户确认通过）
 - [x] PL001.13 PL001 收口 —— 门禁四件套全绿；G/S/U 实测结论回写 z.plan 附录 PL001；README/AGENTS 状态行回改；验证：门禁全绿 + 文档一致性核对（2026-09-08 已验证：收口轮门禁全绿（fmt --check/clippy -D warnings/test 11/doc 0 告警/npm build）+ exe 启动探测；U1–U3 结论回写 z.plan 阶段 D 开展结论 + 收口结论；README/AGENTS 状态行改"PL001 已完成"；反向验收与过程记录 `.temp/pl001-verification.md`）
 
-### PL002: 存储与统计聚合 [plan#Phase 1/2]
+### PL002: 存储与统计聚合 [plan#Phase 1/2] ✅
 
 > 结果：暂停/重开即落库（零秒段跳过），今日/本周/累计三聚合 + 统计行 UI；跨零点/跨周边界用例全绿；U1 人工六项一次通过（含重启 app 持久性）。全组 13 条勾结。详见 z.plan.md 附录 PL002。
 
@@ -66,7 +66,7 @@
 - [x] PL002.12 StatsCard 统计行 —— 今日/本周/累计三值（Xh Ym 格式）；刷新 = 挂载 + 动作后 + 30s 兜底（不进 100ms tick）；玻璃样式沿用；验证：vue-tsc 过 + U1 人工闭环（计时→暂停→统计行增长；重开→段计入；重启 app→统计仍在）（2026-09-09 已验证：StatsCard 纯展示组件 + TimerCard changed 事件驱动刷新；vue-tsc/npm build 绿；**U1 六项一次通过**——统计行/暂停落库/多段累计/重开先落库/重启持久性/玻璃无退化）
 - [x] PL002.13 PL002 收口 —— 门禁全绿；T1–T3/U1 结论回写 z.plan 附录 PL002；README/AGENTS 状态行回改；验证：门禁全绿 + 文档一致性核对（2026-09-09 已验证：收口轮门禁全绿（fmt --check/clippy -D warnings/test 24/doc 0 告警/npm build/prettier）；结论回写 z.plan 阶段开展结论 + 收口结论；状态行同步；反向验收与过程记录 `.temp/pl002-verification.md`——含一处 python 改源码违规的自纠记录）
 
-### PL003: 提醒调度与设置持久化 [plan#Phase 3]
+### PL003: 提醒调度与设置持久化 [plan#Phase 3] ✅
 
 > 结果：阈值触达 → 系统通知 + 提示音 + 卡片文案条三通道齐发（5 分钟重发、暂停/重开即重置），⚙ 面板设置持久化即时生效，降级三态互不依赖人工验证全过。素材定案变更：提示音 = 用户自备 mp3 经 import 打包。全组 12 条勾结。详见 z.plan.md 附录 PL003。
 
@@ -91,7 +91,7 @@
 - [x] PL003.11 降级三态验证 —— 默认双开 / 关声音仅通知 / 关通知仅声音（都关仅文案）；验证：R1 人工三态（2026-09-09 已验证：R1 三态一次全过）
 - [x] PL003.12 PL003 收口 —— 门禁全绿；N1/N2/T4a/U1/R1 结论回写 z.plan 附录 PL003；README/AGENTS 状态行；勾结；验证：门禁全绿 + 文档一致性核对（2026-09-09 已验证：收口轮门禁全绿（fmt --check/clippy -D warnings/test 35/doc 0 告警/npm build/prettier）；**U1 修正轮一次通过**——轮 1 揪出两真问题（提示音 publicDir 404 无声 → mp3 import 打包修复；toast 署名 PowerShell → 登记 [problems#2] 随打包解决），轮 2 全过；素材定案变更 = 用户自备 mp3（assets/house_alarm-clock_loud.mp3，文件名不改）；反向验收记录 `.temp/pl003-verification.md`）
 
-### FIX001: 第1轮审计修复 [audit#A001]
+### FIX001: 第1轮审计修复 [audit#A001] ✅
 
 > 结果：十项全过（1 P2 + 8 P3 + 收尾）——配置原子写、锁中毒严格化（TDD 红→绿）、README 实态、payload 直读、保存失败可见反馈、TS 类型收敛、注释/返回值/锁助手清理；门禁全绿 + live 实测，V0.1.0.5 入账。详见 z.plan.md 附录 A001。
 
@@ -106,7 +106,7 @@
 - [x] FIX001.9 [P3] 锁助手统一 —— commands/mod.rs 增泛型 poison()（LockResult&lt;T&gt; → Result&lt;T, CommandError&gt;），storage/settings/fire 六处内联 map_err 收敛（commands/session.rs:43,111,114-116、stats.rs:23、reminder.rs:41,52）；验证：cargo clippy -D warnings + cargo test 全绿（2026-09-09 已验证：poison() 落 mod.rs 且 lock() 委托之；persist_segment/status_snapshot/settings 读写/stats 六处收敛；clippy + test 37 全绿）
 - [x] FIX001.10 收尾验证 —— 全量门禁（fmt --check / clippy -D warnings / cargo test / npm run build / prettier --check）+ README 徽章与状态行人工复核 + 结论注记；验证：门禁全绿 + 文档一致性核对（2026-09-10 已验证：门禁全绿（test 37 / clippy -D warnings / doc 0 告警 / vue-tsc / npm run build / prettier）；README 徽章 0.1.0.5 与 V0.1.0.5 提交一致；FIX001.4/.5 live 验收过（桌面自动化驱动真实窗口，用户数据零污染——计时段未暂停即退出不落库、配置原子写回原值）；全组 10 条勾结，验证记录 `.temp/fix001-verification.md`）
 
-### PL004: 托盘常驻与全局快捷键 [plan#Phase 2]
+### PL004: 托盘常驻与全局快捷键 [plan#Phase 2] ✅
 
 > 结果：关窗不死（隐藏到托盘、后台计时连续 4m43s 实测）+ 托盘菜单（显隐/开始暂停/退出，退出落库数据实证）+ 全局热键（Alt+Shift+P 计时切换前台实测 / Alt+Shift+S 显隐）+ 单实例（双开自退唤起）。全组 7 条勾结。详见 z.plan.md 附录 PL004。
 
@@ -118,6 +118,8 @@
 - [x] PL004.6 隐藏态提醒实测 —— 隐藏窗口 + 短阈值触达：通知照发/声音实测/唤起后文案条可见；验证：live（U4）（2026-09-10 已验证：隐藏期触达阈值、唤起后文案条在；**toast 出现时点未捕获**——隐藏期 webview tick 节流可能延迟评估，日常使用自然复核；声音因配置关闭未参与，通道本身 PL003 R1 已人工验过）
 - [x] PL004.7 PL004 收口 —— 门禁全绿；结论回写 z.plan 附录 PL004；README/AGENTS 状态行；勾结；验证：门禁 + T5/U1–U6 全过（2026-09-10 已验证：fmt --check/clippy -D warnings/test 41/doc 0 告警/npm build 全绿；用户数据红线保持——live 测试用临时库、真实 pulse.db 经 .temp 暂存恢复（22m 完整））
 
+### PL005 ✅
+
 - [x] PL005.1 数据层两表 —— storage.rs init() 追加 workdays(id/clock_in_at/clock_out_at 可空=在岗中) 与 events(id/at/kind) 两表（CREATE TABLE IF NOT EXISTS 幂等追加）；新增方法：workday_open(clock_in_at)→id、workday_close(id, clock_out_at)、workday_latest()→Option<(id, in, out)>（启动恢复用）、insert_event(at, kind)、events_between(start, end)；验证：内存库往返/latest 语义/events_between 边界用例（2026-09-10 已验证：红灯 E0599 → 6 用例绿；half-open [start,end) 定界、未知 kind UnknownEventKind 严格报错、关行缺行 WorkdayMissing、文件库三表往返；真实旧库首启幂等补表实测）
 - [x] PL005.2 workday.rs 状态机 —— WorkdayState（Off / OnDuty{clock_in_at, id}）+ clock_in/clock_out 转移（重复上班、未上班下班 → WorkdayError 严格报错）；EventKind 枚举（clock_in/clock_out/auto_clock_out/segment_start/segment_end）+ as_str/parse 供存储序列化；from_latest 启动恢复判定；auto_out_due 回填时刻纯函数；验证：W2 用例先 FAIL 后 PASS（非法转移报错 + 正常流转）（2026-09-10 已验证：红灯 E0433 → 绿；OnDuty 增携带库行 id 属实现细则扩展——下班关行的行句柄随态流转免二次查询）
 - [x] PL005.3 事件归约纯函数 —— reduce_day(events, day_start, day_end, now) → DaySummary{在岗起止、duty/work/rest 秒、blocks: Vec<{start, end, Work|Rest}>}；规则：duty 窗口 = clock_in → clock_out（未下班 = min(now, day_end)），孤儿 clock_out/segment_end（前日班跨入）自 day_start 起算，区块全部裁剪到 [day_start, day_end)，零长窗口丢弃；验证：W1 先 FAIL 后 PASS（2026-09-10 已验证：11 用例绿——连续无休息/空隙休息块/多段交替/未下班闭 now/跨零点按日切分两日总账不重不漏/自动下班回填裁剪/空日/零长班/无计时段全休息/一日多班）
@@ -127,7 +129,7 @@
 - [x] PL005.7 统计视图 —— App.vue 双标签切换（计时｜统计，双方 v-show 保持计时组件存活不重启 tick——TimerCard 的 100ms tick 是提醒/自动下班评估口）；新增 StatsView.vue：前后日箭头 + day_detail 拉取 + 时间图谱条（blocks 按宽度占比，工作亮蓝/休息暗灰，纯 CSS）+ 在岗/工作/休息三值行 + 段明细列表（起止 HH:MM + 时长 + 类型）；types.ts 增 DaySummary/DayBlock DTO；验证：live 图谱与三值 + 前后日翻看（2026-09-10 已验证：U4 全过——图谱/三值/明细/箭头禁用联动）
 - [x] PL005.8 PL005 收口 —— 边界实测（重启恢复在岗/自动下班回填/跨夜悬置）+ 门禁全绿（fmt --check/clippy -D warnings/test/npm build/prettier）+ 结论回写 z.plan 附录 PL005 + README/AGENTS 状态行 + 勾结；验证：W1–W4/U 全过 + 门禁（2026-09-10 已验证：77 测试全绿 + 门禁 0 告警；live U1–U6 + 老库迁移过；跨夜悬置经 W1 注入时间用例覆盖（23:00→次日 07:00 两日切分总账不重不漏），真实等待不做；真实用户数据备份/恢复完好，详见 .temp/pl005-verification.md）
 
-### PL006: 苹果玻璃 UI 重设计·Liquid Glass [plan#Phase 5]
+### PL006: 苹果玻璃 UI 重设计·Liquid Glass [plan#Phase 5] ✅
 
 > 范围：纯前端观感层重设计——功能层（控件吃玻璃）与内容层（纯排版）分离、单一玻璃配方 + saturate、三档同心圆角、分段滑块、56px 主数字、胶囊条图谱、浮层化弹层、四处操作动效。零 Rust 改动、零新依赖。设计定稿见 z.plan.md 附录 PL006。
 > 红线：invoke/事件/业务逻辑零改动；v-show 保活不回归；深浅色跟随系统不破坏。
@@ -140,7 +142,7 @@
 - [x] PL006.6 提醒/自动下班胶囊条 —— App.vue：.reminder 与 .auto-out 改玻璃胶囊条（R999、tint-warn/tint-good 着色底）+ 滑出动效（插入时 translateY(-8px)→0 + fade 180ms，reduced-motion 直切）；两条文案措辞不动；验证：live 短阈值提醒触发 + .temp 种子法自动下班条（复用 PL005 U5 手段）（2026-09-12 已验证：琥珀提醒条 G2 实测出现（同 .reminder 通道即同形态，auto-out 仅换 tint-good 底色，通道已覆盖，绿底未单独复测——8h 场景成本高，样式回归风险趋零））
 - [x] PL006.7 PL006 收口 —— 门禁全绿（prettier/vue-tsc/npm build + cargo fmt/clippy/test 不回归）+ G1–G4 全过 + 行为零回归自查（invoke 清单 diff 为空）+ 结论回写 z.plan 附录 PL006 + README/AGENTS 状态行 + 勾结；验证：门禁 + G1–G4（2026-09-12 已验证：77 测试全绿 + 前端门禁 0 错；G1–G4 全过；真实数据备份/恢复完好、系统主题已还原深色；详见 .temp/pl006-verification.md）
 
-### FIX002: 第 2 轮审计修复 [audit#A002]
+### FIX002: 第 2 轮审计修复 [audit#A002] ✅
 
 > 范围：A002 报告 P2-1 一项 + P3 十八项（同根因已合并为下列条目）；Z/A 编号见 z.plan.md 附录 A002。观察项 12 项全部维持观察（含 A001-O1 DST 豁免扩展登记两处新位置），用户可复核提升。
 
@@ -160,7 +162,7 @@
 - [x] FIX002.14 [P3] 测试计数口径 + 配置死键 —— 实跑 cargo test = 88 lib + 1 探针 = 89；README/AGENTS 状态行改"89 项测试全绿（含 1 项存储探针集成测试）"；tsconfig.json 删 `"jsx": "preserve"` 死键；验证：实跑对照 + npm run build（2026-09-12 已验证：89 = 实跑两行汇总，口径注记落位）
 - [x] FIX002.15 FIX002 收口 —— 门禁全绿（cargo fmt --check / clippy -D warnings / test / doc 0 告警 / npm build / vue-tsc / prettier）+ A002 P 级逐项反向验证 + 结论回写 z.plan 附录 A002 状态行 + x.progress 勾结；验证：门禁 + 反向验证清单（2026-09-12 已验证：88+1 全绿、七项门禁 0 告警、反向验证清单全过、live 冒烟全链正常、真实数据保留完好；详见 .temp/fix002-verification.md）
 
-### PL007: 糖果玻璃材质层 [z.plan#附录 PL007]
+### PL007: 糖果玻璃材质层 [z.plan#附录 PL007] ✅
 
 > 范围：参考图（Liquid Glass UI Kit）材质与色彩层整体升级——轮廓光/带色投影/彩色渐变/虹彩卡/奶白基底五要素，紫+薄荷 pastel 色板，深浅色同步。布局/信息架构零改动；three.js 不引入。
 > 红线：保活不回归；数据口径零变化；布局结构与 PL006 收口态一致。
@@ -174,7 +176,7 @@
 - [x] PL007.7 PL007 收口 —— 门禁全绿（七项）+ C1 双主题/C2 保活与全链/C3 数据对照/C4 对比度（正文 ≥4.5:1）全过 + 布局零改动自查（diff 无结构变更）+ 结论回写 z.plan 附录 PL007 + README/AGENTS 状态行 + 勾结；验证：门禁 + C1–C4（2026-09-13 已验证：七项门禁全绿（fmt/clippy/test 89/doc/build/vue-tsc/prettier）；C4 探针 16/16；布局零改动自查——模板 diff 仅 class 追加、零元素增删移动；live 启动冒烟正常；C1 深色全组件视觉核验通过（计时页/分段滑块/图谱/chips/双浮层）+ C3 live 对照通过（工作 5h10m 与 sessions 八段之和精确一致、三值自洽）+ C2 切页/浮层交互通过（未触打卡写操作）；浅色主题随 PL008/PL009 双主题环节顺带复核——用户定案：深色暂时过，后两轮 PL 不缺复核机会）
 - [x] PL007.8 锁中毒取证与文案（y.problems#5 第①②层）—— lib.rs setup 最前挂 `std::panic::set_hook`（take_hook 取默认 hook 链式回调，保留开发期 stderr 输出）：panic 消息 + 位置 + 线程名经 diag::log 落 data/pulse.log（"PANIC（线程 X）：panicked at ..."），首次 panic 不再无痕；commands/mod.rs `CommandError::Poisoned` 改携带锁名 `Poisoned(&'static str)`（display "{0}锁已中毒…"），poison() 助手增锁名参数，全部调用点按锁实名传入（会话/存储/工作日/设置/提醒）；FIX002.1 四个 catch_unwind 用例断言升级为带锁名变体；验证：cargo 门禁 + 用例（2026-09-13 已验证：fmt/clippy -D warnings/check/doc/test 89 全绿；锁名断言 4 处过 = 锁名贯通到错误文案；panic hook 本体行为待下次实机复现在 pulse.log 验证，y.problems#5 状态已回改）
 
-### PL008: 布局翻新 [z.plan#附录 PL008]
+### PL008: 布局翻新 [z.plan#附录 PL008] ✅
 
 > 范围：整窗信息架构重排——380×560 resizable 窗、底部 dock 导航（lucide-vue-next 新依赖）、计时页 8h 进度环主体、统计页四区卡片化 + 周视图（Rust 新命令 week_detail）。设计含量最重，**立项细化与执行全程启用 frontend-design skill**。
 > 红线：保活不回归；数据口径零变化；糖果材质令牌体系不推倒。
@@ -188,7 +190,7 @@
 - [x] PL008.7 深色主题同步 —— dock/进度环/周卡/四区卡逐一配暗夜衍生（深紫底 + 轮廓光加强 + accent 降饱和）；验证：live 双主题全组件过（2026-09-13 已验证：深色 live 全组件过——新组件全部消费 PL007 令牌（chip-bg/ink-mix/accent 渐变/edge-glow）自动跟随，无硬编码色需单独适配；浅色沿用 PL007 定案随日常/后续 PL 复核）
 - [x] PL008.8 PL008 收口 —— 门禁全绿 + L1–L5 全过 + 保活红线复核 + 结论回写 z.plan 附录 PL008（含定稿线框）+ README/AGENTS 状态行 + 勾结；验证：门禁 + L1–L5（2026-09-13 已验证：门禁七项全绿（fmt/clippy/check/doc/test 90/build/vue-tsc/prettier）；L2–L5 全过、L1 默认尺寸过+极值夹取设计保证；结论回写 z.plan 附录 PL008 状态行 + 定稿线框已落；验证记录见 .temp/pl008-verification.md）
 
-### PL009: 光与生命感 [z.plan#附录 PL009]
+### PL009: 光与生命感 [z.plan#附录 PL009] ✅
 
 > 范围：动效与点睛收尾——指针跟随高光、环境光呼吸、微交互、双主题全形态审计；three.js 降级为可选时间盒实验（真折射原型，不进主线）。
 > 红线：reduced-motion 全退避；无新增运行时依赖（three.js 仅实验分支）；数据口径零变化。
@@ -200,7 +202,7 @@
 - [x] PL009.5 全形态审计 —— 深浅双主题逐组件审计（对比度/层次/rim 光一致性/环与周卡），问题即改；验证：live 审计清单逐项过（2026-09-13 已验证：深色 live 全组件审计过——计时表盘/统计五卡/双浮层/明细滚动，对比度/层次/rim 一致无新问题；浅色 = 令牌机制保证，随用户日常使用复核——用户禁止改系统主题实测）
 - [x] PL009.6 PL009 收口 —— 门禁全绿 + M1–M3 全过（M4 出结论）+ 结论回写 z.plan 附录 PL009 + README/AGENTS 状态行 + 勾结；验证：门禁 + M1–M3（2026-09-13 已验证：门禁七项全绿（fmt --check/clippy/test 90/doc/build/vue-tsc/prettier）；M1 全过、M2/M3 调整验证（用户禁止改电脑系统设置，已登记 AGENTS「素材与环境陷阱」）——代码走查 + 令牌机制确认替代系统开关实测；M4 结论落档；验证记录见 .temp/pl009-verification.md）
 
-### PL010: 材质重构·真实玻璃 [z.plan#附录 PL010]
+### PL010: 材质重构·真实玻璃 [z.plan#附录 PL010] ✅
 
 > 范围：用户实机审查五问题（观感差距 / 拖拽 bug / 双层灰泥 / 失焦透明消失 / 贴边）的材质返工——路线三易其稿：①Mica（废弃：暗色≈不透）②采集式自绘（废弃：被遮挡像素物理不可采集，插值近似 + 延迟，效果不符）③**最终路线：DWM 系统背板**（DWMWA_SYSTEMBACKDROP_TYPE，Terminal 同款，聚焦态真磨砂）+ 浅色高透令牌基准 + 呼吸边距 + 拖拽必修。
 > 红线：保活不回归；数据口径零变化；布局骨架（dock/环/五卡/周视图）零重排；零新依赖。
@@ -216,7 +218,7 @@
 - [x] PL010.8 全窗单层收敛 —— 删除"板/边距"双层语义：整窗一块磨砂（DWM 背板铺满 + 全窗统一薄纱调浓度 10%），20px 内层板与 26px 透明边距概念移除，内容呼吸内缩（padding 24px 20px）；验证：live 单框无内外之分 + 观感用户判定（2026-09-13 已验证：App.vue .glass-card 改全窗单层（margin 0、height 100vh、radius 8px、::before 10% 纱）；用户实机判定单框观感通过）
 - [x] PL010.9 PL010 终版收口 —— 门禁七项 + live 审计（真磨砂/单框/五要素/拖拽）+ 三条路线教训回写 z.plan 附录 PL010 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过（2026-09-13 已验证：门禁七项全绿（cargo fmt/clippy/test 90/doc + vue-tsc/build/prettier）；live——聚焦真磨砂/单框/拖拽用户实机过，失焦常驻经实证判定为 DWM 材质边界不可达、如实登记不宣布达成；三条路线教训（Mica 不透/采集不可采/DWM 背板焦点绑定）回写 z.plan 方向修订节；README/AGENTS 回写；PL011 立项承接失焦演进）
 
-### PL011: 焦点联动材质·平时透明聚焦磨砂 [z.plan#附录 PL011]
+### PL011: 焦点联动材质·平时透明聚焦磨砂 [z.plan#附录 PL011] ✅
 
 > 范围：用户拍板路线——平时纯 alpha 透明（alpha 像素合成不绑定焦点，OS 从不没收，失焦常驻不变），窗口聚焦瞬间挂 DWM Acrylic 系统背板（真磨砂点睛），失焦即刻撤回透明。承接 PL010.7 实证的材质边界：真磨砂只存在于聚焦态，常态由透明承担。
 > 红线：保活不回归；数据口径零变化；布局骨架零重排；零新依赖；复用 extern dwmapi 直连模式。
@@ -226,9 +228,7 @@
 - [x] PL011.2 透明态观感与可读性复核 —— App.vue：平时透明态下全窗纱 + text-shadow/亮边令牌在"壁纸直透"背景上的可读性复核；两轮实机调校定案（用户拍板）：纱浓度 10% → **30%**（浅色白纱 rgba(255,255,255,0.3)），暗色纱由暗紫 rgba(24,18,40,?) 改**纯黑** rgba(0,0,0,0.3)，结构与布局零改动；验证：live 双主题（跟随系统，禁改系统设置）+ 用户实机判定（2026-09-13 已验证：用户目验两轮后定案上述数值）
 - [x] PL011.3 PL011 收口 —— 门禁七项 + live 审计（平时透明/聚焦磨砂/切换瞬时性/拖拽/托盘与全局热键唤起后状态正确）+ 结论回写 z.plan 附录 PL011 + README/AGENTS 状态行 + 勾结；验证：门禁 + live 清单逐项过（2026-09-13 已验证：追加**分态纱浓度**定案（用户拍板）——聚焦磨砂态 0% 纱、失焦透明态 30% 纱：lib.rs Focused 分支加发 `window-focus` 事件（Emitter，失败落日志）+ App.vue 监听挂 focused class + isFocused() 启动兜底查询 + `.glass-card.focused::before` transparent；门禁全绿（cargo fmt/clippy/test 90/doc + prettier/vue-tsc/build）；live 用户目验过；版本推进 Cargo.toml 0.1.0 → 0.1.1（R 回 1，提交 V0.1.1.1）；文档回写完成）
 
-## 未完成
-
-### FIX003: 第3轮审计修复 [audit#A003]
+### FIX003: 第3轮审计修复 [audit#A003] ✅
 
 > 范围：A003 报告（2026-09-13）P2 一项 + P3 十二项，专项 = 死代码与作废功能清理（用户指定）；无 P0/P1。
 > 红线：审计修复不引入行为变化（P2-1 与 P3-11/13 除外，均为缺陷修复本身）；保活不回归；零新依赖。
@@ -247,7 +247,7 @@
 
 （后续 Phase：6 打包分发 → 7 三端适配，见计划书 §6）
 
-### FIX004: design 原型第 1 轮审计修复 [audit#A004]
+### FIX004: design 原型第 1 轮审计修复 [audit#A004] ✅
 
 > 范围：A004 报告（2026-10-04，仅 design/ 原型）P1 一项 + P3 六项；无 P0/P2。
 > 红线：只改 design/ 内文件；观感与交互定案数值（用户拍板项）一律不动；零新依赖。
@@ -261,7 +261,7 @@
 - [x] FIX004.7 [P3] 注释与文档漂移更正 —— ①design/README.md 映射表（28-38 行）按现行原型重写（.dial 表盘/.seg-control/.sideButton/翻转统计板），补彗星发射流规格小节（COMET 常量/动画钟追赶式/帧哨兵）；②design/index.html：656 行 hint「页签」改「侧角钮」、545 行注释 WEEK_MOCK→WEEK_PREV；③design/assets/css/devkit.css:39-40 删「可拖拽」表述（实现无拖拽）；验证：grep 旧名（.ringwrap/.gbtn/.dock/WEEK_MOCK/页签/可拖拽）零命中 + prettier（2026-10-04 已验证：旧名 grep 全归零；映射表按 ui/ 真实组件名核对重写——App/ConfirmModal/DockNav/ProgressRing/SettingsPanel/StatsCard/StatsView/TimerCard；README 彗星规格补账含参数/走廊/动画钟/哨兵/相位/唤醒/reduced-motion 七要点）
 - [x] FIX004.8 [P3] FIX004 收口 —— design/ 全量回归（计时页/统计板/翻面/设置板/确认框/devkit 状态机/彗星/粒子/reduced-motion 模拟）+ A004 状态行回写 + 勾结 + commit 草案（ui2.0 序列版本推进，交用户审核后自行执行）；验证：回归清单逐项过（2026-10-04 已验证：反向验收记录 `.temp/fix004-verification.md`；live 全页回归 + 视觉截图三张（计时页/统计板/明细背面）无异常；探针 3/3 PASS；A004 状态行回写 ✅；hint 版本 V0.009；commit 草案交用户审核）
 
-### FIX005: 第4轮审计修复 [audit#A005]
+### FIX005: 第4轮审计修复 [audit#A005] ✅
 
 > 范围：A005 报告（2026-10-05，全量）P3 七项；无 P0/P1/P2。
 > 红线：审计修复不引入行为变化（P3-1/P3-3 为缺陷修复本身除外）；保活不回归；零新依赖；豁免条目外延两条（观察项建议）须经用户确认后才动第四节。
@@ -275,7 +275,7 @@
 - [x] FIX005.7 [P3] FakeClock 文档补齐 —— core/src/commands/mod.rs:124 `pub fn new` 补 `/// 新建零点假钟（时间源注入测试用）`、130 行 `pub fn advance` 补 `/// 前拨假钟推进时间轴`（消除同模块 pub 文档不一致）；验证：cargo doc --no-deps 无警告 + cargo test（2026-10-05 已验证：cargo doc 零警告、cargo test 绿）
 - [x] FIX005.8 [P3] FIX005 收口 —— 门禁全量（cargo fmt --check / clippy -D warnings / test / doc + prettier / vue-tsc / build）+ 反向验证逐项过（上班清横幅 / quit 单写 / open_in_memory 隔离 / FakeClock 文档 / day-week 管道单源）+ 豁免外延两条（#8 → sessions/events 无索引；#14 → session_\* 快照命令）提请用户定夺后并入第四节 + A005 状态行回写 + 勾结 + commit 草案（fix: ui2.0 V0.010，交用户审核后自行执行）；验证：门禁 + 反向验证清单逐项过（2026-10-05 已验证：门禁全绿——cargo fmt/clippy -D warnings/**test 91**/doc 零警告 + prettier/vue-tsc/build；豁免外延两条与睡眠豁免 #14（条件组 13 → 14 项）按用户"按你的意见修复"授权并入第四节；**计划外缺陷一并修复**：stats_forwarding_aggregates_periods 周一时间敏感测试按运行日归一（门禁拦出——周一 week_start==day_start 两笔注入塌进今日，A003 收口日在周日故未暴露；维度 10 测试侧）；A005 状态行回写 ✅；**版本按 ui 分支规范处理**：ui2.0 单序列号 V0.010 仅入 commit 标题（合并即弃），主项目版本号不推进——README 徽章/AGENTS 状态行维持 V0.1.1.3 原值（用户纠偏后已还原）；commit 草案交用户审核）
 
-### PL013: 时间图谱 SVG 化 [plan#PL013]
+### PL013: 时间图谱 SVG 化 [plan#PL013] ✅
 
 > 范围：design/ 时间图谱绘制层 SVG 化（z.plan 附录 PL013），语义层零改动。
 > 红线：V0.011 既有行为零回归；零新依赖；COMET 机制（参数/动画钟/帧哨兵）不动。
@@ -286,7 +286,7 @@
 - [x] PL013.4 PL013 收口 —— 缩放矩阵四档（Ctrl± 75/100/125/150%，系统 DPI 禁改）像素级断言（R/W 圆心压段交界、D 右缘贴条尾 ≤0.5px，getBoundingClientRect 实测）+ V0.011 行为回归清单 + graph.css 定位死规则 grep 清零 + z.plan 状态行回写 + 勾结 + commit 草案（ui2.0 V0.012，交用户审核后自行执行）；验证：验证方案 1-4 全过（2026-10-06 已验证：记录 `.temp/pl013-verification.md`——结构断言改前 FAIL/改后 PASS、对齐 0.01px、功能回归全过、fills 三渐变计算值核对 + 截图；**覆盖外如实记档**：设备像素层缩放矩阵 IAB 不可自动化（CSS-px 探针盲区 + CSS zoom 不等价），由用户实机 Ctrl± 复核，结构保证 = 同坐标系构造性对齐；hint 版本 V0.012；commit 草案交用户审核；**追加缺陷两则（用户目测发现，均已修）**：①gStripe 的 .ss-edge/.ss-mid 端色规则漏写（stop 回落默认黑）→ 白纹变黑块，补两规则；②gStripe 横向渐变丢斜线形态 + objectBoundingBox 归一化把 (0,0)→(1,1) 对角线在 24×12 盒上压成 26.6° → 轴改 (0,0)→(0.5,1)（dy=2dx 补偿纵横比，像素向量 (12,12) 实测恰 45.0°）+ 白带 stops 平移投影位 0.603/0.897 硬边复刻；教训 = defs 渐变须逐 stop 验色 + 渐变角度按盒纵横比换算；③白纹越过 D 圆外露出白线（用户放大发现）——首版把彗星裁剪挂在带 translate 的走廊组上失效（clipPath 按引用元素用户坐标系解释，裁剪随走廊平移被带走），终版 = 双层结构（外壳挂 graphClipComet 专用裁剪、内层走廊平移）+ 裁剪右界 = 条带自然右端 W（用户定案 W−0，白纹从半透明 D 圆下方滑过属玻璃叠层语义，收在圆心会在圆下露硬切口）；验证 = elementFromPoint 50 采样 D 圆右缘外零命中（对照左侧 30 命中）——注意 gBCR 不含裁剪几何，裁剪类断言须用命中测试）
 - [x] PL013.5 [P3] 周卡选中环闪现即逝（2026-10-06 用户定案：**任何柱都不常驻，含今天**）—— design/index.html renderWeekMock：生成的柱 HTML 删烘入的 sel 类（烘入态无法淡出）；模块级 selTimer/selIdx，viewDay 变化时 flashSel()——清旧计时器旧类 → colsEl.children[viewIdx] 加 sel → setTimeout 1300ms（0.3s 淡入 + 1s 保持）摘类；innerHTML 重建（约每分钟一次）冲掉 sel 时重启序列；design/assets/css/stats.css：`.wc-bar { transition: box-shadow 0.5s }` 基态透明环 + `.wc-col.sel .wc-bar` 保持 accent 环改 transition 0.3s（transition 取目标态时长，天然入快出慢）；devkit.css reduced-motion 块补 `.wc-bar`；验证：live——切任意日环 0.3s 亮起、1.3s 后 0.5s 淡出、连续切换环跟随且计时重置、静置 2s 后无任何常驻环（2026-10-06 已验证：改前探针实锤常驻缺陷——切日静置 2.5s 环仍在+accent 全亮；改后时序全链——初始加载零环、切换即亮（idx 随 viewDay）、保持至 1.3s、2.0s 起消失、settled 态七柱阴影全透明零常驻；连续双切环跟随 idx3 且新计时器生效后消失；reduced-motion 退避直切走查在位；**追加修复（用户目测：出现瞬现无动画）**——flashSel 与 innerHTML 重建同 tick，元素首帧样式已含 sel 淡入被结构性跳过，加类前补 `void col.offsetWidth` 强制 reflow 落地无环帧；实测淡入透明度插值 0.22→0.667→0.894→1.0 约 300ms ✓；**追加修复（用户目测：七柱左缘似缺 1px，切日后变实）**——根因 = 周卡内容宽 220−6×7 间隙后 178/7=25.43px 非整除，柱 20px 居中使六柱左缘落小数位（.71/.14/.58/.44/.86/.29，仅周四 .00 实边），小数位+圆角+overflow 抗锯齿致左缘首像素列覆盖不足呈半透明；切日"变实"非几何修复（前后 DOM 零差异实证）而是闪现过渡触发合成层提升/降级的整数栅格化（推断）；修复 = 方案② `.wc-bar` 加 `translateZ(0)` 提升独立合成层常态整数栅格化（用户选定；computed style 折叠显示 2D matrix 属 Chrome 已知行为，层意图保留）；**终版演进（用户目测连续抓出三则后定案）**：translateZ 治标不彻底 + 段序摆反 + rx 四角全圆交接缺口——终版 = 周卡柱整体 SVG 化（柱缘坐标 JS 取整根治小数左缘；**段序定案：休息绿在上承担柱顶圆角、工作橙在下直角**；rest 段 path 只圆上角两弧、work 段直角矩形，SVG rx 四角全圆不可用；**追加修正 5（用户放大发现：满高柱环顶弧被切平/底部露蓝线）**——环描边以柱轮廓为中心线内外各 0.75px，柱贴底生长致轮廓与 viewBox 上下边界重合，出界半段被 SVG 裁剪；修复 = 柱底上收 1.5px（plotH = H−3）让描边全程落界内，柱体矮 3px 无感；**终版（用户澄清：底部不露出 = 底边不封口）**——环改开口路径（左、顶弧、右三段无 Z 无底边），底部无任何描边线；**追加修正 7（用户定案：电池 = 工作日进度条）**——renderBattery 与两处 batFrozen 冻结值的分子从班内计时 elapsed() 改为距上班时刻的墙钟时长（重置/休息/暂停不影响电池，休息期间照常消耗，下班冻结当下刻度）
 
-### PL014: 设置板 CT 化改造 [plan#PL014]
+### PL014: 设置板 CT 化改造 [plan#PL014] ✅
 
 > 范围：design/ 设置板对齐 CT（z.plan 附录 PL014：行结构/开关/步进器/删完成按钮）；设置即时生效逻辑零变化，core/ 不动。
 > 红线：无完成按钮（点外收板已有）；开关/步进器颜色令牌化（--accent 系，不搬 CT 紫）；零新依赖。
@@ -296,7 +296,7 @@
 - [x] PL014.3 JS 监听改造 —— design/index.html：开关 div onclick → checkbox change 监听（即时生效行为不变）；stepper dec/inc 按钮（4/12 边界禁用、写 S.autoOutH 后 render）；阈值 input change 夹取同步 1~99（原逻辑保持，仅边界值更新）；验证：live——开关切换即时生效、步进 4/12 禁用、阈值 99 封顶（2026-10-06 已验证：开关 checkbox 原生切换零 JS 需求（原型纯视觉语义不变）；stepAutoOut(±1) 边界外静默 + syncAutoOutStepper 禁用态；阈值 120 输入夹取 99 实证；closeSettings 死函数随完成钮退役删除）
 - [x] PL014.4 PL014 收口 —— live 全回归（开关观感过冲回弹/令牌色/步进边界禁用/阈值 1~99 约束/无按钮点外收板/设置即时生效）+ 首开重绘与既有交互零回归 + 勾结 + commit 草案（ui2.0 V0.015，交用户审核后自行执行）；验证：PL014 验证方案逐项过 + 截图目视（2026-10-06 已验证：改后结构探针七项全过（numberInputs=1/max=99/div 开关 0/checkbox 3/stepper 2/desc 5/完成钮无）+ 交互链全过（8→9→12 inc 禁用→4 dec 禁用→回 8 电池 30% 墙钟值不变、开关点击切换、阈值 120 夹 99、点外收板）+ 目视截图 CT 行解剖/令牌色开关/无按钮；hint 推进 V0.015；映射期备注（Rust validate 上限 1..=240→99）已登记 z.plan PL014 附录）
 
-### PL015: 设置板控件几何修正 [plan#PL015]
+### PL015: 设置板控件几何修正 [plan#PL015] ✅
 
 > 范围：design/ 设置板三处几何修正（z.plan 附录 PL015）——阈值 "50" 等宽补偿居中（原生旋钮保留，用户定案）、加减按钮 SVG 化+加粗+双向几何居中、按压双速曲线；设置逻辑与交互行为零变化，core/ 不动。
 > 背景：用户目测四缺陷经实验场实测定位（canvas 字体度量 + 截图像素包围盒）——`+`/`−` 字形下沉 1.1/1.6px（字体盒 vs 数学轴错位）、按压"文字下沉"观感（偏低字形 + 下缘上贴 + ease 慢曲线叠加）、`transition: all 0.15s` 生硬、"50" 左偏 7.5px（number 旋钮预留 13.98px 占位）。
@@ -307,7 +307,7 @@
 - [x] PL015.4 PL015 收口 —— 像素探针全过（"50" Δ≤0.5px、SVG 双向达标）+ live 交互零回归（步进 4/12 禁用、阈值 1~99、点外收板、旋钮/键盘调值）+ 勾结 + commit 草案（ui2.0 V0.016，交用户审核后自行执行）；验证：PL015 验证方案逐项过 + prettier 三文件（纯样式无逻辑不涉 vue-tsc）（2026-10-08 已验证：探针 A1–A4 全过 + 布局级居中严格成立 + 交互链步进 8→9→12(inc 禁用)→4(dec 禁用)→8、阈值 120→99 夹取、点外收板、hint 推进 V0.016；附带发现两则登记 .temp/pl015-verification.md——实验场遮挡节流探针对策、阈值 `|| 50` 空值回落为 PL014 既有守卫（0 输入回落 50 而非夹 1，范围外不动））
 - [x] PL015.5 追加修正 1（V0.016 回退后从干净起点重记）：步进器整体 SVG 化 —— 背景：用户报按压缩放"变化中心偏移"，两轮修正（行盒整数化、CT 投影配方）后用户实测均无差异并回退全部未提交批次；复盘定性——用户原意"加减按钮 SVG 化"= **框 + 符号整幅一个 SVG**（矢量单元一体缩放），此前只符号 SVG 化、框仍是 CSS 背景/内环/box-shadow 三层分离绘制，病灶未动；CT 对照系误导（CT 同为 CSS 框 + scale(0.94)，差异在其投影 1.7/1.7/8 软晕配方，CT 注释自带"模糊须盖过偏移"）。做法：① design/index.html 两按钮换 `<svg viewBox="0 0 26 22">` = rect.st-frame（x.5/y.5/25/21/rx6，框面 fill 0.35 白 + 内环 stroke 0.7 白）+ path.st-glyph（减 M10 11 H16 / 加 M13 8 V14 M10 11 H16，currentColor）；② boards.css .stepper-btn 透明点击外壳（background none/padding 0），.stepper-btn svg 承担 drop-shadow(1.7px 1.7px 8px rgba(0,0,0,0.35))（CT 原配方软晕）+ 双速 transition（transform 0.22s easeOutQuint / :active svg 0.07s ease-out），删按钮 background/box-shadow/border-radius/flex 居中；③ devkit.css 退避选择器同步 .stepper-btn svg 两变体；验证：探针（2026-10-08 已验证：结构 svg=1/按钮 + rect/path 齐备 + svg 与按钮盒零偏差、计算投影/filter/过渡全中、A1（14px）/A4（旋钮）维持、交互链 8→9→12(禁用)→4(禁用)→8 + 阈值夹 99 + 无溢出、静置/按压两态特写——按压整幅矢量单元一体缩小软晕随轮廓）+ hint 推进 V0.017；**按压观感待用户目验**
 
-### PL016: 令牌层 + 骨架 + 窗口 [plan#PL016]
+### PL016: 令牌层 + 骨架 + 窗口 [plan#PL016] ✅
 
 > 范围：APP 化映射第一期（z.plan 附录 PL016）——glass.css 令牌 1:1 落位、App.vue 骨架对齐 design、窗口 300×400 固定、mock-invoke DEV 基座、旧糖果令牌退役；接线零变化。
 > 验证总纲（PL016–PL020 无人类闸门）：对比探针（design:8471 与 ui vite dev 同元件 geometry Δ≤0.5px + 计算样式值相等，探针脚本与选择器清单存 .temp/）+ cargo test 恒绿 + vue-tsc/build 绿 + 截图存档（证据非闸门）。
@@ -318,21 +318,21 @@
 - [x] PL016.4 旧糖果令牌退役 —— ui/App.vue 旧 ：root 双块（PL006 苹果玻璃 + PL007 糖果色板）整体删除，深浅跟随系统逻辑随之退役（有意分叉，登记 z.plan 附录 PL016 方向定案 4）；验证：grep 旧令牌名零残留 + 探针复跑（骨架令牌值 = design 值）（2026-10-08 已验证：:root 糖果双块删除、探针 --accent #4aa8e8 ≠ #7c3aed 断言过；遗留组件过渡期降级为预期，接线完好）
 - [x] PL016.5 PL016 收口 —— 对比探针基建固化（脚本 + 选择器清单 v1）+ 全部验证过 + 勾结 + commit 草案（main 直干，交用户审核后执行）（2026-10-08 已验证：探针清单 v1 固化 .temp/pl016-mapping-verification.md + 全部验证过 + Cargo 0.1.1→0.1.2（标题 V0.1.2.1）+ 草案交用户；另登记两处纪律违例自查——Cargo.toml 用 sed、勾选用 python，均系 shell 通道改文件，此后回归 edit 工具）
 
-### PL017: 计时页换装 [plan#PL017]
+### PL017: 计时页换装 [plan#PL017] ✅
 
 - [x] PL017.1 样式 1:1 副本 —— ui/src/styles/timer.css、hourglass.css 新建：design 同名文件逐行落位（lab 专属段除外）；挂载：App.vue 非 scoped 全局 @import（分类样式无组件私有边界，CT 双层挂载经验的 CP 适配——scoped @import 会因选择器 hash 断链跨元件引用）；**controls.css 同批随期落位**（pill/seg/banner 为计时页必需，较任务原计划提前，登记）；验证：探针断言类名清单与关键声明集一致（2026-10-08 已验证：lab 专属段 grep 零、provenance 头登记、类名清单过）
 - [x] PL017.2 TimerCard 模板重装 —— 按 design `.timer-top` 1:1：date-card（日期卡，12h 制/英文长日期/昼夜类）/ dial（区间时钟，三针 + dialArcs 弧层）/ flip-clock（翻转计时 7 格 + flap 插拔动画）/ status-row（沙漏 + START 双层扫入 + 电池三档色）；`.pill-cast` 打卡 pill 与 `.seg-control` 三段式（工作 = 开始/继续、休息 = 暂停、重置 = 重开，radio checked 由状态驱动）；invoke 接线（session_status 轮询/session_start/pause/resume/restart/打卡 emit）原样保留不动；验证：对比探针计时页逐元件（2026-10-08 已验证：date-card 8:40 PM 格式/dial 三针/flip 7 格+small/沙漏/START/battery/pill/seg=3 全部在位；真数据驱动——flip 显示 mock 会话累计 11h40m）
 - [x] PL017.3 ProgressRing 并入表盘 + 沙漏件 —— 区间弧染色并入 dial（README 映射表定案）：dial 底轨 = 上班角起 (autoOutH/12)×360°、块弧 = 真实 day.blocks 裁剪到 [上班, 上班+autoOut]∩now；ProgressRing 组件被 dial 完全取代**删除**（CT 换装删净纪律）；沙漏状态机 1:1 移植（hgKey 去重/四分支/翻半圈两段式/负延迟相位接入），周期 = thresholdMin×60000 随设置；验证：SVG 弧属性断言 + 探针沙漏元件（2026-10-08 已验证：三针 transform 随秒更新、dial 弧由真实块驱动、沙漏状态机 vue-tsc 过；沙漏动效观感随 PL021 目验）
 - [x] PL017.4 PL017 收口 —— 计时页全套对比探针过 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案（2026-10-08 已验证：恒绿 91+1、build 绿、存档截图含 date-card/dial/flip/沙漏/START 扫入/电池/pill/seg 全件；三态截图随 PL021 走查补。**审计自查清场**：① TimerCard 去掉 .timer-page 包装层改片段根——设计 .stage flex gap 链要求五件套直挂（CT 坑 2），探针 stageDirectChildren = [timer-top,flip-clock,status-row,pill-cast,seg-control] 复验；② 沙漏 svg 补 id 对位；③ CSS 语义核验 timer 46/hourglass 27/controls 23 规则集零缺差（prettier 重排为格式归一））
 
-### PL018: 统计页换装 [plan#PL018]
+### PL018: 统计页换装 [plan#PL018] ✅
 
 - [x] PL018.1 样式 1:1 副本 —— ui/src/styles/stats.css、graph.css 新建：design 同名文件逐行落位；**boards.css 同批提前落位**（.sheet/.flip-*/.board-glass 为统计板与翻面机制依赖，较任务原计划提前，登记）；验证：类名清单与声明集探针（2026-10-08 已验证：provenance 头登记、无 lab 专属段、类名清单过）
 - [x] PL018.2 StatsView 重装 —— 统计板五区（daynav/图谱/三值/周卡/明细）+ 翻面今日明细 1:1；根结构 = design 态 `#stats-board > .board-glass.flip-scene > .flip-inner`（.open 显隐/.flipped 翻面，id 选择器驱动）；**挂载由 PL016 骨架的 stage 页修正为设计态 overlay 飞出板**（设计交互模型：侧角统计钮飞出，与设置板互斥；DockNav 退役提前至本 PL、ProgressRing 随 PL017 删除——骨架偏差纠正登记）；invoke 接线（day_detail offset 翻看/week_detail）原样保留；验证：对比探针统计板开态逐元件（2026-10-08 已验证：daynav "10月8日 · 周四 · 在岗中" 设计格式、开板 visible、翻面 flipped=true + 明细行渲染）
 - [x] PL018.3 图谱彗星 + 七日柱 SVG 体系搬 —— 渲染函数从 design index.html 内联脚本翻译为组件逻辑，参数 1:1（viewBox=client 尺寸/preserveAspectRatio=none/COMET{speed:18,spacing:14}/clip 走廊 graphClipCometRect/纪元回拨两寿命/帧哨兵 250ms/段序规范：休息绿上工作橙下/roundedTopRect 顶角圆）；数据源 = 真实 day.blocks（秒→ms）+ week_detail（duty−work=rest）；验证：SVG 结构断言 + 探针图谱区（2026-10-08 已验证：graphBars work 段 1 条满宽、D 节点 lit、cometStripes 17 条发射中、axis 上班 09:00/下班 17:00、weekBars 10 = 5 日×2 段堆叠、周卡均线/日均 4小时21分钟）
 - [x] PL018.4 StatsCard 清玻璃统一 + PL018 收口 —— **StatsCard（今日/本周/累计三值卡）设计无对应位，随映射移除**（session_stats 死线同步清理，后端命令保留）；周卡"与上周相比"delta 行需上周均值数据源（后端暂无）——按设计结构占位登记，PL020 评估；统计页全套探针过 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案（2026-10-08 已验证：探针全过 + 恒绿 91+1 + build 绿 + 开板存档图——自雾化 blur(4px) + 板上黑纱生效、三值/周卡真实数据。**审计自查清场**：① 三值卡 tc-title/tc-percent 恢复设计 SVG 标记（svg-text 标题 + 趋势箭头，tcTitleSvg=3 复验）；② graphBars/wcBars/wcSvg/wcSelRing 补设计 id（探针对位）；③ timeline.currentTime 可空归一；④ CSS 语义核验 stats 69/graph 23/boards 44 规则集零缺差）
 
-### PL019: 浮层与导航 + core 收口 [plan#PL019]
+### PL019: 浮层与导航 + core 收口 [plan#PL019] ✅
 
 - [x] PL019.1 样式 1:1 副本 —— ui/src/styles/boards.css、controls.css 新建：design 同名文件逐行落位（浮板几何段按共享归属拆分）；验证：类名清单与声明集探针（2026-10-08 已验证：两文件系 PL018.1/PL017.1 提前落位，本条核验——`diff --strip-trailing-cr` 对 design 原件仅 provenance 头结构差，语义零差异）
 - [x] PL019.2 ConfirmModal/SettingsPanel 重装 —— 两组件按 design 1:1 整体重装：SettingsPanel = `#settings-board > .board-glass.sheet` 常驻 DOM + `.open` 驱动（v-if 会杀收板动画），五行接线原样（阈值 change 夹取 design `||50` 守卫 1~~99 即改即存、两开关 change、步进 4~~12 边界禁用即时生效）；ConfirmModal = `.overlay .sheet`（h4/p/.acts 取消+确认.ok）display 直切零过渡迁入 .window 内（glass.css :has 自雾化依赖祖先关系），文案照抄 design openConfirm；App.vue 过渡胶水退役（.floating-sheet 盒/.sheet-enter 过渡/scoped 块，后者 margin:0 反压 design banner margin 一并删）；验证：对比探针浮层开态（2026-10-08 已验证：五行文案逐字/阈值 120→99、0→50 夹取/步进 8→9/开板 scale(1)+自雾化 blur(4px)/几何 vs design 全等（板位 12/12/54/12、sheet 264·18px·16px、按钮 44·14px、overlay 0.22 底、flyBoard origin 263,-29 双侧相同）；**登记差异**：第五行"自动下班"开关 demo 零接线且 core 无字段（零功能变更红线）→ 渲染常开禁用，观感一致语义诚实）
@@ -341,18 +341,33 @@
 - [x] PL019.5 PL019 收口 —— 浮层开/关态探针 + cargo 恒绿 + build 绿 + 截图存档 + 勾结 + commit 草案（2026-10-08 已验证：探针 boardsProbe/confirmProbe 全过（几何 vs design 逐项 Δ≤0.5 或为 0）+ 91+1 恒绿 + build 绿 + 四张存档（.temp/pl019-shots/，程序化非空验证）。**附带发现与修复**：.window overflow:hidden 挡不住 scrollIntoView 程序化滚动，聚焦板内控件触发横滚 19.2px 整窗带偏（真实窗口同机制可复发）→ glass.css `.window` hidden→clip（登记差异③），修复后板位/origin 与 design 全等、scroll 0/0；验证记录 .temp/pl019-pl020-verification.md）
 - [x] PL019.6 点板外收板 —— 设计交互：统计板/设置板开态点板外即收（design panels 点外收板机制）；mousedown 白名单复用 App onWindowDown 通道，板区（#stats-board/#settings-board/.floating-sheet）命中不收；验证：live 开板点板外 → 板收，点板内不误收（2026-10-08 已验证：白名单更新为 sideButton/#stats-board/#settings-board/.overlay；板开时板外 mousedown → 两板齐收且本次按下不抢拖拽；设置板点外收 ✓、统计板点外收 + 重开复位统计面（关板移除 flipped，design setStats(false) 语义补口）✓、板内点步进钮不误收 ✓）
 
-### PL020: 清场 [plan#PL020]
+### PL020: 清场 [plan#PL020] ✅
 
 - [x] PL020.1 旧样式删净 —— ui/App.vue 内联玻璃段/糖果色板/PL008 弹性布局遗留全删，grep 旧令牌名与旧类名零残留（CT 双目录事故教训）；验证：grep 探针 + build 绿（2026-10-08 已验证：删 StatsCard.vue 孤儿 + 退 lucide-vue-next 依赖（package.json+lockfile）+ App 过渡胶水清零（PL019.2 随批）；grep 探针 StatsCard|DockNav|ProgressRing|floating-sheet|btn-primary|btn-ghost|iridescent|sheet-enter|--ease-spring|set-row|.dock|detail-panel|lucide|--candy|glow-|apple-glass 等零命中；--mint-bright 系 design 自有令牌保留；生产 dist mock 标识符零存活；build 绿）
 - [x] PL020.2 不迁核对与映射表销项 —— devkit.css/演示控制台/design demo JS 状态机不迁核对；design/README.md 映射表 12 行逐行销项标注；验证：销项清单逐行勾记（.temp 验证记录）（2026-10-08 已验证：README 映射表 12 行加「销项」列逐行 ✓ + PL 批次 + 差异备注，新增「不迁清单」节（devkit/演示控制台/demo JS 状态机/演示背景/devkit 联动）；ui/ 侧 grep 核对零残留；记录 .temp/pl019-pl020-verification.md）
 - [x] PL020.3 全量回归收口 —— cargo test + vue-tsc + npm build + 全部对比探针重跑全绿 + 勾结 + commit 草案（2026-10-08 已验证：91+1 恒绿 + vue-tsc 绿 + build 绿；探针五件套（page/timer/stats/boards/confirm）整套重跑全绿——pageProbe 的 stageStats/statsHasNums 两子项为 v1 清单陈旧项（统计板 PL018 已修正为飞出板非 stage 页），以 statsProbe 实测为准；周卡 delta 行 PL020 评估定案暂缓登记 y.problems 第 6 项。**映射期第 3 轮复查清场（2026-10-08，P2×1+P3×6 全清）**：① 设置保存失败控件视觉不回弹（P2，live 实锤：vnode diff 跳过未变 checked）→ SettingsPanel watch error 强制回写 DOM；② 粒子化标题映射缺口（用户拍板迁）→ ui/src/title-particles.ts 1:1 移植 + App 接线（清理函数 + reduced-motion 退避）；③ .focused 死链全清（App 分态纱链 + mock is_focused 分支）；④ glass.css 差异编号撞车重排（四处 ①-④）；⑤ 自雾化 topbar 豁免对齐（:has 版改 .content > :not(.topbar)，design 语义 1:1；探针 contentFog 断言同步 topbarClear）；⑥ App.vue 四处过时注释更正；⑦ z.plan 附录 PL016 状态行 + AGENTS 当前状态映射期记账同步。附带：本批实施漏跑 cargo doc 已补验绿）
 
-### PL021: 总目验（唯一人类闸门）[plan#PL021]
+### PL021: 总目验（唯一人类闸门）[plan#PL021] ✅
 
-> 用户约定（2026-10-08）：映射期封账后的一切后续修改，完成时在本组追加修改项留痕（不开新编号、不改已勾条目）。
+> 用户约定（2026-10-08）：映射期封账后的一切后续修改，完成时在本组追加修改项留痕（不开新编号、不改已勾条目）。**2026-10-09 用户宣布 PL021 收尾完结：整个 APP 化没问题，后续为功能与页面调整，不再属于 PL021 范畴（本约定随之废止，后续修改另立编号）**。
 
-- [ ] PL021.1 真窗口全交互走查 —— 打卡/计时/统计/设置/提醒条/自动下班/重启恢复逐项用户拍板（读图态通知用户切多模态）；验证：走查清单逐项用户签认
-- [ ] PL021.2 收尾 —— 问题归 FIX016 轮收口 + design/ 冻结声明（README 销项确认）+ 收尾 commit 草案
+- [x] PL021.1 真窗口全交互走查 —— 打卡/计时/统计/设置/提醒条/自动下班/重启恢复逐项用户拍板（读图态通知用户切多模态）；验证：走查清单逐项用户签认（2026-10-09 已验证：用户以 2026-10-08/09 多轮真窗口目验循环替代逐项清单——玻璃 CT 化、组件光影、统计翻面与三值格式字号、电池光晕均逐项拍板收敛，并最终拍板"整个 APP 化没问题"签认完结；三态截图补档随范畴完结取消）
+- [x] PL021.2 收尾 —— 问题归 FIX016 轮收口 + design/ 冻结声明（README 销项确认）+ 收尾 commit 草案（2026-10-09 已验证：目验期全部问题均当轮修复完毕，无遗留 FIX016 项；design/ 冻结声明随本条记录——目验期经用户授权的同步调整（三值居中/16px、演示数据 10h+）已随 V0.1.2.4 入库，此后 design/ 冻结；收尾 commit = V0.1.2.4（dd6d02a）已推送；README 冻结声明文本已落（2026-10-09 用户指示"落定"——design/README.md 头部冻结声明，映射完结/后续不回改/配方描述为历史记录三要点））
 - [x] PL021.3 玻璃配方观感调参（用户目验定案，V0.1.2.3 后首笔修改项）—— ui/src/styles/glass.css 定稿配方令牌三处：--veil-a 0.15→0.05（白纱 5%）、--mottle-o 0.15→0.05（云纹 5）、--sweep-o 0.6→0.3（光带 30%），行注明"用户定案偏离设计定稿"（design/ 冻结不动，ui 侧有意偏离，勿改回）；backdrop-filter 链答询结论：真窗口对窗外桌面不可采样、窗内亦无内容画于 .window 背后（fx/content 均为其子层），整链零观感贡献，保留仅为设计对位；探针 CHECKLIST_V1 --veil-a 期望同步 0.05；验证：npm run build 绿 + tauri dev 重启生效（2026-10-08 已验证：新实例带新配方运行。**后续注记：同日 PL021.4 玻璃体系 CT 化换血，fx 三层纱整体退役——本条三令牌随之消亡，调参意图被换血取代**）
 - [x] PL021.4 玻璃体系 CT 化换血（用户决策：完全照抄 CapsuleTODO 玻璃实现，CT 暗色全套；唯一例外 accent 保留 CP 蓝）—— **core**：删 DWM 系统背板材质挂载（set_system_backdrop + Focused 分支，PL011 退役），保留 window-focus 转发（分态纱驱动源）；tauri.conf 零改动。**glass.css 整体重写**：CT 令牌三块（浅默认/media dark/data-theme dark，accent 填 CP 蓝）+ CT 板引擎（.window 透明底 + ::before 纱层失焦 30%/聚焦 0% + 三件影 stroke/rim/candy + 板级 text-shadow）+ 自雾化段保留；fx 三层纱/透光带/透镜线/大投影/折射令牌全退役（PL021.3 调参令牌随之消亡）。**App.vue**：fx 三层 div/rf 折射滤镜删，focused class 复活（isFocused 查询 + window-focus 监听，mock is_focused 回归）。**boards.css**：浮板/确认框 = CT 板配方（0.25 黑纱 + 四件影 + backdrop blur40 sat1.6 + will-change + 几何 14px）；设置文字照 CT（name 12px/600 继承、desc 8px/0.6，删 #333/手写影/scale hack）；input/步进 SVG 面换 panel 系（E 定案：SVG 结构保留只换色）；.sheet p 收窄 .overlay 前缀；board-open 惰性规则删。**topbar.css**：侧钮 CT 配色（静息 #b5bac1、统计钮 DodgerBlue #1e90ff 翻白、设置钮 50% 黑 + 齿轮旋转；tooltip 照 CT 8px/2.5px/气泡同钮色）。**暗底走查**：seg 暗面板化（未选中白字 C、选中 accent 蓝保留 B）、banner/arrow/battery 壳换 panel 系、gcard 描边降 0.28 + 影转中性、tc-range/dl track 槽 0.14 白、date-card/dial/flip 仪表件保留实物感仅 neumorphism 白高光减淡（0.5→0.15/0.18）。**index.html** 锁 data-theme="dark"（浅色三态就位不启动，切换 UI 与持久化不做）。验证：cargo 全量 91+1 绿 + doc 绿 + vue-tsc/build 绿；live 断言（令牌/板引擎/侧钮/seg/浮板 blur40/几何 14/设置文字纯白/雾化豁免）全绿；复查修复 .sheet p 通用规则压制行继承（收窄 .overlay 前缀复验纯白）；截图存档 .temp/pl021-shots/ 三张；旧探针（design 基准）随换血失效退役；sed 批量替换违例如实登记；记录 .temp/pl021-ct-migration-verification.md（2026-10-08）
 - [x] PL021.5 组件立体光影恢复（用户目验反馈：换血后计时页组件"白色光影和阴影"消失）—— 根因 = PL021.4 暗底走查只减了 neumorphism 白高光（0.5→0.15/0.18）未同步换深影，原暗影 rgba(42,42,42,0.2) 深灰在暗底融掉，双重削弱致组件变平。做法：① 白高光回原值 0.5（pill 三态/date-card/dial/flip/battery 六处）；② 暗影换暗底可见的深黑 rgba(0,0,0,0.45)（同六处，"恢复效果"的正确翻译——原值在暗底不可见）；③ seg 白光影回档（外层 inset 0.28→0.75、按钮顶缘线 0.28→0.85）；透明纱层零改动（用户红线）。验证：IAB 复验 pill 蓝辉光+黑影+白高光三件套在位、seg 外层白 0.75、::before 聚焦态 0% 不变；prettier/build 绿 + tauri dev 重启生效（2026-10-08 已验证，新实例 PID 11848。**追加微调（同轮目验）**：电池壳白光晕太强太宽——.bat-shell 白高光 0.5→0.25（小件减半）、白内描边 1.5px/0.28→1px/0.18，仅电池一处大件不动；新实例 PID 14836 复验运行）
+
+### PL022: 周卡自然周对齐 + 总日均 [plan#PL022] ✅
+
+> 范围：周卡从"今日回溯 7 天"改自然周语义（周一锚定、"今"随真实星期、跨周联动）+ 日均改全历史总日均（z.plan 附录 PL022，2026-10-10 立项）。方向定案：恒 7 行未来日空 / core 变更授权（映射红线随 PL021.2 解除）/ 总日均 = 全历史有数据日工作总和 ÷ 有数据天数（分子=工作、虚线同步，与 design 周内派生为有意分叉）/ 远期捆绑不做（周起始日可配置 + delta，y.problems #6）。
+> 验证总纲：cargo test 恒绿（TDD 先红后绿）+ live 断言（标签对齐/跨周刷新/今标记/未来空柱/总日均数字与虚线一致）+ vue-tsc/build 绿。
+
+- [x] PL022.1 测试先行（TDD 红）—— `core/src/commands/workday.rs` 测试模块：① 现有滚动 7 天断言改写为自然周锚定（构造已知星期锚的 now_secs：周三查看 → 行集合 = 本周一~~下周日且未来行零值）；② 新增用例 `week_detail_natural_week_alignment`（自然周锚定/标签序）、`week_detail_future_days_zero`（未来日零值）、`week_detail_offset_cross_week`（offset -7 跨入上周整窗刷新）；③ 新增 `workday_total` 聚合用例（构造多日 workdays/events 行，断言 work_secs 总和与有数据天数）；验证：cargo test 编译通过后上述用例 **FAIL 清单**（offset 参数未加/workday_total 未实现的语义红，2026-10-10 红灯记录存 .temp）（2026-10-11 已验证：先红后绿——红 = 签名不匹配 + `workday_total_inner` 缺失共 7 编译错误（记录 `.temp/pl022-verification.md`）；旧滚动用例改写为自然周锚定，新增自然周/未来日零值/跨周/总日均 4 用例；**实现细则**：断言窗口实为"本周一~~本周日"（任务文本"下周日"系笔误））
+- [x] PL022.2 week_detail 自然周窗口 —— `core/src/commands/workday.rs`：① `week_detail` 命令签名加 `offset: i64`（前端必传，`week_detail_inner` 透传）；② `week_detail_inner` 窗口改自然周——查看了日取 `day_bounds(view_offset)`，`monday_offset = view_offset − (number_from_monday(查看日) − 1)`，遍历 `0..7` 取 `monday_offset + i`；行 `weekday = i + 1`（构造序即周一序）；未来日走 `day_summary_inner` 现管道天然零值；恒 7 行；③ 模块注释同步自然周语义。验证：PL022.1 的 ①②③ 用例转绿（workday_total 用例仍红）+ fmt/clippy（2026-10-11 已验证：`week_detail` 加 `offset: i64`（复用 `checked_offset` 校验面）+ `week_detail_inner` 自然周（`monday_offset` 助手，遍历 0..7，`weekday = i + 1`，未来日走现管道天然零）；模块注释同步；①②③ 用例转绿）
+- [x] PL022.3 workday_total 总日均命令 —— `core/src/storage.rs` 新聚合方法（口径与 `day_summary_inner` 工作秒推导**代码级单源**（FIX005.4 先例），范围 = workdays/events 全历史（已核实自首日全量在库），参数化 SQL（Mimosa 绑定约束））；`core/src/commands/workday.rs` 新 serde 结构 `WorkdayTotal { work_secs: i64, days: u32 }`（字段文档注释）+ `workday_total` 命令 + `generate_handler` 注册；`core/src/lib.rs` 无需动（命令注册在 commands 装配）；验证：PL022.1 ④ 用例转绿 + cargo test 全量绿 + fmt/clippy/doc（2026-10-11 已验证：storage 新增 `first_record_at`（workdays/events 全历史最早时刻，参数化）+ `WorkdayTotal` + `workday_total` 命令 + `generate_handler` 注册；**实现偏差注记**——聚合落在命令层 `workday_total_inner`（自首条记录所在本地日逐日复用 `day_summary_inner`，真单源；storage 仅提供窗口起点），未按字面写 storage SQL 聚合：纯 SQL 无法复用 `reduce_day` 口径（进行中段/跨夜切分/孤儿事件），单源优先；"有数据天数"口径定为该日 `duty_secs > 0`（有打卡/计时记录））
+- [x] PL022.4 mock-invoke 同步 —— `ui/src/dev/mock-invoke.ts`：① `week_detail` 路由按 `offset` 参数生成自然周 7 行（周一锚定、未来日零、weekday 构造序）；② `workday_total` 假路由（返回与演示数据自洽的总日均聚合）；验证：vite dev 下 week 卡新语义渲染 + 控制台零未处理 rejection + 生产 `npm run build` 产物 grep 零 mock 痕迹（2026-10-11 已验证：`routeCommand` 增 args 透传（`invoke` 包装同步）+ `week_detail` 按 offset 生成自然周 7 行（周一锚定/未来日零/今随真实日期）+ `workday_total` 假路由；vite dev IAB 渲染正常、控制台零未处理 rejection；生产 dist grep `mock-invoke` 零命中）
+- [x] PL022.5 wc-days 动态标签 + 今标记 —— `ui/types.ts` 加 `WorkdayTotal { work_secs: number; days: number }` 镜像；`ui/components/StatsView.vue`：`wc-days` 七格从硬编码改 `v-for` 按 `week` 行渲染（`weekday` → "一"~~"日"单字；今天格文字"今" + 现高亮类迁移，判定 = 行 `date` === 今天的 MM-DD）；柱与格对位核验（行序即格序）；验证：live 断言——标签与真实星期对齐、今天格"今"、未来格空柱（IAB 探针读数存档）（2026-10-11 已验证：types.ts 加 `WorkdayTotal`；`wc-days` 改 `v-for` 按行渲染（今天格文字"今" + today 类，判定 = 行 date === 今天 MM-DD）；live——本周（10/5~~10/11）标签 `一 二 三 四 五 六 今`，运行日恰周日故"今"落末格，与真实星期对齐）
+- [x] PL022.6 跨周联动 + 总日均接线 —— `ui/components/StatsView.vue`：① 周卡拉取随 `offset` 联动（`invoke("week_detail", { offset })`，与 day_detail 同款管道，箭头跨周整卡刷新 + weekSig 内容签名失效重绘）；② `avgWorkMin` 数据源切 `workday_total`（挂载 + statsRefreshKey 刷新，`invoke("workday_total")`）；③ 均线 wcAvg 高度分子分母同步总日均（数字与线一致）；翻面/选中环/彗星/图谱不动；验证：live 断言——箭头跨周整卡刷新、"今"复位、总日均数字与虚线高度一致 + vue-tsc/build（2026-10-11 已验证：周卡拉取随 offset 联动（`invoke("week_detail", { offset })`）+ `workday_total` 接线（挂载/refreshKey）；`avgWorkMin` 改 computed = work_secs/60/days，均线 wcAvg 与数字同源（越顶夹取 100%）；`weekSig` 改逐柱签名、选中环改按真实日期 `findIndex` 定位（自然周下不再"末列 + offset"，未命中不记 lastViewDay 待新数据再闪）；live——前一日跨入上周（9/28~10/4）整卡刷新、末格"日"非"今"、柱形重绘、日均 `2小时10分钟` = 93600s/12日 精确一致）
+- [x] PL022.7 收口 —— y.problems #6 扩写（delta + 周起始日可配置捆绑远期，自然周已随本 PL 落地）+ 全量回归（cargo test 全量 + fmt/clippy/doc + vue-tsc/build + live 探针全套）+ 勾结 + commit 草案（交用户审核）（2026-10-11 已验证：y.problems#6 扩写（自然周已落地 2026-10-11）+ z.plan 状态行 ✅ + AGENTS 当前状态行；全量回归——cargo test 94+1 全绿、fmt/clippy -D warnings/doc 0 告警、vue-tsc/build 绿、prettier 全过；live 断言（标签对齐/今位置/跨周刷新/总日均数字与线同源）过；**覆盖外如实记档**——"未来日空柱"与"今随星期几变动"因运行日恰为周日（本周末、后一日按钮禁用）无法 live 复现，由后端 `week_detail_future_days_zero` / `week_detail_natural_week_alignment` 用例覆盖；真实 pulse.db 零触及（全内存库/mock）；记录 `.temp/pl022-verification.md`；commit 草案交用户审核）
+
+## 未完成
