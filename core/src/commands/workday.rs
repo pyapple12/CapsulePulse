@@ -143,11 +143,16 @@ fn monday_offset(view_offset: i64, view_day_start: i64) -> Result<i64, CommandEr
     Ok(view_offset - (i64::from(dt.weekday().number_from_monday()) - 1))
 }
 
-/// 总日均聚合成品（serde 单一来源，TS 侧镜像 WorkdayTotal）：全历史工作总和 ÷ 有数据天数。
+/// 全历史聚合（serde 单一来源，TS 侧镜像 WorkdayTotal）：三值总和 + 有数据天数。
+/// 前端据三值总和 ÷ 天数得各值平均（PL022 总日均取 work_secs；PL024.6 三值百分比取三者）。
 #[derive(Debug, Serialize)]
 pub struct WorkdayTotal {
-    /// 全历史工作总秒数（各日 work_secs 之和；口径与 day_summary_inner 代码级单源）。
+    /// 全历史在岗总秒数（各日 duty_secs 之和；口径与 day_summary_inner 代码级单源）。
+    pub duty_secs: i64,
+    /// 全历史工作总秒数（各日 work_secs 之和）。
     pub work_secs: i64,
+    /// 全历史休息总秒数（各日 rest_secs 之和）。
+    pub rest_secs: i64,
     /// 有数据天数（当日存在打卡/计时记录，即 duty_secs > 0 的本地日；空日不计）。
     pub days: u32,
 }
@@ -161,16 +166,18 @@ fn local_day_start(at: i64) -> Result<i64, CommandError> {
     Ok(period::day_start_secs(&dt))
 }
 
-/// 总日均（PL022）：从全历史首条记录所在本地日逐日走 day_summary_inner 累加——
-/// 聚合落在命令层以复用同一日管道（真单源），storage 仅提供全历史起点；
-/// 天数按"该日 duty_secs > 0"计（有打卡/计时记录的日子），空日不计。
+/// 全历史聚合（PL022 总日均 / PL024.6 三值平均）：从首条记录所在本地日逐日走
+/// day_summary_inner 累加三值总和——聚合落在命令层以复用同一日管道（真单源），
+/// storage 仅提供全历史起点；天数按"该日 duty_secs > 0"计（有打卡/计时记录的日子），空日不计。
 pub(super) fn workday_total_inner<C: Clock>(
     ctx: &AppContext<C>,
     now_secs: i64,
 ) -> Result<WorkdayTotal, CommandError> {
     let Some(first_at) = poison("存储", ctx.storage.lock())?.first_record_at()? else {
         return Ok(WorkdayTotal {
+            duty_secs: 0,
             work_secs: 0,
+            rest_secs: 0,
             days: 0,
         });
     };
@@ -190,12 +197,16 @@ pub(super) fn workday_total_inner<C: Clock>(
         .num_days();
 
     let mut total = WorkdayTotal {
+        duty_secs: 0,
         work_secs: 0,
+        rest_secs: 0,
         days: 0,
     };
     for step in 0..=span {
         let summary = day_summary_inner(ctx, -step, now_secs)?;
+        total.duty_secs += summary.duty_secs;
         total.work_secs += summary.work_secs;
+        total.rest_secs += summary.rest_secs;
         if summary.duty_secs > 0 {
             total.days += 1;
         }
@@ -578,20 +589,25 @@ mod tests {
         assert!(cur.iter().all(|d| d.work_secs == 0 && d.duty_secs == 0));
     }
 
-    /// PL022.1：总日均聚合——全历史工作总秒数 + 有数据天数（空日不计；空库零）。
+    /// PL022.1 / PL024.6：全历史聚合——三值总和 + 有数据天数（空日不计；空库零）。
     #[test]
     fn workday_total_sums_all_history() {
         let empty_ctx = ctx(FakeClock::new());
         let total = workday_total_inner(&empty_ctx, Local::now().timestamp()).unwrap();
+        assert_eq!(total.duty_secs, 0);
         assert_eq!(total.work_secs, 0);
+        assert_eq!(total.rest_secs, 0);
         assert_eq!(total.days, 0, "空库零值不 panic");
 
         let ctx = ctx(FakeClock::new());
+        // 在岗 3h / 工作 2h / 休息 1h
         seed_day(&ctx, -2, 2 * 3_600, 3 * 3_600);
         // 中间（-1 日）为空日：不计入天数
-        seed_day(&ctx, 0, 3_600, 2 * 3_600);
+        seed_day(&ctx, 0, 3_600, 2 * 3_600); // 在岗 2h / 工作 1h / 休息 1h
         let total = workday_total_inner(&ctx, Local::now().timestamp()).unwrap();
+        assert_eq!(total.duty_secs, 5 * 3_600);
         assert_eq!(total.work_secs, 3 * 3_600);
+        assert_eq!(total.rest_secs, 2 * 3_600);
         assert_eq!(total.days, 2, "仅两个有数据日");
     }
 

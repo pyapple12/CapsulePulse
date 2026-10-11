@@ -13,7 +13,7 @@ const day = ref<DaySummary | null>(null);
 // 周视图（PL022）：查看日所在自然周（周一~周日，恒 7 行），Rust 侧归约，本组件零聚合
 const week = ref<WeekDay[]>([]);
 // 总日均（PL022）：全历史工作时长总和 ÷ 有数据天数（后端聚合，前端只做除法展示）
-const total = ref<WorkdayTotal>({ work_secs: 0, days: 0 });
+const total = ref<WorkdayTotal>({ duty_secs: 0, work_secs: 0, rest_secs: 0, days: 0 });
 const loadError = ref("");
 
 async function refresh(): Promise<void> {
@@ -95,12 +95,38 @@ let cometWakeTimer = 0;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/** 图谱空态（PL024.5，用户目测定案）：无打卡日 / 今日未上班——
+ * 清段条与节点、停并清彗星、轴标置 na:na；避免残留上一日画面造成误读。 */
+function renderGraphEmpty(): void {
+  if (barsEl.value) {
+    barsEl.value.innerHTML = "";
+  }
+  const nodesG = graphSvg.value?.querySelector<SVGGElement>("#graphNodes");
+  if (nodesG) {
+    nodesG.innerHTML = "";
+  }
+  cometWalk = 0;
+  const comet = cometEl.value;
+  if (comet) {
+    comet.style.display = "none";
+    for (const s of [...comet.children]) {
+      s.remove();
+    }
+  }
+  axisStart.value = "上班 na:na";
+  axisEnd.value = "下班 na:na";
+}
+
 /** 图谱整帧渲染（design renderGraph 1:1；数据 = 真实 day.blocks，秒 → ms） */
 function renderGraph(): void {
   const svg = graphSvg.value;
   const bars = barsEl.value;
   const d = day.value;
-  if (!svg || !bars || !d?.duty_started_at || d.blocks.length === 0) {
+  if (!svg || !bars) {
+    return;
+  }
+  if (!d?.duty_started_at || d.blocks.length === 0) {
+    renderGraphEmpty();
     return;
   }
   const clockIn = d.duty_started_at * 1000;
@@ -493,11 +519,55 @@ function blkWidth(secs: number): string {
   return `${Math.min((secs / detailMax.value) * 100, 100).toFixed(1)}%`;
 }
 
-/** 三值卡百分比（design tc-percent：占在岗份额） */
+/** 三值卡进度条宽度（design tc-percent：占在岗份额；PL024.6 起仅进度条沿用，文字改用 deltaView） */
 function pct(part: number): number {
   const duty = day.value?.duty_secs ?? 0;
   return duty > 0 ? Math.round((part / duty) * 100) : 0;
 }
+
+/** 三值各自的全历史平均（秒；分母 = 有数据天数，与总日均同口径） */
+const avgDuty = computed(() =>
+  total.value.days > 0 ? total.value.duty_secs / total.value.days : 0,
+);
+const avgWork = computed(() =>
+  total.value.days > 0 ? total.value.work_secs / total.value.days : 0,
+);
+const avgRest = computed(() =>
+  total.value.days > 0 ? total.value.rest_secs / total.value.days : 0,
+);
+
+/** 指示符三态（PL024.6 用户定案）：up 红 / down 绿 / eq 中性灰 / na 无数据 */
+type DeltaState = "up" | "down" | "eq" | "na";
+
+/** 单值相对其历史平均的偏离（整数百分比，不带正负号；方向由箭头与颜色表达） */
+function deltaView(valueSecs: number, avgSecs: number): { text: string; state: DeltaState } {
+  if (day.value?.duty_started_at == null || avgSecs <= 0) {
+    return { text: "na", state: "na" };
+  }
+  const pctVal = Math.round(((valueSecs - avgSecs) / avgSecs) * 100);
+  if (pctVal > 0) {
+    return { text: `${pctVal}%`, state: "up" };
+  }
+  if (pctVal < 0) {
+    return { text: `${Math.abs(pctVal)}%`, state: "down" };
+  }
+  return { text: "0%", state: "eq" };
+}
+
+/** 指示符图形（上 / 下 / 等号；na 无图形） */
+function deltaIcon(state: DeltaState): string {
+  if (state === "up") {
+    return "m18 15-6-6-6 6";
+  }
+  if (state === "down") {
+    return "m6 9 6 6 6-6";
+  }
+  return "M6 12h12";
+}
+
+const dutyDelta = computed(() => deltaView(day.value?.duty_secs ?? 0, avgDuty.value));
+const workDelta = computed(() => deltaView(day.value?.work_secs ?? 0, avgWork.value));
+const restDelta = computed(() => deltaView(day.value?.rest_secs ?? 0, avgRest.value));
 
 /** 明细进行中段的时长增长由每秒 renderDetail 重算覆盖（design sig 语义同效） */
 
@@ -590,7 +660,7 @@ onUnmounted(() => {
 
           <div class="graph-block">
             <div class="graph">
-              <svg ref="graphSvg" height="12" width="100%" preserveAspectRatio="none">
+              <svg id="graphSvg" ref="graphSvg" height="12" width="100%" preserveAspectRatio="none">
                 <defs>
                   <clipPath id="graphClip"><rect width="100%" height="12" rx="6" /></clipPath>
                   <clipPath id="graphClipComet">
@@ -641,7 +711,7 @@ onUnmounted(() => {
 
           <div class="triple-row">
             <div class="gcard t-card t-duty" @click="flipped = true">
-              <div class="tc-head">
+              <div class="tc-head" :class="{ tight: dutyDelta.text.length >= 4 }">
                 <span class="tc-icon">
                   <svg viewBox="-8 -8 16 16" width="16" height="16">
                     <circle r="7" />
@@ -665,8 +735,9 @@ onUnmounted(() => {
                     </text>
                   </svg></span
                 >
-                <span class="tc-percent"
+                <span class="tc-percent" :class="dutyDelta.state"
                   ><svg
+                    v-if="dutyDelta.state !== 'na'"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -674,16 +745,16 @@ onUnmounted(() => {
                     stroke-linecap="round"
                     stroke-linejoin="round"
                   >
-                    <path d="m18 15-6-6-6 6" />
+                    <path :d="deltaIcon(dutyDelta.state)" />
                   </svg>
-                  {{ pct(day?.duty_secs ?? 0) }}%</span
+                  {{ dutyDelta.text }}</span
                 >
               </div>
               <b>{{ fmtHM((day?.duty_secs ?? 0) / 60) }}</b>
               <span class="tc-hint">今日明细</span>
             </div>
             <div class="gcard t-card t-work">
-              <div class="tc-head">
+              <div class="tc-head" :class="{ tight: workDelta.text.length >= 4 }">
                 <span class="tc-icon">
                   <svg viewBox="-8 -8 16 16" width="16" height="16">
                     <circle r="7" />
@@ -707,8 +778,9 @@ onUnmounted(() => {
                     </text>
                   </svg></span
                 >
-                <span class="tc-percent"
+                <span class="tc-percent" :class="workDelta.state"
                   ><svg
+                    v-if="workDelta.state !== 'na'"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -716,9 +788,9 @@ onUnmounted(() => {
                     stroke-linecap="round"
                     stroke-linejoin="round"
                   >
-                    <path d="m18 15-6-6-6 6" />
+                    <path :d="deltaIcon(workDelta.state)" />
                   </svg>
-                  {{ pct(day?.work_secs ?? 0) }}%</span
+                  {{ workDelta.text }}</span
                 >
               </div>
               <b>{{ fmtHM((day?.work_secs ?? 0) / 60) }}</b>
@@ -727,7 +799,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="gcard t-card t-rest">
-              <div class="tc-head">
+              <div class="tc-head" :class="{ tight: restDelta.text.length >= 4 }">
                 <span class="tc-icon">
                   <svg viewBox="-8 -8 16 16" width="16" height="16">
                     <circle r="7" />
@@ -755,8 +827,9 @@ onUnmounted(() => {
                     </text>
                   </svg></span
                 >
-                <span class="tc-percent"
+                <span class="tc-percent" :class="restDelta.state"
                   ><svg
+                    v-if="restDelta.state !== 'na'"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -764,9 +837,9 @@ onUnmounted(() => {
                     stroke-linecap="round"
                     stroke-linejoin="round"
                   >
-                    <path d="m6 9 6 6 6-6" />
+                    <path :d="deltaIcon(restDelta.state)" />
                   </svg>
-                  {{ pct(day?.rest_secs ?? 0) }}%</span
+                  {{ restDelta.text }}</span
                 >
               </div>
               <b>{{ fmtHM((day?.rest_secs ?? 0) / 60) }}</b>
