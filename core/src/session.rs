@@ -169,9 +169,20 @@ impl<C: Clock> WorkSession<C> {
         Ok(())
     }
 
-    /// 重置回 Idle 并清零累计（UI"重开归零"路径）；任意态合法、幂等。
+    /// 重置回 Idle 并清零累计（未上班/退出等既有用途）；任意态合法、幂等。
     pub fn reset(&mut self) {
         self.state = SessionState::Idle;
+        self.accumulated = Duration::ZERO;
+    }
+
+    /// 重置为"归零休息"（PATCH002：重置按钮的落点）：任意态 → `Paused { elapsed: 0 }`，
+    /// 累计清零、幂等——大计时器归零且**不自动开跑**（休息态，等用户按「工作」再计）。
+    /// # 契约
+    /// 调用方负责先把未落库的运行段收段落库（见 commands/session 的 `restart_session`）。
+    pub fn reset_to_paused(&mut self) {
+        self.state = SessionState::Paused {
+            elapsed: Duration::ZERO,
+        };
         self.accumulated = Duration::ZERO;
     }
 
@@ -384,6 +395,44 @@ mod tests {
         s.reset();
         s.reset();
         assert_eq!(s.state(), &SessionState::Idle);
+    }
+
+    /// PATCH002：reset_to_paused —— 任意态 → Paused{0}，累计清零、幂等（重置按钮的落点）。
+    #[test]
+    fn reset_to_paused_lands_zeroed_pause_from_any_state() {
+        let clock = FakeClock::new();
+        let mut s = WorkSession::new(clock.clone());
+
+        // Idle → Paused{0}
+        s.reset_to_paused();
+        assert_eq!(
+            s.state(),
+            &SessionState::Paused {
+                elapsed: Duration::ZERO
+            }
+        );
+        assert_eq!(s.total(), Duration::ZERO);
+
+        // Running 中累计后重置 → 归零且落在 Paused（不再自动开跑）
+        s.resume().unwrap();
+        clock.advance(secs(30));
+        s.reset_to_paused();
+        assert_eq!(
+            s.state(),
+            &SessionState::Paused {
+                elapsed: Duration::ZERO
+            }
+        );
+        assert_eq!(s.total(), Duration::ZERO);
+
+        // 幂等：重复调用无副作用
+        s.reset_to_paused();
+        assert_eq!(
+            s.state(),
+            &SessionState::Paused {
+                elapsed: Duration::ZERO
+            }
+        );
     }
 
     /// T5：计时切换热键的动作映射——Idle→start / Running→pause / Paused→resume 三态循环。

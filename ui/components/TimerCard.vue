@@ -60,10 +60,11 @@ async function refresh(): Promise<void> {
   tickBattery();
 }
 
-/** 执行命令后立即刷新快照与统计（不等下一 tick）；失败上抛父组件可见反馈 */
-async function act(command: string): Promise<void> {
+/** 执行命令后立即刷新快照与统计（不等下一 tick）；失败上抛父组件可见反馈。
+ * args 供带参命令使用（PATCH002：`session_set_run_mode` 的 mode） */
+async function act(command: string, args?: Record<string, unknown>): Promise<void> {
   try {
-    await invoke(command);
+    await invoke(command, args);
     await refresh();
     emit("changed");
   } catch (err) {
@@ -422,22 +423,21 @@ watch(onDuty, (duty, prev) => {
 });
 
 /* ============================================================
-   ⑥ 三段式控制（design 语义）：work = 开始/继续，rest = 暂停，reset = 重开；
-   重置后 duty=true + 空闲 → 休息段呈选中态（已暂停归零）
+   ⑥ 三段式控制（PATCH002 语义）：工作 = Running、休息 = Paused、重置 = 收段归零回休息；
+   打卡即工作（后端 clock_in 内 start），故在岗初始高亮即「工作」。
+   动作只发**意图**（session_set_run_mode），start/resume/pause 的裁决全在 Rust 侧——
+   前端不再按自身缓存的会话态自选命令（那是"三段切不动"BUG 的根因之一）。
    ============================================================ */
 const runMode = computed(() => (!onDuty.value ? "" : isRunning.value ? "work" : "rest"));
 
+/** 工作：交给后端裁决（Idle→start / Paused→resume / Running→幂等） */
 function onWork(): void {
-  if (!onDuty.value || isRunning.value) {
-    return;
-  }
-  void act(state.value === "idle" ? "session_start" : "session_resume");
+  void act("session_set_run_mode", { mode: "work" });
 }
 
+/** 休息：Running→pause（Paused/Idle 幂等） */
 function onRest(): void {
-  if (isRunning.value) {
-    void act("session_pause");
-  }
+  void act("session_set_run_mode", { mode: "rest" });
 }
 
 /* ============================================================
@@ -720,27 +720,27 @@ onUnmounted(() => {
     <span>{{ onDuty ? "下班" : "上班" }}</span>
   </button>
 
-  <!-- ⑤ 三段式控制：工作/休息互斥选中；重置 = 瞬时（按下回弹，不保持选中） -->
+  <!-- ⑤ 三段式控制：工作/休息互斥选中；重置 = 瞬时（按下回弹，不保持选中）。
+       动作挂 label 的 @click（PATCH002）——不再依赖 display:none radio 的 change 转发；
+       input 只做显示（:checked 驱动 :has(input:checked) 的按下样式） -->
   <div class="seg-control" :class="{ off: !onDuty }">
-    <label class="seg">
+    <label class="seg" @click="onWork">
       <input
         type="radio"
         name="runseg"
         value="work"
         :disabled="!onDuty"
         :checked="runMode === 'work'"
-        @change="onWork"
       />
       <span class="text">工作</span>
     </label>
-    <label class="seg">
+    <label class="seg" @click="onRest">
       <input
         type="radio"
         name="runseg"
         value="rest"
         :disabled="!onDuty"
         :checked="runMode === 'rest'"
-        @change="onRest"
       />
       <span class="text">休息</span>
     </label>

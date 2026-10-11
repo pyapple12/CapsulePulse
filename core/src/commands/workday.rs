@@ -11,8 +11,8 @@ use crate::period;
 use crate::session::Clock;
 use crate::workday::{auto_out_due, reduce_day, DaySummary, EventKind, WorkdayError, WorkdayState};
 
-/// 上班打卡：开行 + clock_in 事件入馆（单事务，FIX002.9），再转移状态；会话复位 Idle
-/// （上班 = 新一天计时从零，此前累计均已落库，无数据丢失）。
+/// 上班打卡：开行 + clock_in 事件入馆（单事务，FIX002.9），再转移状态；会话归零并**立即进入
+/// 工作态**（PATCH002：打卡即工作，大计时器从 0 起跑；此前累计均已落库，无数据丢失）。
 /// # 错误
 /// 已在岗返回 [`WorkdayError::AlreadyOnDuty`]；锁中毒/存储失败照常上抛。
 pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i64, CommandError> {
@@ -22,10 +22,18 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i
         return Err(CommandError::Workday(WorkdayError::AlreadyOnDuty));
     }
     {
+        // 打卡即工作（PATCH002）：归零 + 立即 Running，同一 guard 内完成不留中间态；
+        // 锁序 workday → session → storage 单向（见 AppContext 注释）。
         let mut session = lock(ctx)?;
         session.reset();
+        session.start()?;
     }
-    let id = poison("存储", ctx.storage.lock())?.workday_open_with_event(at, EventKind::ClockIn)?;
+    let id = poison("存储", ctx.storage.lock())?.workday_open_with_events(
+        at,
+        // 打卡即工作（PATCH002）：一次事务同时记 clock_in 与段起点——图谱/明细从打卡那一刻
+        // 就有工作段（否则该窗口会整段算休息）
+        &[EventKind::ClockIn, EventKind::SegmentStart],
+    )?;
     workday.clock_in(at, id)?;
     Ok(id)
 }
@@ -334,9 +342,14 @@ mod tests {
                 id: 1
             }
         );
-        assert!(
-            super::super::session::start_session(&ctx).is_ok(),
-            "上班后计时放行"
+        // 打卡即工作（PATCH002）：会话直接处于 Running，无需再 start
+        assert_eq!(
+            super::super::session::status_snapshot(&ctx)
+                .unwrap()
+                .0
+                .state,
+            "running",
+            "打卡即工作"
         );
     }
 
@@ -369,7 +382,6 @@ mod tests {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        super::super::session::start_session(&ctx).unwrap();
         clock.advance(secs(60));
         clock_out_inner(&ctx, 2_000, EventKind::ClockOut).unwrap();
 
@@ -411,7 +423,6 @@ mod tests {
         let ctx = ctx(FakeClock::new());
         let in_at = wall_now_secs().unwrap() - 9 * 3_600;
         clock_in_inner(&ctx, in_at).unwrap();
-        super::super::session::start_session(&ctx).unwrap();
         let out_at = in_at + 8 * 3_600;
         assert!(try_auto_clock_out(&ctx).unwrap().is_some());
         let rows = ctx

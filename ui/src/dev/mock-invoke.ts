@@ -10,6 +10,23 @@ function mmdd(d: Date): string {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** DEV 会话状态机（PATCH002.2）：打卡与各会话命令都改这份状态——让"打卡即工作 / 三段切换 /
+ * 重置回休息"这类链路在 DEV 基座可复现、可验证（此前 session_status 写死 running，验不了）。
+ * 初值 = 在岗计时中（段起点取今日 09:00，对齐 day_detail 的演示态）。 */
+let mockState: "idle" | "running" | "paused" = "running";
+let mockOnDuty = true;
+let mockAccumMs = 0; // 已完成段累计（毫秒）
+let mockSegStart = (() => {
+  const t = new Date();
+  t.setHours(9, 0, 0, 0);
+  return t.getTime();
+})();
+
+/** 当前累计毫秒（Running = 累计 + 本段实时） */
+function mockTotalMs(): number {
+  return mockAccumMs + (mockState === "running" ? Math.max(0, Date.now() - mockSegStart) : 0);
+}
+
 /** 命令路由表：cmd → 返回值（同步值直接返回，异步语义由 invoke 包装） */
 function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
   // 今日起点 09:00（本地时区），运行中累计到当前时刻
@@ -22,7 +39,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
 
   switch (cmd) {
     case "session_status":
-      return { state: "running", total_ms: elapsedMs, on_duty: true };
+      return { state: mockState, total_ms: mockTotalMs(), on_duty: mockOnDuty };
     case "session_stats":
       return { today_secs: 12_600, week_secs: 54_300, all_secs: 93_600 };
     case "day_detail":
@@ -81,11 +98,54 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         workday_auto_out_hours: 8,
       };
     case "set_settings":
-    case "clock_in":
-    case "clock_out":
-    case "session_start":
-    case "session_pause":
     case "main_hide_to_tray":
+      return null;
+    /* 会话链（PATCH002.2）：与后端同语义——打卡即工作、工作/休息幂等切换、重置收段归零回休息 */
+    case "clock_in":
+      mockOnDuty = true;
+      mockState = "running";
+      mockAccumMs = 0;
+      mockSegStart = Date.now();
+      return null;
+    case "clock_out":
+      mockOnDuty = false;
+      mockState = "idle";
+      mockAccumMs = 0;
+      return null;
+    case "session_set_run_mode": {
+      const mode = args?.mode;
+      if (mode === "work") {
+        if (mockState !== "running") {
+          mockState = "running";
+          mockSegStart = Date.now();
+        }
+      } else if (mode === "rest" && mockState === "running") {
+        mockAccumMs = mockTotalMs();
+        mockState = "paused";
+      }
+      return null;
+    }
+    case "session_start":
+      if (mockState === "idle") {
+        mockState = "running";
+        mockSegStart = Date.now();
+      }
+      return null;
+    case "session_pause":
+      if (mockState === "running") {
+        mockAccumMs = mockTotalMs();
+        mockState = "paused";
+      }
+      return null;
+    case "session_resume":
+      if (mockState === "paused") {
+        mockState = "running";
+        mockSegStart = Date.now();
+      }
+      return null;
+    case "session_restart":
+      mockAccumMs = 0;
+      mockState = "paused";
       return null;
     /* 窗口/事件插件面：isFocused 恒真（分态纱初值兜底）、拖拽空操作、listen/unlisten 发假 id */
     case "plugin:window|is_focused":

@@ -122,7 +122,7 @@ impl Storage {
     }
 
     /// 开一个工作日（上班打卡）：写入 clock_in_at 并返回行 id（clock_out 保持 NULL = 在岗中；
-    /// 仅测试用——生产链走 workday_open_with_event 事务版）。
+    /// 仅测试用——生产链走 workday_open_with_events 事务版）。
     #[cfg(test)]
     pub fn workday_open(&self, clock_in_at: i64) -> Result<i64, StorageError> {
         self.conn.execute(
@@ -222,12 +222,13 @@ impl Storage {
         Ok(())
     }
 
-    /// 开工作日 + clock_in 事件（单事务，FIX002.9）：任一笔失败整体回滚，
-    /// 消除"两笔独立写入间崩溃留孤儿态"的窗口。返回新行 id。
-    pub fn workday_open_with_event(
+    /// 开工作日 + 若干事件（单事务，FIX002.9；PATCH002 起事件为复数）：任一笔失败整体回滚，
+    /// 消除"多笔独立写入间崩溃留孤儿态"的窗口。返回新行 id。
+    /// 打卡同时记 `clock_in` 与 `segment_start`（打卡即工作，PATCH002），故事件是切片。
+    pub fn workday_open_with_events(
         &self,
         at: i64,
-        kind: crate::workday::EventKind,
+        kinds: &[crate::workday::EventKind],
     ) -> Result<i64, StorageError> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
@@ -235,10 +236,12 @@ impl Storage {
             [at],
         )?;
         let id = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO events (at, kind) VALUES (?1, ?2)",
-            rusqlite::params![at, kind.as_str()],
-        )?;
+        for kind in kinds {
+            tx.execute(
+                "INSERT INTO events (at, kind) VALUES (?1, ?2)",
+                rusqlite::params![at, kind.as_str()],
+            )?;
+        }
         tx.commit()?;
         Ok(id)
     }
@@ -452,7 +455,7 @@ mod tests {
     fn transactional_write_pairs_roundtrip() {
         let s = Storage::open_in_memory().unwrap();
         let id = s
-            .workday_open_with_event(1_000, EventKind::ClockIn)
+            .workday_open_with_events(1_000, &[EventKind::ClockIn])
             .unwrap();
         s.workday_close_with_event(id, 2_000, EventKind::AutoClockOut)
             .unwrap();

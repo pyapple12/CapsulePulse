@@ -305,6 +305,7 @@ pub fn run() {
             commands::session::session_pause,
             commands::session::session_resume,
             commands::session::session_restart,
+            commands::session::session_set_run_mode,
             commands::session::session_status,
             commands::stats::session_stats,
             commands::reminder::get_settings,

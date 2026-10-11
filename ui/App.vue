@@ -62,9 +62,11 @@ let unlistenFocus: (() => void) | undefined;
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
 // 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）；
 // 浮层件全部在列（PL019：板区不拖不收、确认遮罩不拖，design 无拖拽语义）；
-// .topbar 自 PATCH001.2 起在列——标题改走阈值拖拽把手（否则"按下即拖"会吞掉双击）
+// .topbar 自 PATCH001.2 起在列——标题改走阈值拖拽把手（否则"按下即拖"会吞掉双击）；
+// label 自 PATCH002.2 起在列——三段控件的「工作/休息」是 <label>，不在白名单时按下即被
+// startDragging 抢走鼠标捕获、click 永不派发（"按了没反应"根因；凡交互控件一律在列）
 const DRAG_INTERACTIVE =
-  "button, input, textarea, select, a, .sideButton, #stats-board, #settings-board, .overlay, .topbar";
+  "button, input, textarea, select, a, label, .sideButton, #stats-board, #settings-board, .overlay, .topbar";
 
 // —— design flyBoard（PL019.2）：把开板按钮中心换算成板内坐标写入 transform-origin，
 // 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = boards.css 板位常量（design 同名）——

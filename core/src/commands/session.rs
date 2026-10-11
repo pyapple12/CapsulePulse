@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use super::workday::require_on_duty;
@@ -131,6 +131,35 @@ fn resume_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// 运行态设置意图（PATCH002）：前端只发"工作 / 休息"意图，`start / resume / pause` 的裁决
+/// 全在 Rust 侧——原实现由前端按自身缓存的会话态自选命令，快照不同步即撞 `NotIdle`
+/// （本次"三段切不动、只能靠重置"BUG 的根因之一）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunMode {
+    /// 工作：Idle→start（新段）、Paused→resume（累计继承）、Running→幂等。
+    Work,
+    /// 休息：Running→pause（收段落库）、Paused/Idle→幂等。
+    Rest,
+}
+
+/// 设置运行态（PATCH002）：按当前态裁决，**幂等**（重复设置不报错、不动累计、不重复留痕）。
+/// 注意：先把 state 绑定出来再 match——match 暂存值里的锁临时会活到 match 结束，
+/// 分支内再取同一把锁即自锁死锁（FIX002 实测教训）。
+pub(super) fn set_run_mode_inner<C: Clock>(
+    ctx: &AppContext<C>,
+    mode: RunMode,
+) -> Result<(), CommandError> {
+    let state = *lock(ctx)?.state();
+    match (mode, state) {
+        (RunMode::Work, SessionState::Idle) => start_session(ctx),
+        (RunMode::Work, SessionState::Paused { .. }) => resume_session(ctx),
+        (RunMode::Work, SessionState::Running { .. }) => Ok(()),
+        (RunMode::Rest, SessionState::Running { .. }) => pause_session(ctx),
+        (RunMode::Rest, SessionState::Paused { .. } | SessionState::Idle) => Ok(()),
+    }
+}
+
 /// 计时切换（托盘菜单与全局热键共用）：按当前态执行 start/pause/resume，返回实际执行的动作。
 /// （未上班时 start 分支被门禁拒绝：托盘/热键在托盘日志可见错误，UI 按钮已置灰。）
 pub(crate) fn toggle_session<C: Clock>(ctx: &AppContext<C>) -> Result<TimerAction, CommandError> {
@@ -160,34 +189,16 @@ pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), C
     close_running_segment(ctx, None)
 }
 
-/// 重开（先落库再重开，用户定案）：仅 Running 有未落库本段——Paused 的段已在
-/// 最近一次 pause 落库、Paused 期间不累计；随后 reset + start 单锁原子完成。
-/// 未上班严格拒绝（重开隐含 start，同一门禁）。
-/// 留痕失败回滚回 Idle（FIX003.9）：旧账此刻已全部落库（Running 分支刚收段）或本无
-/// 未落库数据，reset 后内存与库一致；不用快照写回——Running 分支落库成功后写回旧
-/// Running 态会使内存累计含已落库段（下次 pause 双计）。损失仅新段起点事件缺失，
-/// 时间图谱归约容错吸收；诊断日志留痕（容错白名单 ⑥ 通道）。
+/// 重开（先落库再归零；PATCH002 语义更新）：班内运行段先经 `close_running_segment` 收段落库
+/// （复用 pause_session_at 的落库/留痕/回滚链，FIX002.14），再把会话重置为**归零休息**
+/// （`reset_to_paused`）——大计时器清零且**不自动开跑**，等用户按「工作」再计。
+/// 未上班严格拒绝（重开隐含"在岗"前提）。
+/// 沿革：原实现 reset+start（立即开跑）并额外写一条 SegmentStart；新语义下重置落在休息态、
+/// 无工作段开始，故该事件写入与其留痕回滚分支（FIX003.9）随本次语义变更退役。
 fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     require_on_duty(ctx)?;
-    let mut session = lock(ctx)?;
-    if let SessionState::Running { .. } = *session.state() {
-        let segment = session.pause()?;
-        let now = wall_now_secs()?;
-        poison("存储", ctx.storage.lock())?.record_session_with_event(
-            now - segment.as_secs() as i64,
-            segment.as_secs() as i64,
-            now,
-            EventKind::SegmentEnd,
-        )?;
-    }
-    session.reset();
-    session.start()?;
-    if let Err(err) = mark_segment(ctx, EventKind::SegmentStart) {
-        // 回滚复用已持有的 session 锁 guard——此处再 lock(ctx) 即自锁死锁（本测试实测抓出）
-        session.reset();
-        crate::diag::log(&format!("重开留痕失败已回滚（回 Idle，可重新开始）：{err}"));
-        return Err(err);
-    }
+    close_running_segment(ctx, None)?;
+    lock(ctx)?.reset_to_paused();
     Ok(())
 }
 
@@ -249,10 +260,19 @@ pub fn session_resume(handle: State<'_, AppContext>) -> Result<(), CommandError>
     resume_session(&handle)
 }
 
-/// 重开：先落库未落库段，再归零并立即开始（任意态合法）。
+/// 重开（重置）：先收段落库，再归零并**回到休息态**（PATCH002：不再自动开跑）。
 #[tauri::command]
 pub fn session_restart(handle: State<'_, AppContext>) -> Result<(), CommandError> {
     restart_session(&handle)
+}
+
+/// 设置运行态（工作 / 休息）——三段控件入口（PATCH002：前端只发意图，裁决在 Rust 侧）。
+#[tauri::command]
+pub fn session_set_run_mode(
+    handle: State<'_, AppContext>,
+    mode: RunMode,
+) -> Result<(), CommandError> {
+    set_run_mode_inner(&handle, mode)
 }
 
 /// 查询会话快照（前端 100ms tick 拉取；顺路执行提醒评估与自动下班检查）。
@@ -337,7 +357,6 @@ mod tests {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(30));
         pause_session(&ctx).unwrap();
         resume_session(&ctx).unwrap();
@@ -368,7 +387,6 @@ mod tests {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(100));
         pause_session(&ctx).unwrap();
 
@@ -382,27 +400,28 @@ mod tests {
     fn zero_segment_skips_persist() {
         let ctx = ctx(FakeClock::new());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         pause_session(&ctx).unwrap();
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 0);
     }
 
     /// U2/T3：非法转发严格报错 + 合法路径放行——覆盖 Idle/Running/Paused 三态交叉。
+    /// PATCH002 起打卡即工作：在岗的起始态是 **Running**，Idle 只出现在未上班。
     #[test]
     fn invalid_forwarding_errors() {
-        let ctx = ctx(FakeClock::new());
-        begin_duty(&ctx);
-        // Idle 下 pause / resume 非法
+        // Idle（未上班）下 pause / resume 非法
+        let idle_ctx = ctx(FakeClock::new());
         assert!(matches!(
-            pause_session(&ctx),
+            pause_session(&idle_ctx),
             Err(CommandError::Session(SessionError::NotRunning))
         ));
         assert!(matches!(
-            resume_session(&ctx),
+            resume_session(&idle_ctx),
             Err(CommandError::Session(SessionError::NotPaused))
         ));
-        // Running 下重复 start 非法；合法 pause 后再 start 仍非法（Paused ≠ Idle）
-        start_session(&ctx).unwrap();
+
+        // 在岗：打卡即 Running → 重复 start 非法、pause 合法
+        let ctx = ctx(FakeClock::new());
+        begin_duty(&ctx);
         assert!(matches!(
             start_session(&ctx),
             Err(CommandError::Session(SessionError::NotIdle))
@@ -416,37 +435,35 @@ mod tests {
         assert!(resume_session(&ctx).is_ok());
     }
 
-    /// T3：Running 态重开——本段落库后归零重走（先落库再重开定案）。
+    /// T3：Running 态重开——本段落库后归零回**休息**（PATCH002：不再自动开跑）。
     #[test]
     fn restart_from_running_persists_segment() {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(100));
         restart_session(&ctx).unwrap();
 
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 1);
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 100);
         let s = status_snapshot(&ctx).unwrap().0;
-        assert_eq!(s.state, "running");
-        assert_eq!(s.total_ms, 0);
+        assert_eq!(s.state, "paused", "重置后停在休息态（PATCH002）");
+        assert_eq!(s.total_ms, 0, "大计时器归零");
     }
 
-    /// T3：Paused 态重开不重复落库（段已在最近一次 pause 入库），直接归零重走。
+    /// T3：Paused 态重开不重复落库（段已在最近一次 pause 入库），直接归零回休息。
     #[test]
     fn restart_from_paused_does_not_duplicate() {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(50));
         pause_session(&ctx).unwrap();
         restart_session(&ctx).unwrap();
 
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 1);
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 50);
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
     }
 
     /// T3+N1：提醒决策随 status 评估——49 分钟不发、50 分钟发、5 分钟内不重发；动作清零触发点。
@@ -455,7 +472,6 @@ mod tests {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(49 * 60));
         let (_, d) = status_snapshot(&ctx).unwrap();
         assert!(!d.fire);
@@ -486,7 +502,6 @@ mod tests {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(60));
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = ctx.storage.lock().unwrap();
@@ -501,10 +516,13 @@ mod tests {
     }
 
     /// FIX002.1：start 留痕失败回滚回 Idle——计时未开始。
+    /// PATCH002 起打卡即工作，在岗常态是 Running；本用例把会话显式复位回 Idle（"未上班"语义）
+    /// 以保留 start 回滚分支的覆盖。
     #[test]
     fn start_rolls_back_to_idle_on_mark_failure() {
         let ctx = ctx(FakeClock::new());
         begin_duty(&ctx);
+        lock(&ctx).unwrap().reset(); // 复位回 Idle（PATCH002 后仅在未上班出现）
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = ctx.storage.lock().unwrap();
             panic!("污染 storage 锁");
@@ -522,7 +540,6 @@ mod tests {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(30));
         pause_session(&ctx).unwrap();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -536,29 +553,15 @@ mod tests {
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
     }
 
-    /// FIX003.9：Idle 态重开留痕失败回滚回 Idle（mark_segment 失败 → reset，与 start 同款）。
+    /// PATCH002：Running 态重开在落库步失败——收段经 pause 的回滚链保持 **Running**（段未落库、
+    /// 计时继续，非数据丢失态），重置整体不生效（严格抛错）。
+    /// 沿革：原实现（FIX003.9）重开是"reset+start"，落库失败停 Paused；现改为复用
+    /// `close_running_segment`（含 pause 回滚链），故停 Running。
     #[test]
-    fn restart_from_idle_rolls_back_to_idle_on_mark_failure() {
-        let ctx = ctx(FakeClock::new());
-        begin_duty(&ctx);
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = ctx.storage.lock().unwrap();
-            panic!("污染 storage 锁");
-        }));
-        assert!(matches!(
-            restart_session(&ctx),
-            Err(CommandError::Poisoned("存储"))
-        ));
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "idle");
-    }
-
-    /// FIX003.9：Running 态重开在落库步失败——状态停 Paused（段保留内存可续走，非数据丢失态）。
-    #[test]
-    fn restart_running_stays_paused_on_persist_failure() {
+    fn restart_running_keeps_running_on_persist_failure() {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         clock.advance(secs(60));
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = ctx.storage.lock().unwrap();
@@ -570,8 +573,8 @@ mod tests {
         ));
         assert_eq!(
             status_snapshot(&ctx).unwrap().0.state,
-            "paused",
-            "落库失败停 Paused：段未落库保留内存，可继续"
+            "running",
+            "收段落库失败回滚：计时继续（段未丢）"
         );
     }
 
@@ -580,7 +583,6 @@ mod tests {
     fn poisoned_fire_lock_is_strict_error() {
         let ctx = ctx(FakeClock::new());
         begin_duty(&ctx);
-        start_session(&ctx).unwrap();
         // 持锁 panic 污染 fire 锁（catch_unwind 隔离，仅取中毒副作用）
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = ctx.fire.lock().unwrap();
@@ -592,14 +594,18 @@ mod tests {
         ));
     }
 
-    /// 托盘/热键共用的计时切换：Idle→start、Running→pause、Paused→resume 三态循环。
+    /// 托盘/热键共用的计时切换：按当前态切换——PATCH002 起打卡即工作，在岗态只在这两态间循环
+    /// （Running→pause、Paused→resume）；Idle→start 分支仅在未上班出现（被门禁拒绝，见上用例）。
     #[test]
     fn toggle_session_cycles_three_states() {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Start);
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+        assert_eq!(
+            status_snapshot(&ctx).unwrap().0.state,
+            "running",
+            "打卡即工作"
+        );
         clock.advance(secs(10));
         assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Pause);
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
@@ -608,21 +614,74 @@ mod tests {
     }
 
     /// 退出收尾：Running 态先落库（数据不丢）；Paused 段已在 pause 落库、二次收尾幂等；Idle 无事。
+    /// PATCH002 起打卡即工作：在岗初始态即 Running，Idle 只在未上班（用独立 ctx 覆盖）。
     #[test]
     fn persist_before_quit_persists_running_segment() {
+        // Idle（未上班）：无事
+        let idle_ctx = ctx(FakeClock::new());
+        persist_before_quit(&idle_ctx).unwrap();
+        assert_eq!(idle_ctx.storage.lock().unwrap().session_count().unwrap(), 0);
+
+        // Running（打卡即工作）：先落库再收尾
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
-        // Idle：无事
-        persist_before_quit(&ctx).unwrap();
-        assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 0);
-        // Running：先落库再收尾
-        start_session(&ctx).unwrap();
         clock.advance(secs(30));
         persist_before_quit(&ctx).unwrap();
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 30);
         // 收尾后为 Paused，二次收尾幂等（不重复落库）
         persist_before_quit(&ctx).unwrap();
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 30);
+    }
+
+    /// PATCH002：`set_run_mode` 矩阵——前端只发意图，Rust 按当前态裁决且**幂等**。
+    #[test]
+    fn set_run_mode_resolves_from_any_state() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx); // 打卡即工作 → Running
+
+        // Running + Work → 幂等（不报错、不动累计）
+        clock.advance(secs(10));
+        set_run_mode_inner(&ctx, RunMode::Work).unwrap();
+        let s = status_snapshot(&ctx).unwrap().0;
+        assert_eq!(s.state, "running");
+        assert_eq!(s.total_ms, 10_000, "幂等不重置累计");
+
+        // Running + Rest → Paused（收段落库）
+        set_run_mode_inner(&ctx, RunMode::Rest).unwrap();
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 10);
+
+        // Paused + Rest → 幂等
+        set_run_mode_inner(&ctx, RunMode::Rest).unwrap();
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+
+        // Paused + Work → resume（累计继承；暂停期间不累计，故推进假钟放在 resume 之后）
+        set_run_mode_inner(&ctx, RunMode::Work).unwrap();
+        clock.advance(secs(5));
+        let s = status_snapshot(&ctx).unwrap().0;
+        assert_eq!(s.state, "running");
+        assert_eq!(s.total_ms, 15_000, "累计继承（10 + 5）");
+
+        // 未在岗：Work 被门禁拒绝（库零副作用），Rest 幂等
+        //（全路径调用 ctx 助手：本用例已把 ctx 绑定为上下文变量，避免同名遮蔽）
+        let off_ctx = crate::commands::test_support::ctx(FakeClock::new());
+        assert!(matches!(
+            set_run_mode_inner(&off_ctx, RunMode::Work),
+            Err(CommandError::Workday(WorkdayError::NotOnDuty))
+        ));
+        set_run_mode_inner(&off_ctx, RunMode::Rest).unwrap();
+        assert_eq!(off_ctx.storage.lock().unwrap().session_count().unwrap(), 0);
+    }
+
+    /// PATCH002：Idle + Work 走 start 分支（在岗但会话被复位回 Idle 的边界态）。
+    #[test]
+    fn set_run_mode_work_from_idle_starts() {
+        let ctx = ctx(FakeClock::new());
+        begin_duty(&ctx);
+        lock(&ctx).unwrap().reset(); // 复位回 Idle（PATCH002 后仅在未上班出现）
+        set_run_mode_inner(&ctx, RunMode::Work).unwrap();
+        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
     }
 }
