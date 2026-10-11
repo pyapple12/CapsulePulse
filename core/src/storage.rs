@@ -162,6 +162,23 @@ impl Storage {
         }
     }
 
+    /// 查询半开区间 [start, end) 内的工作日行 (id, clock_in_at, clock_out_at)，
+    /// 按上班时刻升序（PL025.6 数据日口径：归属只看 clock_in 落在哪一日，一日可多行 = 多班）。
+    pub fn workday_rows_between(
+        &self,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<(i64, i64, Option<i64>)>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, clock_in_at, clock_out_at FROM workdays
+             WHERE clock_in_at >= ?1 AND clock_in_at < ?2 ORDER BY clock_in_at, id",
+        )?;
+        let rows = stmt.query_map([start, end], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// 全历史最早记录时刻（workdays.clock_in_at 与 events.at 取最小；空库 None）——
     /// 总日均聚合的窗口起点（PL022；数据自首日全量在库，无窗口/清理逻辑）。
     pub fn first_record_at(&self) -> Result<Option<i64>, StorageError> {
@@ -392,6 +409,32 @@ mod tests {
             s.workday_close(99, 2_000),
             Err(StorageError::WorkdayMissing(99))
         ));
+    }
+
+    /// PL025.6：数据日取行——半开区间 [start, end) 按 clock_in 归属，升序返回，空区间空表。
+    #[test]
+    fn workday_rows_between_bounds_and_orders() {
+        let s = Storage::open_in_memory().unwrap();
+        let a = s.workday_open(1_000).unwrap();
+        s.workday_close(a, 2_000).unwrap();
+        let b = s.workday_open(3_000).unwrap();
+        s.workday_close(b, 4_000).unwrap();
+        let _open = s.workday_open(5_000).unwrap(); // 未下班行（clock_out = None）
+        assert_eq!(
+            s.workday_rows_between(1_000, 5_000).unwrap(),
+            vec![(1, 1_000, Some(2_000)), (2, 3_000, Some(4_000))],
+            "右端点不含；未下班行不在区间内"
+        );
+        assert_eq!(
+            s.workday_rows_between(1_000, 5_001).unwrap(),
+            vec![
+                (1, 1_000, Some(2_000)),
+                (2, 3_000, Some(4_000)),
+                (3, 5_000, None)
+            ],
+            "左端点含；未下班行 clock_out 为 None"
+        );
+        assert!(s.workday_rows_between(6_000, 9_000).unwrap().is_empty());
     }
 
     /// W4 数据源：事件写入按 kind 编码，查询按时间序返回类型化结果。

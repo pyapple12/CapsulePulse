@@ -29,7 +29,7 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-use crate::commands::AppContext;
+use crate::commands::{AppContext, AutoOutWatch};
 use crate::reminder::ReminderFire;
 use crate::session::WorkSession;
 use crate::settings::{ReminderSettings, WindowPos};
@@ -38,13 +38,14 @@ use crate::workday::WorkdayState;
 
 /// 运行期警告双写：eprintln（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
 /// 文件日志是唯一落点——FIX003.8）。仅用于失败不中断主流程的容错路径。
-fn warn_diag(msg: &str) {
+pub(crate) fn warn_diag(msg: &str) {
     eprintln!("{msg}");
     diag::log(msg);
 }
 
 /// 显示主窗口并聚焦（还原最小化；失败逐项记日志，不中断流程）。
-fn show_main_window(app: &AppHandle) {
+/// PL025.8 起自动下班待决也走此口（到点前 60s 把窗口拉到前台）。
+pub(crate) fn show_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -298,6 +299,7 @@ pub fn run() {
             storage: Mutex::new(storage),
             settings: Mutex::new(settings),
             fire: Mutex::new(ReminderFire::default()),
+            auto_out: Mutex::new(AutoOutWatch::default()),
             settings_path,
         })
         .invoke_handler(tauri::generate_handler![
@@ -312,6 +314,7 @@ pub fn run() {
             commands::reminder::set_settings,
             commands::workday::clock_in,
             commands::workday::clock_out,
+            commands::workday::overtime,
             commands::workday::day_detail,
             commands::workday::week_detail,
             commands::workday::workday_total,
@@ -361,6 +364,16 @@ pub fn run() {
             }
             build_tray(app)?;
             register_global_shortcuts(app)?;
+            // 兜底自动下班武装（PL025.8）：在岗恢复时按"上班 + N"重建基准并起线程——
+            // 重启后 tick 之外仍有第二道保险（与打卡路径同源：arm → spawn）
+            let ctx = app.state::<AppContext>();
+            match commands::workday::arm_auto_out_on_start(&ctx) {
+                Ok(Some(generation)) => {
+                    commands::workday::spawn_auto_out_watcher(&app.handle().clone(), generation);
+                }
+                Ok(None) => {}
+                Err(err) => warn_diag(&format!("自动下班基准重建失败（兜底线程未武装）：{err}")),
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

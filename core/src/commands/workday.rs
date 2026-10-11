@@ -4,12 +4,15 @@
 
 use chrono::{Datelike, Local, TimeZone};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::{lock, poison, wall_now_secs, AppContext, CommandError};
 use crate::period;
 use crate::session::Clock;
-use crate::workday::{auto_out_due, reduce_day, DaySummary, EventKind, WorkdayError, WorkdayState};
+use crate::workday::{
+    auto_out_at, auto_out_pending, auto_out_step, reduce_day, AutoOutStep, DaySummary, EventKind,
+    WorkdayError, WorkdayState, OVERTIME_CAP_HOURS,
+};
 
 /// 上班打卡：开行 + clock_in 事件入馆（单事务，FIX002.9），再转移状态；会话归零并**立即进入
 /// 工作态**（PATCH002：打卡即工作，大计时器从 0 起跑；此前累计均已落库，无数据丢失）。
@@ -35,6 +38,9 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<i
         &[EventKind::ClockIn, EventKind::SegmentStart],
     )?;
     workday.clock_in(at, id)?;
+    // 武装自动下班基准（PL025.8）：到点时刻 = 上班 + N（设置口径）；兜底线程由命令层 spawn
+    let hours = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
+    set_auto_out_watch(ctx, at + i64::from(hours) * 3_600)?;
     Ok(id)
 }
 
@@ -61,6 +67,8 @@ pub(super) fn clock_out_inner<C: Clock>(
         let mut session = lock(ctx)?;
         session.reset();
     }
+    // 下班即撤基准（PL025.8）：代次 +1 使兜底线程退出
+    clear_auto_out_watch(ctx)?;
     Ok(())
 }
 
@@ -75,29 +83,35 @@ fn day_bounds(offset: i64, now_secs: i64) -> Result<(i64, i64), CommandError> {
     Ok((start, start + 86_400))
 }
 
-/// 单日明细：events 拉取 + 事件归约（图谱与三值唯一装配点，前端零业务）。
-/// 在岗中且上班时刻早于本日零点（跨夜班）时从上班时刻取事件，归约侧裁剪到本日。
-/// 单日事件拉取起点：在岗且上班时刻早于当日零点（跨夜班）时从上班时刻取（PL005 口径，
-/// day_detail 与 week_detail 共用；取锁顺序恒 workday → storage，用后即还）
-fn day_fetch_start<C: Clock>(ctx: &AppContext<C>, day_start: i64) -> Result<i64, CommandError> {
-    let workday = poison("工作日", ctx.workday.lock())?;
-    Ok(match *workday {
-        WorkdayState::OnDuty { clock_in_at, .. } => day_start.min(clock_in_at),
-        WorkdayState::Off => day_start,
-    })
-}
-
-/// 单日摘要管道（day/week 两视图单源，FIX005.4）：日界 → 在岗起点 → 事件区间 → 归约，
+/// 单日摘要管道（day/week 两视图单源，FIX005.4）：日界 → 该日打卡行（在岗窗口）→ 事件区间 → 归约，
 /// 四步只此一处——口径调整改这里即两视图同变，杜绝逐字复制漂移。
+/// PL025.6 数据日口径：**归属只看 clock_in 落在哪个本地日**（跨零点不切分）——窗口取该日
+/// clock_in 的 workdays 行（未下班行闭于 now；可多行 = 同日多班）；事件区间 = [首个 clock_in,
+/// 末个 clock_out（未下班则 now）]，跨零点尾巴随窗口带入（不再按自然日截断）；
+/// 原 `day_fetch_start`（在岗且早于日零点才提前取）随该口径退役。
 pub(super) fn day_summary_inner<C: Clock>(
     ctx: &AppContext<C>,
     offset: i64,
     now_secs: i64,
 ) -> Result<DaySummary, CommandError> {
     let (day_start, day_end) = day_bounds(offset, now_secs)?;
-    let fetch_start = day_fetch_start(ctx, day_start)?;
-    let events = poison("存储", ctx.storage.lock())?.events_between(fetch_start, day_end)?;
-    Ok(reduce_day(&events, day_start, day_end, now_secs))
+    let rows = poison("存储", ctx.storage.lock())?.workday_rows_between(day_start, day_end)?;
+    let mut windows: Vec<(i64, i64)> = Vec::new();
+    let mut open_tail = false;
+    for &(_, clock_in_at, clock_out_at) in &rows {
+        let end = clock_out_at.unwrap_or(now_secs);
+        if end <= clock_in_at {
+            continue; // 零长窗口（误触上下班同一秒）不计
+        }
+        windows.push((clock_in_at, end));
+        open_tail = clock_out_at.is_none();
+    }
+    let Some(&(fetch_start, _)) = windows.first() else {
+        return Ok(reduce_day(&[], &[], false));
+    };
+    let fetch_end = windows.last().map(|&(_, end)| end).unwrap_or(now_secs) + 1;
+    let events = poison("存储", ctx.storage.lock())?.events_between(fetch_start, fetch_end)?;
+    Ok(reduce_day(&windows, &events, open_tail))
 }
 
 /// 周视图行（serde 单一来源，TS 侧镜像 WeekDay）：日期标签 + 星期序 + workday 口径两值。
@@ -227,26 +241,143 @@ pub(super) fn workday_total_inner<C: Clock>(
     Ok(total)
 }
 
-/// 自动下班检查（挂 session_status 评估口）：在岗且满 N 小时 → 以回填时刻执行下班，
-/// 返回回填时刻供调用方发 workday-auto-out 事件；未在岗/未到点返回 None。
+/// 自动下班检查（挂 session_status 评估口）：**基准到点**（PL025.8：打卡武装 = 上班 + N，
+/// 加班后 = 上班 + 12h）→ 以基准时刻执行下班，返回该时刻供调用方发 workday-auto-out 事件；
+/// 未武装（无在岗班）或未到点 → None。口径：执行时刻恒 = 基准本身（与发现时刻无关，
+/// "发现可迟到、账目准时"），**与段状态无关**（在休息态照点执行）。
 pub(super) fn try_auto_clock_out<C: Clock>(
     ctx: &AppContext<C>,
 ) -> Result<Option<i64>, CommandError> {
-    let due_at = {
-        let workday = poison("工作日", ctx.workday.lock())?;
-        match *workday {
-            WorkdayState::OnDuty { clock_in_at, .. } => {
-                let hours = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
-                auto_out_due(wall_now_secs()?, clock_in_at, hours)
-            }
-            WorkdayState::Off => None,
+    let due_at = poison("自动下班", ctx.auto_out.lock())?.due_at;
+    let Some(due) = due_at else {
+        return Ok(None);
+    };
+    if wall_now_secs()? < due {
+        return Ok(None);
+    }
+    // 若恰被并发手动下班，此处严格报错、下一 tick 基准已撤自然消停
+    clock_out_inner(ctx, due, EventKind::AutoClockOut).map(|_| Some(due))
+}
+
+/// 写入自动下班基准（PL025.8）：代次 +1 使旧兜底线程让位、待决提示复位；返回新代次供命令层 spawn。
+pub(super) fn set_auto_out_watch<C: Clock>(
+    ctx: &AppContext<C>,
+    due_at: i64,
+) -> Result<u64, CommandError> {
+    let mut watch = poison("自动下班", ctx.auto_out.lock())?;
+    watch.due_at = Some(due_at);
+    watch.generation = watch.generation.wrapping_add(1);
+    watch.pending_notified = false;
+    Ok(watch.generation)
+}
+
+/// 撤销自动下班基准（下班/退出）：代次 +1 让兜底线程退出。
+pub(super) fn clear_auto_out_watch<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    let mut watch = poison("自动下班", ctx.auto_out.lock())?;
+    watch.due_at = None;
+    watch.generation = watch.generation.wrapping_add(1);
+    Ok(())
+}
+
+/// 读当前基准与代次（兜底线程用）：锁中毒按"无基准"处理并落档——线程无调用方可上抛。
+fn read_auto_out_watch(app: &AppHandle) -> Option<(Option<i64>, u64)> {
+    let ctx = app.state::<AppContext>();
+    let read = match ctx.auto_out.lock() {
+        Ok(watch) => Some((watch.due_at, watch.generation)),
+        Err(_) => {
+            crate::warn_diag("自动下班基准锁中毒，兜底线程退出");
+            None
         }
     };
-    match due_at {
-        // 若恰被并发手动下班，此处严格报错、下一 tick 状态已 Off 自然消停
-        Some(out_at) => clock_out_inner(ctx, out_at, EventKind::AutoClockOut).map(|_| Some(out_at)),
-        None => Ok(None),
+    read
+}
+
+/// 自动下班待决判定（PL025.8）：到点前 60s 内且本轮尚未提示过 → 置提示标志并返回到点时刻
+/// （同一基准只提示一次；基准变更时标志复位）。无基准（未武装）不提示。
+pub(super) fn auto_out_pending_inner<C: Clock>(
+    ctx: &AppContext<C>,
+    now: i64,
+) -> Result<Option<i64>, CommandError> {
+    let mut watch = poison("自动下班", ctx.auto_out.lock())?;
+    if watch.pending_notified {
+        return Ok(None);
     }
+    let Some(due) = auto_out_pending(watch.due_at, now) else {
+        return Ok(None);
+    };
+    watch.pending_notified = true;
+    Ok(Some(due))
+}
+
+/// 加班（PL025.9）：本班下班基准拉满到 `clock_in + 12h` + 写 overtime 事件（留痕）；
+/// 已 ≥12h 严格报错（`AlreadyAtOvertimeCap`）。**不动段事件**——用户可能正在工作段或休息段，
+/// 计时与图谱不受影响；返回新代次供命令层重排兜底线程。
+pub(super) fn overtime_inner<C: Clock>(ctx: &AppContext<C>, now: i64) -> Result<u64, CommandError> {
+    let clock_in_at = {
+        let workday = poison("工作日", ctx.workday.lock())?;
+        match *workday {
+            WorkdayState::OnDuty { clock_in_at, .. } => clock_in_at,
+            WorkdayState::Off => return Err(CommandError::Workday(WorkdayError::NotOnDuty)),
+        }
+    };
+    let cap_at = auto_out_at(clock_in_at, OVERTIME_CAP_HOURS);
+    if now >= cap_at {
+        return Err(CommandError::AlreadyAtOvertimeCap(OVERTIME_CAP_HOURS));
+    }
+    poison("存储", ctx.storage.lock())?.insert_event(now, EventKind::Overtime)?;
+    set_auto_out_watch(ctx, cap_at)
+}
+
+/// 启动武装（PL025.8）：在岗恢复时按"上班 + N"重建基准并返回代次（未在岗返回 None）。
+/// 重启后基准随 AppContext 清零，不重建则兜底线程无基准可依——与打卡路径同源（arm → spawn）。
+pub(crate) fn arm_auto_out_on_start<C: Clock>(
+    ctx: &AppContext<C>,
+) -> Result<Option<u64>, CommandError> {
+    let clock_in_at = {
+        let workday = poison("工作日", ctx.workday.lock())?;
+        match *workday {
+            WorkdayState::OnDuty { clock_in_at, .. } => clock_in_at,
+            WorkdayState::Off => return Ok(None),
+        }
+    };
+    let hours = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
+    set_auto_out_watch(ctx, auto_out_at(clock_in_at, hours)).map(Some)
+}
+
+/// 兜底自动下班线程（PL025.8）：到点自动下班——前端被关/崩溃也必执行。
+/// 循环读基准按 [`AutoOutStep`] 行动：未到点睡到点（远期按 60s 上限轮询，基准变更 1 分钟内被感知），
+/// 到点以基准时刻执行；基准换代（加班/下班/重新打卡）即让位，由新线程接手。
+pub(crate) fn spawn_auto_out_watcher(app: &AppHandle, generation: u64) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        let Some((due_at, current)) = read_auto_out_watch(&app) else {
+            return;
+        };
+        let now = match wall_now_secs() {
+            Ok(now) => now,
+            Err(err) => {
+                crate::warn_diag(&format!("兜底自动下班时钟异常，线程退出：{err}"));
+                return;
+            }
+        };
+        match auto_out_step(due_at, generation, current, now) {
+            AutoOutStep::Stop | AutoOutStep::Yield => return,
+            AutoOutStep::Wait(secs) => std::thread::sleep(std::time::Duration::from_secs(secs)),
+            AutoOutStep::Fire(at) => {
+                let ctx = app.state::<AppContext>();
+                match clock_out_inner(&ctx, at, EventKind::AutoClockOut) {
+                    Ok(()) => {
+                        if let Err(err) = app.emit("workday-auto-out", at) {
+                            crate::warn_diag(&format!("兜底自动下班事件发送失败：{err}"));
+                        }
+                    }
+                    // 并发手动下班后到点：状态已 Off，报错属预期
+                    Err(err) => crate::warn_diag(&format!("兜底自动下班未执行：{err}")),
+                }
+                return;
+            }
+        }
+    });
 }
 /// 计时门禁：未上班严格拒绝（前后端双保险的后端面；托盘/热键/UI 共用）。
 pub(super) fn require_on_duty<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
@@ -257,10 +388,12 @@ pub(super) fn require_on_duty<C: Clock>(ctx: &AppContext<C>) -> Result<(), Comma
     Ok(())
 }
 
-/// 上班打卡（前端确认框确认后调用）。
+/// 上班打卡（前端确认框确认后调用）；顺路武装兜底自动下班线程（PL025.8：前端死也必下班）。
 #[tauri::command]
-pub fn clock_in(handle: State<'_, AppContext>) -> Result<(), CommandError> {
+pub fn clock_in(handle: State<'_, AppContext>, app: AppHandle) -> Result<(), CommandError> {
     clock_in_inner(&handle, wall_now_secs()?)?;
+    let generation = poison("自动下班", handle.auto_out.lock())?.generation;
+    spawn_auto_out_watcher(&app, generation);
     Ok(())
 }
 
@@ -268,6 +401,14 @@ pub fn clock_in(handle: State<'_, AppContext>) -> Result<(), CommandError> {
 #[tauri::command]
 pub fn clock_out(handle: State<'_, AppContext>) -> Result<(), CommandError> {
     clock_out_inner(&handle, wall_now_secs()?, EventKind::ClockOut)?;
+    Ok(())
+}
+
+/// 加班（PL025.9）：把本班下班基准拉满到 12h；顺路重排兜底线程（代次换代 → 旧线程让位）。
+#[tauri::command]
+pub fn overtime(handle: State<'_, AppContext>, app: AppHandle) -> Result<(), CommandError> {
+    let generation = overtime_inner(&handle, wall_now_secs()?)?;
+    spawn_auto_out_watcher(&app, generation);
     Ok(())
 }
 
@@ -454,7 +595,8 @@ mod tests {
         ));
     }
 
-    /// W4：day_detail 装配——种子事件归约为三值与区块（在岗 8h/工作 3h/休息 5h）。
+    /// W4：day_detail 装配——种子归约为三值与区块（在岗 8h/工作 3h/休息 5h）。
+    /// PL025.6：在岗窗口来自 workdays 行（数据日 = 打卡日），事件只补段末。
     #[test]
     fn day_detail_reduces_seeded_events() {
         let ctx = ctx(FakeClock::new());
@@ -462,17 +604,17 @@ mod tests {
         let day_start = period::day_start_secs(&Local::now());
         {
             let storage = ctx.storage.lock().unwrap();
-            storage
-                .insert_event(day_start + 9 * 3_600, EventKind::ClockIn)
-                .unwrap();
-            storage
-                .insert_event(day_start + 9 * 3_600, EventKind::SegmentStart)
+            let id = storage
+                .workday_open_with_events(
+                    day_start + 9 * 3_600,
+                    &[EventKind::ClockIn, EventKind::SegmentStart],
+                )
                 .unwrap();
             storage
                 .insert_event(day_start + 12 * 3_600, EventKind::SegmentEnd)
                 .unwrap();
             storage
-                .insert_event(day_start + 17 * 3_600, EventKind::ClockOut)
+                .workday_close_with_event(id, day_start + 17 * 3_600, EventKind::ClockOut)
                 .unwrap();
         }
         let sum = day_summary_inner(&ctx, 0, now).unwrap();
@@ -484,7 +626,7 @@ mod tests {
         assert_eq!(sum.duty_ended_at, Some(day_start + 17 * 3_600));
     }
 
-    /// day_detail 前后日翻看：昨日事件只在 offset = -1 可见，今日为空日。
+    /// day_detail 前后日翻看：昨日班只在 offset = -1 可见，今日为空日。
     #[test]
     fn day_detail_offset_browses_days() {
         let ctx = ctx(FakeClock::new());
@@ -493,15 +635,99 @@ mod tests {
         let yesterday_in = day_start - 86_400 + 9 * 3_600;
         {
             let storage = ctx.storage.lock().unwrap();
-            storage
-                .insert_event(yesterday_in, EventKind::ClockIn)
+            let id = storage
+                .workday_open_with_events(yesterday_in, &[EventKind::ClockIn])
                 .unwrap();
             storage
-                .insert_event(yesterday_in + 3_600, EventKind::ClockOut)
+                .workday_close_with_event(id, yesterday_in + 3_600, EventKind::ClockOut)
                 .unwrap();
         }
         assert_eq!(day_summary_inner(&ctx, 0, now).unwrap().duty_secs, 0);
         assert_eq!(day_summary_inner(&ctx, -1, now).unwrap().duty_secs, 3_600);
+    }
+
+    /// PL025.6：跨零点班归打卡日——23:00 打卡、次日 07:00 下班，次日视图全零。
+    #[test]
+    fn cross_midnight_shift_belongs_to_clock_in_day() {
+        let ctx = ctx(FakeClock::new());
+        let now = Local::now().timestamp();
+        let day_start = period::day_start_secs(&Local::now());
+        let in_at = day_start - 86_400 + 23 * 3_600;
+        let out_at = in_at + 8 * 3_600;
+        {
+            let storage = ctx.storage.lock().unwrap();
+            let id = storage
+                .workday_open_with_events(in_at, &[EventKind::ClockIn, EventKind::SegmentStart])
+                .unwrap();
+            storage.insert_event(out_at, EventKind::SegmentEnd).unwrap();
+            storage
+                .workday_close_with_event(id, out_at, EventKind::ClockOut)
+                .unwrap();
+        }
+        let day = day_summary_inner(&ctx, -1, now).unwrap();
+        assert_eq!(day.duty_secs, 8 * 3_600, "整班归打卡日（不按自然日切分）");
+        assert_eq!(day.work_secs, 8 * 3_600);
+        assert_eq!(day.duty_ended_at, Some(out_at), "终点越过日界保留");
+        let today = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(today.duty_secs, 0, "次日无打卡行 → 无窗口");
+    }
+
+    /// PL025.6：同日两班（打卡→下班→打卡）→ 两个在岗窗口各自成段，三值不重不漏。
+    #[test]
+    fn same_day_two_shifts_are_two_windows() {
+        let ctx = ctx(FakeClock::new());
+        let now = Local::now().timestamp();
+        let day_start = period::day_start_secs(&Local::now());
+        {
+            let storage = ctx.storage.lock().unwrap();
+            let first = storage
+                .workday_open_with_events(
+                    day_start + 9 * 3_600,
+                    &[EventKind::ClockIn, EventKind::SegmentStart],
+                )
+                .unwrap();
+            storage
+                .insert_event(day_start + 12 * 3_600, EventKind::SegmentEnd)
+                .unwrap();
+            storage
+                .workday_close_with_event(first, day_start + 12 * 3_600, EventKind::ClockOut)
+                .unwrap();
+            let second = storage
+                .workday_open_with_events(
+                    day_start + 14 * 3_600,
+                    &[EventKind::ClockIn, EventKind::SegmentStart],
+                )
+                .unwrap();
+            storage
+                .insert_event(day_start + 18 * 3_600, EventKind::SegmentEnd)
+                .unwrap();
+            storage
+                .workday_close_with_event(second, day_start + 18 * 3_600, EventKind::ClockOut)
+                .unwrap();
+        }
+        let sum = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(sum.duty_secs, 7 * 3_600);
+        assert_eq!(sum.work_secs, 7 * 3_600);
+        assert_eq!(sum.rest_secs, 0);
+        assert_eq!(sum.duty_started_at, Some(day_start + 9 * 3_600));
+        assert_eq!(sum.duty_ended_at, Some(day_start + 18 * 3_600));
+        assert_eq!(sum.blocks.len(), 2, "两班各一块（班间空档不是块）");
+    }
+
+    /// PL025.6：打卡即工作首段——clock_in 事务里那条 segment_start 生效，首块即 Work。
+    #[test]
+    fn clock_in_first_segment_is_work() {
+        let ctx = ctx(FakeClock::new());
+        let now = Local::now().timestamp();
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 60).unwrap(); // 取当日极早时刻，窗口必闭于 now
+        let sum = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(
+            sum.blocks.first().map(|b| b.kind),
+            Some(crate::workday::BlockKind::Work)
+        );
+        assert!(sum.work_secs > 0, "打卡那刻起就有工作段");
+        assert_eq!(sum.duty_ended_at, None, "未下班 → 在岗中");
     }
 
     /// 把某"今日零点 + N 日"的秒时间戳格式化为 MM-DD（周用例的期望值锚）。
@@ -523,16 +749,18 @@ mod tests {
     }
 
     /// 在"今日零点 + day_shift 日"种一个完整班：上班 09:00、工作 [09:00, +work)、下班 09:00+duty。
+    /// PL025.6：在岗窗口来自 workdays 行（数据日 = 打卡日），事件补段起止与打卡留痕。
     fn seed_day<C: Clock>(ctx: &AppContext<C>, day_shift: i64, work: i64, duty: i64) {
         let base = period::day_start_secs(&Local::now()) + day_shift * 86_400 + 9 * 3_600;
         let storage = ctx.storage.lock().unwrap();
-        storage.insert_event(base, EventKind::ClockIn).unwrap();
-        storage.insert_event(base, EventKind::SegmentStart).unwrap();
+        let id = storage
+            .workday_open_with_events(base, &[EventKind::ClockIn, EventKind::SegmentStart])
+            .unwrap();
         storage
             .insert_event(base + work, EventKind::SegmentEnd)
             .unwrap();
         storage
-            .insert_event(base + duty, EventKind::ClockOut)
+            .workday_close_with_event(id, base + duty, EventKind::ClockOut)
             .unwrap();
     }
 
@@ -579,17 +807,17 @@ mod tests {
         let last_sunday = wed - 2 * 86_400 - 86_400;
         {
             let storage = ctx.storage.lock().unwrap();
-            storage
-                .insert_event(last_sunday + 9 * 3_600, EventKind::ClockIn)
-                .unwrap();
-            storage
-                .insert_event(last_sunday + 9 * 3_600, EventKind::SegmentStart)
+            let id = storage
+                .workday_open_with_events(
+                    last_sunday + 9 * 3_600,
+                    &[EventKind::ClockIn, EventKind::SegmentStart],
+                )
                 .unwrap();
             storage
                 .insert_event(last_sunday + 10 * 3_600, EventKind::SegmentEnd)
                 .unwrap();
             storage
-                .insert_event(last_sunday + 11 * 3_600, EventKind::ClockOut)
+                .workday_close_with_event(id, last_sunday + 11 * 3_600, EventKind::ClockOut)
                 .unwrap();
         }
         let prev = week_detail_inner(&ctx, -7, now).unwrap();
@@ -673,5 +901,87 @@ mod tests {
         // 未上班：不动
         clock_out_inner(&ctx, wall_now_secs().unwrap(), EventKind::ClockOut).unwrap();
         assert_eq!(try_auto_clock_out(&ctx).unwrap(), None);
+    }
+
+    /// PL025.8：打卡武装基准（到点 = 上班 + N）；待决提示同一基准只发一次；下班撤基准。
+    #[test]
+    fn clock_in_arms_and_clock_out_clears_auto_out() {
+        let ctx = ctx(FakeClock::new());
+        clock_in_inner(&ctx, 1_000).unwrap();
+        let due = 1_000 + 8 * 3_600;
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(due),
+            "打卡武装到点 = 上班 + N（设置口径）"
+        );
+        assert_eq!(auto_out_pending_inner(&ctx, due - 61).unwrap(), None);
+        assert_eq!(
+            auto_out_pending_inner(&ctx, due - 60).unwrap(),
+            Some(due),
+            "恰 60s 进待决窗口"
+        );
+        assert_eq!(
+            auto_out_pending_inner(&ctx, due - 20).unwrap(),
+            None,
+            "同一基准只提示一次"
+        );
+        clock_out_inner(&ctx, 2_000, EventKind::ClockOut).unwrap();
+        assert_eq!(ctx.auto_out.lock().unwrap().due_at, None, "下班撤基准");
+    }
+
+    /// PL025.9：加班拉满 12h + 写 overtime 事件 + 换代；不动段事件；已满 12h / 未上班严格报错。
+    #[test]
+    fn overtime_sets_cap_and_errors() {
+        let off = ctx(FakeClock::new());
+        assert!(matches!(
+            overtime_inner(&off, 1_000),
+            Err(CommandError::Workday(WorkdayError::NotOnDuty))
+        ));
+
+        let ctx = ctx(FakeClock::new());
+        let in_at = wall_now_secs().unwrap();
+        clock_in_inner(&ctx, in_at).unwrap();
+        let starts_before = event_kinds(&ctx)
+            .iter()
+            .filter(|k| **k == EventKind::SegmentStart)
+            .count();
+        let generation_before = ctx.auto_out.lock().unwrap().generation;
+        let generation = overtime_inner(&ctx, in_at + 3_600).unwrap();
+        assert!(generation > generation_before, "加班换代 → 旧兜底线程让位");
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(in_at + 12 * 3_600),
+            "基准拉满到上班 + 12h"
+        );
+        let kinds = event_kinds(&ctx);
+        assert!(kinds.contains(&EventKind::Overtime), "加班事件入馆（留痕）");
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|k| **k == EventKind::SegmentStart)
+                .count(),
+            starts_before,
+            "加班不动段事件"
+        );
+        assert!(matches!(
+            overtime_inner(&ctx, in_at + 12 * 3_600),
+            Err(CommandError::AlreadyAtOvertimeCap(12))
+        ));
+    }
+
+    /// PL025.8：重启武装——在岗恢复时按"上班 + N"重建基准；未在岗返回 None。
+    #[test]
+    fn arm_on_start_rebuilds_baseline() {
+        let ctx = ctx(FakeClock::new());
+        assert_eq!(arm_auto_out_on_start(&ctx).unwrap(), None, "未在岗不武装");
+        clock_in_inner(&ctx, 1_000).unwrap();
+        {
+            // 模拟重启后 AppContext 清零
+            let mut watch = ctx.auto_out.lock().unwrap();
+            watch.due_at = None;
+        }
+        let generation = arm_auto_out_on_start(&ctx).unwrap().unwrap();
+        assert_eq!(ctx.auto_out.lock().unwrap().due_at, Some(1_000 + 8 * 3_600));
+        assert!(generation > 0, "重建即换代");
     }
 }

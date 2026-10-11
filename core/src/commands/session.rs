@@ -284,7 +284,13 @@ pub async fn session_status(
 ) -> Result<SessionStatus, CommandError> {
     let (status, decision) = status_snapshot(&handle)?;
     super::reminder::deliver_reminder(&app, decision)?;
-    // 自动下班检查挂现有 tick 评估口（与提醒同构）：到点以回填时刻下班并发事件；
+    // 自动下班待决（PL025.8）：到点前 60s 提示一次——发事件（前端弹倒计时框）+ 把窗口拉到前台
+    if let Some(due_at) = super::workday::auto_out_pending_inner(&handle, wall_now_secs()?)? {
+        app.emit("workday-auto-out-pending", due_at)
+            .map_err(|e| CommandError::Event(e.to_string()))?;
+        crate::show_main_window(&app);
+    }
+    // 自动下班检查挂现有 tick 评估口（与提醒同构）：到点以基准时刻下班并发事件；
     // 本帧 status 可能仍是关闭前的快照，前端下一 tick（100ms）自然对齐
     if let Some(out_at) = super::workday::try_auto_clock_out(&handle)? {
         app.emit("workday-auto-out", out_at)

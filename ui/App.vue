@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -42,6 +42,11 @@ const confirmMode = ref<"in" | "out" | null>(null);
 const statsOpen = ref(false);
 const autoOutVisible = ref(false);
 const autoOutAt = ref(0);
+// PL025.8 自动下班待决：到点前 60s 弹确认框（倒计时 + 下班/加班）——到点由后端执行，前端只展示
+const autoOutDue = ref<number | null>(null);
+const autoOutLeft = ref(0);
+let autoOutCountdown: number | undefined;
+let unlistenAutoOutPending: (() => void) | undefined;
 // 统计视图刷新信号：计时/打卡动作后自增，StatsView watch 重拉（保持 Rust 不推送定案）
 const statsRefreshKey = ref(0);
 let statsTimer: number | undefined;
@@ -249,6 +254,70 @@ async function onConfirmOk(): Promise<void> {
   statsRefreshKey.value++;
 }
 
+/** PL025.8 自动下班待决：记到点时刻并起 1s 倒计时（后端已把窗口拉到前台，前端只展示与选择） */
+function showAutoOutPending(dueAt: number): void {
+  autoOutDue.value = dueAt;
+  tickAutoOutLeft();
+  if (autoOutCountdown === undefined) {
+    autoOutCountdown = window.setInterval(tickAutoOutLeft, 1000);
+  }
+}
+
+/** 倒计时刷新（到点即 0；到点后后端执行并回 workday-auto-out → 关框） */
+function tickAutoOutLeft(): void {
+  const due = autoOutDue.value;
+  autoOutLeft.value = due == null ? 0 : Math.max(0, Math.ceil(due - Date.now() / 1000));
+}
+
+/** 关自动下班确认框（下班/加班/后端已执行都走这里），并清倒计时句柄 */
+function closeAutoOutPending(): void {
+  autoOutDue.value = null;
+  autoOutLeft.value = 0;
+  if (autoOutCountdown !== undefined) {
+    window.clearInterval(autoOutCountdown);
+    autoOutCountdown = undefined;
+  }
+}
+
+/** 加班钮可见性（PL025.9）：已满 12h 或 设置本就是 12h → 加班等于拉满到同值，无意义即隐藏。
+ * 依赖 autoOutLeft（框开着时每秒刷新）保证到点判定随之更新。 */
+const canOvertime = computed(() => {
+  void autoOutLeft.value;
+  const hours = settings.value?.workday_auto_out_hours ?? null;
+  const startedAt = day.value?.duty_started_at ?? null;
+  if (hours == null || startedAt == null || hours >= 12) {
+    return false;
+  }
+  return Date.now() / 1000 < startedAt + 12 * 3600;
+});
+
+/** 自动下班框「下班」：立即打卡下班（后端按基准时刻记账） */
+async function onAutoOutClockOut(): Promise<void> {
+  actionError.value = "";
+  try {
+    await invoke("clock_out");
+  } catch (err) {
+    actionError.value = `下班失败：${String(err)}`;
+    console.error("clock_out 调用失败", err);
+  }
+  closeAutoOutPending();
+  reminderVisible.value = false;
+  void refreshStats();
+  statsRefreshKey.value++;
+}
+
+/** 自动下班框「加班」：把本班基准拉满 12h（计时继续）；失败经错误条可见 */
+async function onAutoOutOvertime(): Promise<void> {
+  actionError.value = "";
+  try {
+    await invoke("overtime");
+  } catch (err) {
+    actionError.value = `加班失败：${String(err)}`;
+    console.error("overtime 调用失败", err);
+  }
+  closeAutoOutPending();
+}
+
 onMounted(() => {
   void refreshStats();
   void refreshSettings();
@@ -296,6 +365,8 @@ onMounted(() => {
   listen<number>("workday-auto-out", (event) => {
     autoOutAt.value = event.payload;
     autoOutVisible.value = true;
+    // 后端已执行（tick 或兜底线程）→ 待决确认框随之关闭（PL025.8）
+    closeAutoOutPending();
     if (autoOutHideTimer !== undefined) {
       window.clearTimeout(autoOutHideTimer);
     }
@@ -310,6 +381,18 @@ onMounted(() => {
       unlistenAutoOut = un;
     })
     .catch((err) => console.error("workday-auto-out 监听注册失败", err));
+  // PL025.8 workday-auto-out-pending：payload = 到点时刻——弹确认框（倒计时 + 下班/加班）；
+  // 后端同时已把窗口拉到前台（show/unminimize/set_focus），前端只管展示与选择
+  listen<number>("workday-auto-out-pending", (event) => {
+    showAutoOutPending(event.payload);
+  })
+    .then((un) => {
+      unlistenAutoOutPending = un;
+    })
+    .catch((err) => {
+      actionError.value = `自动下班提示监听注册失败：${String(err)}`;
+      console.error("workday-auto-out-pending 监听注册失败", err);
+    });
 });
 
 onUnmounted(() => {
@@ -319,9 +402,13 @@ onUnmounted(() => {
   if (autoOutHideTimer !== undefined) {
     window.clearTimeout(autoOutHideTimer);
   }
+  if (autoOutCountdown !== undefined) {
+    window.clearInterval(autoOutCountdown);
+  }
   window.removeEventListener("mousedown", onWindowDown);
   unlistenReminder?.();
   unlistenAutoOut?.();
+  unlistenAutoOutPending?.();
   unlistenFocus?.();
   destroyTitleParticles?.();
   destroyThresholdDrag?.();
@@ -408,6 +495,19 @@ onUnmounted(() => {
       "
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel"
+    />
+
+    <!-- PL025.8 自动下班确认框（到点前 60s 弹出，复用同一形态）：倒计时 + 下班/加班 -->
+    <ConfirmModal
+      :open="autoOutDue != null"
+      title="即将自动下班"
+      :message="`上班满 ${settings?.workday_auto_out_hours ?? 8} 小时，到点将自动下班并记账。`"
+      :note="autoOutLeft > 0 ? `剩余 ${autoOutLeft} 秒` : '正在自动下班…'"
+      ok-text="下班"
+      cancel-text="加班"
+      :cancel-visible="canOvertime"
+      @confirm="onAutoOutClockOut"
+      @cancel="onAutoOutOvertime"
     />
 
     <!-- 设置板（design：自齿轮中心缩放飞出，覆于内容之上；settings 就绪才挂载） -->

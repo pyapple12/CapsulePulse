@@ -24,10 +24,23 @@ use crate::settings::ReminderSettings;
 use crate::storage::Storage;
 use crate::workday::WorkdayState;
 
+/// 自动下班基准与代次（PL025.8）：当前在岗班的到点时刻（`clock_in + N`；加班改为 `clock_in + 12h`）。
+/// 代次每次写入 +1——兜底线程据它判断"基准是否已换代"（换代即让位退出，由新线程接手）；
+/// 待决提示标志使到点前 60s 只提示一次（基准变更时清零）。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AutoOutWatch {
+    /// 到点时刻（Unix 秒）；`None` = 无在岗班 / 已下班。
+    pub due_at: Option<i64>,
+    /// 代次（每次基准写入 +1）。
+    pub generation: u64,
+    /// 待决提示是否已发（到点前 60s 只提示一次）。
+    pub pending_notified: bool,
+}
+
 /// 应用级共享上下文：工作日状态 + 会话状态机 + 存储 + 提醒设置与触发状态。
 /// lib.rs 经 `.manage()` 注册，各命令经 State 访问。泛型默认 [`RealClock`]；测试注入假钟。
 /// rusqlite Connection 非 Sync，故 Storage 亦入 Mutex；
-/// 锁序恒 workday → session → storage/settings/fire 单向（禁反向嵌套，防死锁）。
+/// 锁序恒 workday → session → storage/settings/fire → auto_out 单向（禁反向嵌套，防死锁）。
 /// 线程现状（FIX002.8）：写命令同步（主线程串行），四个读命令（status/stats/day/week）已 async 化——
 /// 全面 async 化后本锁序纪律即实际承压面，新增命令必须遵守。
 pub struct AppContext<C: Clock = RealClock> {
@@ -41,6 +54,8 @@ pub struct AppContext<C: Clock = RealClock> {
     pub settings: Mutex<ReminderSettings>,
     /// 提醒段内触发状态（暂停/开始/重开时 clear）。
     pub fire: Mutex<ReminderFire>,
+    /// 自动下班基准与兜底线程代次（PL025.8；锁序末位取用）。
+    pub auto_out: Mutex<AutoOutWatch>,
     /// 设置文件路径（set_settings 持久化目标）。
     pub settings_path: PathBuf,
 }
@@ -63,6 +78,9 @@ pub enum CommandError {
     /// 在岗期间禁止修改自动下班小时数（PL025.5：本班基准不可中途改，账目口径唯一）。
     #[error("在岗期间不可修改自动下班小时数（本班按 {0} 小时计）")]
     AutoOutLockedOnDuty(u32),
+    /// 已到加班上限（PL025.9：拉满 12h 后只能下班）。
+    #[error("已到加班上限（{0} 小时），请下班")]
+    AlreadyAtOvertimeCap(u32),
     /// 锁中毒（此前持锁线程 panic）——携带锁名严格报错，不静默续行（y.problems#5②：文案如实反映是哪把锁）。
     #[error("{0}锁已中毒（此前持锁线程异常终止）")]
     Poisoned(&'static str),
@@ -152,6 +170,7 @@ pub(crate) mod test_support {
             storage: Mutex::new(Storage::open_in_memory().unwrap()),
             settings: Mutex::new(ReminderSettings::default()),
             fire: Mutex::new(ReminderFire::default()),
+            auto_out: Mutex::new(AutoOutWatch::default()),
             settings_path: temp_settings_path("ctx"),
         }
     }

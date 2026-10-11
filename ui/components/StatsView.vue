@@ -103,7 +103,7 @@ function graphHhmm(ms: number): string {
 interface GraphSeg {
   t0: number;
   t1: number;
-  kind: "work" | "rest";
+  kind: "work" | "rest" | "gap";
 }
 
 /** graphSvg 内的子节点引用（bars 复用更新 / comet 白纹容器） */
@@ -158,23 +158,39 @@ function renderGraph(): void {
   const clockIn = d.duty_started_at * 1000;
   const autoOut = (props.autoOutHours ?? 8) * 3_600_000;
   const isToday = offset.value >= 0;
+  const onDutyToday = isToday && d.duty_ended_at == null;
   const nowMs = Date.now();
 
   // 段源：真实块（秒 → ms）；同态延伸只做同 kind（异态分界由下次刷新的块数据承担）
-  const segs: GraphSeg[] = d.blocks.map((b) => ({
+  const blocks: GraphSeg[] = d.blocks.map((b) => ({
     t0: b.start * 1000,
     t1: (b.end || Math.floor(nowMs / 1000)) * 1000,
     kind: b.kind,
   }));
+  // PL025.7：blocks 只覆盖在岗窗口，时间轴上的空洞 = 不在岗空档（同日两班之间等）→ 插 gap 段
+  const segs: GraphSeg[] = [];
+  let lastEnd: number | null = null;
+  for (const b of blocks) {
+    if (lastEnd != null && b.t0 > lastEnd) {
+      segs.push({ t0: lastEnd, t1: b.t0, kind: "gap" });
+    }
+    segs.push(b);
+    lastEnd = b.t1;
+  }
   const tail = segs[segs.length - 1];
-  if (isToday && d.duty_ended_at == null && tail) {
+  if (onDutyToday && tail) {
     const wallNow = Math.floor(nowMs / 1000) * 1000;
     if (wallNow > tail.t1) {
       tail.t1 = wallNow;
     }
   }
 
-  const endTs = isToday ? clockIn + autoOut : segs[segs.length - 1]!.t1;
+  // PL025.10 轴末口径 (a)：今日在岗 → 轴末 = **当前在岗那一班**的打卡 + 自动下班小时
+  // （当前班起点 = 最后一个 gap 之后的第一块起点；无 gap 则首块起点）——修掉"再打卡后第二班
+  // 超出轴末被裁断"（旧口径恒按今天第一班打卡算）；今日已下班 / 过去日 = 末块末尾（落定重画）
+  const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
+  const currentShiftStart = lastGap ? lastGap.t1 : blocks[0]!.t0;
+  const endTs = onDutyToday ? currentShiftStart + autoOut : segs[segs.length - 1]!.t1;
   const nowTs = isToday ? nowMs : endTs;
   const W = svg.clientWidth;
   if (W > 0 && svg.viewBox.baseVal.width !== W) {
@@ -204,8 +220,11 @@ function renderGraph(): void {
       w: xpx(capped) - xpx(t0),
       active: nowTs < endTs && capped === nowTs,
     });
-    if (i > 0 && st !== segs[i - 1]!.kind) {
-      nodes.push({ ts: t0, ch: st === "rest" ? "R" : "W", kind: st });
+    if (i === 0 || st !== segs[i - 1]!.kind) {
+      // PL025.10 节点语义 = 进入状态那一刻：进入工作 W / 进入休息 R / 进灰（= 上一班末）D；
+      // 首段起点也打点（旧 `i > 0` 抑制是设计单班时代遗留，多班后表现为"只有第一班缺 W"）
+      const ch = st === "gap" ? "D" : st === "rest" ? "R" : "W";
+      nodes.push({ ts: t0, ch, kind: st === "gap" ? "end" : st });
     }
   });
   if (nowTs < endTs) {
@@ -232,8 +251,12 @@ function renderGraph(): void {
   const nodesG = svg.querySelector<SVGGElement>("#graphNodes");
   if (nodesG) {
     nodesG.innerHTML = "";
-    for (const n of nodes) {
-      const off = n.kind === "end" ? 12 : 6;
+    nodes.forEach((n, i) => {
+      // PL025.10 节点贴边三态：① 首节点内缩（x=0 时 off=6 会被左圆角裁掉一半）；
+      // ② 中段 D（班末，进灰处）与 R/W 一样**骑交界**（off=6，圆心落在交界线上）；
+      // ③ 轴末 D（列表末位 = "下班 D"）**右贴端**（off=12，圆占 [x−12, x] 防右圆角裁半，设计原样）
+      const isAxisEnd = i === nodes.length - 1;
+      const off = isAxisEnd ? 12 : n.ts <= clockIn ? 0 : 6;
       const g = document.createElementNS(SVG_NS, "g");
       g.setAttribute("class", `graph-node ${n.kind}${n.ts <= nowTs ? " lit" : ""}`);
       g.setAttribute("transform", `translate(${(xpx(n.ts) - off).toFixed(2)} 0)`);
@@ -241,7 +264,7 @@ function renderGraph(): void {
         '<circle cx="6" cy="6" r="5.4" /><text x="6" y="6" dy="-0.5" text-anchor="middle" dominant-baseline="central"></text>';
       (g.querySelector("text") as SVGTextElement).textContent = n.ch;
       nodesG.append(g);
-    }
+    });
   }
 
   // 轴标

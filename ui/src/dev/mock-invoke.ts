@@ -147,6 +147,9 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
       mockAccumMs = 0;
       mockState = "paused";
       return null;
+    /* PL025.9：加班（后端把基准拉满 12h）——DEV 基座无基准概念，只做"命令存在"的占位 */
+    case "overtime":
+      return null;
     /* 窗口/事件插件面：isFocused 恒真（分态纱初值兜底）、拖拽空操作、listen/unlisten 发假 id */
     case "plugin:window|is_focused":
       return true;
