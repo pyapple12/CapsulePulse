@@ -7,7 +7,18 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// 提醒设置（serde 结构单一来源，前端经 get/set 命令读写）。
+/// 窗口位置（物理像素；`outer_position` 的原样记录，PATCH001.4）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowPos {
+    /// 窗口左上角 x（物理像素）
+    pub x: i32,
+    /// 窗口左上角 y（物理像素）
+    pub y: i32,
+}
+
+/// 应用设置（serde 结构单一来源，前端经 get/set 命令读写）。
+/// 命名沿历史（原为纯提醒设置）：config.json 是单一设置文件，本结构还承载窗口位置等
+/// **Rust 自管字段**——前端不参与，`set_settings` 整结构覆盖时由命令层继承（见 commands/reminder）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReminderSettings {
     /// 连续工作提醒阈值（分钟，1–99；上限与设计设置板输入框 max=99 同源，PL019.4）。
@@ -23,6 +34,9 @@ pub struct ReminderSettings {
     /// （PL005.4；serde default 使旧 config.json 无此字段时自动补 8，首启即开箱可用）。
     #[serde(default = "default_auto_out_hours")]
     pub workday_auto_out_hours: u32,
+    /// 窗口位置记忆（`None` = 从未保存 → 启动走默认右上落位，PATCH001.4）。
+    #[serde(default)]
+    pub window_pos: Option<WindowPos>,
 }
 
 fn default_threshold() -> u32 {
@@ -44,6 +58,7 @@ impl Default for ReminderSettings {
             sound_enabled: default_true(),
             notify_enabled: default_true(),
             workday_auto_out_hours: default_auto_out_hours(),
+            window_pos: None,
         }
     }
 }
@@ -160,6 +175,7 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 0,
+            window_pos: None,
         };
         assert!(matches!(
             bad.save(&p),
@@ -170,6 +186,7 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 73,
+            window_pos: None,
         };
         assert!(matches!(
             bad.save(&p),
@@ -193,6 +210,7 @@ mod tests {
             sound_enabled: false,
             notify_enabled: true,
             workday_auto_out_hours: 9,
+            window_pos: None,
         };
         s.save(&p).unwrap();
         assert_eq!(ReminderSettings::load(&p).unwrap(), s);
@@ -202,6 +220,7 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 8,
+            window_pos: None,
         };
         assert!(matches!(
             bad.save(&p),
@@ -220,11 +239,41 @@ mod tests {
             sound_enabled: true,
             notify_enabled: false,
             workday_auto_out_hours: 6,
+            window_pos: None,
         };
         s.save(&p).unwrap();
         assert_eq!(ReminderSettings::load(&p).unwrap(), s);
         let leftover = p.with_extension("tmp");
         assert!(!leftover.exists(), "残留临时文件：{}", leftover.display());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// PATCH001.4：窗口位置 save→load 往返一致（从无到有）。
+    #[test]
+    fn window_pos_roundtrip() {
+        let p = temp_path("window-pos");
+        let s = ReminderSettings {
+            window_pos: Some(WindowPos { x: 320, y: 80 }),
+            ..ReminderSettings::default()
+        };
+        s.save(&p).unwrap();
+        let loaded = ReminderSettings::load(&p).unwrap();
+        assert_eq!(loaded.window_pos, Some(WindowPos { x: 320, y: 80 }));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// PATCH001.4：旧 config.json 缺 window_pos 字段 → None（启动走默认落位），其余字段照常读入。
+    #[test]
+    fn missing_window_pos_field_defaults_to_none() {
+        let p = temp_path("window-pos-legacy");
+        std::fs::write(
+            &p,
+            r#"{"threshold_min":30,"sound_enabled":true,"notify_enabled":true,"workday_auto_out_hours":8}"#,
+        )
+        .unwrap();
+        let s = ReminderSettings::load(&p).unwrap();
+        assert_eq!(s.threshold_min, 30);
+        assert_eq!(s.window_pos, None);
         let _ = std::fs::remove_file(&p);
     }
 

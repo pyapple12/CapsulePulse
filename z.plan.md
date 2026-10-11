@@ -1,7 +1,7 @@
 # 项目方案与审计归档（z.plan.md）
 
 > 文件职责：方案文档与审计归档。与 `x.progress.md`（任务清单）、`CapsulePulse_plan.md`（总体规划）分工：总体规划不动，方案演进与审计记录都落在本文件。
-> 结构：一、已完成 ✅ → 二、待完成 → 三、主题规划（按需）→ 四、审计观察项豁免定案清单 → 附录 PL{NNN}（专题方案，立项时创建）→ 附录 A{NNN}（审计报告，由 audit-report 归档环节生成）。
+> 结构：一、已完成 ✅ → 二、待完成 → 三、主题规划（按需）→ 四、审计观察项豁免定案清单 → 附录 PL{NNN}（功能里程碑方案，立项时创建）/ 附录 PATCH{NNN}（小修小改方案，用户日常立项）/ 附录 A{NNN}（审计报告，由 audit-report 归档环节生成，与 FIX{NNN} 恒同号）。
 
 ## 一、已完成 ✅
 
@@ -43,7 +43,7 @@
 
 （APP 化映射 PL016–PL021 已随 V0.1.2.1–V0.1.2.4 收口，PL022 周卡自然周 + 总日均已随 V0.1.2.5 收口；`design/` 冻结归档）
 
-（PL023 两周测试数据准备、PL024 图谱染色修复 + 空态 + 三值百分比口径 + 锁中毒误报治理，均已随用户目测签认收口（V0.1.2.6）；当前无立项）
+（PL023 两周测试数据准备、PL024 图谱染色修复 + 空态 + 三值百分比口径 + 锁中毒误报治理，均已随用户目测签认收口（V0.1.2.6）；**PATCH001 聚焦态蓝框治理 + CT 交互项移植代码面全落**（2026-10-11，`.1`–`.5` 均已实现并过自动验证；待用户 live 目测签认粒子回位观感后整组移入已完成区，方案见本文件附录 PATCH001）；其余 CT 可移植项候选池见 `future-plan-001.md`）
 
 （后续：Phase 6 打包分发 → Phase 7 三端适配，见计划书 §6/§7，未立项；远期与遗留项见 `y.problems.md`——#1 macOS/Linux 适配、#2 通知署名、#4 自动下班文案条启动竞态、#6 周卡 delta 与周起始日可配置；#5 已查明销项。另：设置板"基准切换（平均/前日）"待讨论）
 
@@ -1744,3 +1744,99 @@ PL023.1–PL023.5 见 x.progress.md「PL023」任务组。
 ### 拆分 todo
 
 PL024.1–PL024.4 见 x.progress.md「PL024」任务组。
+
+## 附录 PATCH001：聚焦态蓝框治理 + CT 交互项移植（2026-10-11 立项）
+
+> 来源：CP ↔ CT（CapsuleTODO V0.2.2.3）全量对照——用户点名 CT 有而 CP 无的四项（粒子 mouseleave 回位 / 标题双击缩回托盘 / 聚焦态窗口外观 / 窗口位置记忆）；对照结论与其余候选池见 `future-plan-001.md`。
+> 编号：PATCH001（**PATCH 轨道首用**；PL 轨道已用到 PL024，FIX 为审计专用）。
+> 状态：✅ **代码面全落**（V0.1.2.7，2026-10-11 立项，`.1`–`.5` 均已实现并过自动验证）；待用户 live 目测签认（`.1` 粒子回位观感）。
+> 红线：只做用户点名四项；零新依赖；**不引入 DWM 系统背板**（只隐藏激活描边）；不改计时/统计口径。
+
+### 一、PATCH001.3 聚焦态窗口框架整定（✅ 已落，2026-10-11）
+
+**现象**：窗口聚焦时外面一圈"蓝框"（用户截图实证）。
+
+**根因判定**：绘制方 = **OS**，不是页面。判据链——① 先试纯 CSS 路线（聚焦态撤 `--glass-stroke`/`--rim-light`、只留外投影）→ 用户实机截图证明蓝线**仍在** → 排除页面描边；② Win11 对**活动窗口**画系统强调色描边（DWM 边框色属性），CSS 不可达；③ CP 侧另有"纱退 0% + 无背板"叠加，使这圈边在透明窗上格外孤立显形。
+
+**修复（最小版 = 用户实际要求）**：
+
+- 新增 `core/src/glass_backdrop.rs`（`extern dwmapi` 直连、**零新依赖**）：`hide_active_border(window)` —— `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE(0xFFFF_FFFE)`；
+- 签名三端一致（非 Windows 空实现），调用点**无平台分支**；
+- `core/src/lib.rs` setup 一次性整定（窗口创建后、建托盘前）；
+- 失败降级：`eprintln` + `diag::log` 双写、维持前态（容错白名单新增登记项）。
+
+**过程留痕**：纯 CSS 尝试已**回退**，`ui/src/styles/glass.css` 与 HEAD 一致（不留半成品）。
+
+**验证**：live——聚焦态无蓝框、失焦态不变；`cargo fmt/clippy/check/test(96)/doc` 全绿；二进制核验（exe 时间戳晚于源码 + 内含新模块字符串）。
+
+### 二、PATCH001.5 顶边框线与系统圆角（✅ 已落，2026-10-11；移植 CT `e8d049b`）
+
+**来源**：CapsuleTODO 同日提交 `e8d049b`（V0.2.2.6）——CT 在隐藏激活描边后仍见**顶部 1px 框线**，且关投影后**两个上角露出方角**；修法 = "关 DWM 投影 + 显式补系统圆角"。
+
+**机制（Tauri 官方文档原文，`tauri-utils/src/config.rs`）**：`shadow: true`（默认）——"will make undecorated window have a **1px white border**, and on Windows 11, it will have a **rounded corners**"。即：CP 的无边框窗一直被 `shadow` 默认值塞着 1px 边框（有框窗路径的框线）与**隐式圆角**；关掉它，两样一起消失。
+
+**做法**：
+
+1. `core/tauri.conf.json`：加 `"shadow": false`（关 Tauri 给无边框窗的投影 → 1px 框线消失）；
+2. `core/src/glass_backdrop.rs`：新增 `apply_round_corners(window)` —— `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND(2)`；非 Windows 空实现、调用点无平台分支；**Win10 无此属性属预期**，只落 dev 控制台、不落 diag（避免每次启动写常驻噪音）；
+3. `core/src/lib.rs` setup：在 `hide_active_border` 之后追加调用（两者同属"窗口框架整定"）。
+
+**与 PATCH001.3 的关系**：`.3` 把激活描边**改色隐藏**（治"蓝框"），`.5` 把 Tauri 给无边框窗的 **1px 框线与投影整个关掉**（治框线本体）——同一族问题的根与梢；`.3` 保留为兜底（CT 亦两者并存）。
+
+**验证**：live——聚焦态无蓝框、顶部无 1px 框线、两个上角为圆角（与 CSS `--radius-board: 8px` 对齐）；门禁全绿；`data/pulse.log` 无新增（两处 DWM 调用返回 0）。
+
+### 三、PATCH001.1 粒子 mouseleave 回位（✅ 已落，2026-10-11）
+
+**现象**：鼠标从窗口顶边直接滑出后，标题粒子散开不回位（永久定格在散开态）。
+
+**根因**：`ui/src/title-particles.ts` 只监听 `mousemove` + `resize`；鼠标从顶边滑出时 `mousemove` 停发 → `mouse` 冻结在标题内坐标 → 无"远离"信号 → 不回位也不停帧（CT 2026-09-29 同款实测）。
+
+**做法**：新增 `onLeave`（`mouse.x/y = -9999` + `frames = 0` + `wake()`），注册在 `document.documentElement` 的 `mouseleave`，并在返回的清理函数里摘除（与 CT `titleParticles.ts:281-286/302/315` 逐行同款）。
+
+**验证**：live——粒子散开后直接从顶边滑出 → ~1s 内弹回归位并停帧；`prettier --check` + `npm run build` 绿。
+
+### 四、PATCH001.2 标题双击缩回托盘（✅ 已落，2026-10-11，含前置把手改造）
+
+**现象**：CP 双击标题无反应（CT 为"缩回托盘"）。
+
+**前置（关键）**：CP 现为全局 mousedown **立即** `startDragging()`（`ui/App.vue:94-108`）；CT 实测该机制下第一次 mousedown 即进系统拖拽循环、**吞掉后续 click** → 不先改把手，`@dblclick` 根本收不到。
+
+**做法**：
+
+1. Rust 新建 `core/src/commands/window.rs`：`#[tauri::command] main_hide_to_tray(app) -> Result<(), String>`（取 main 窗 → `hide()`，失败上抛文案）；`commands/mod.rs` 加 `pub mod window;` + `lib.rs` 注册；
+2. `lib.rs` 的 `hide_main_window` 改 `pub(crate) fn … -> Result<(), String>`，三个既有调用点改 `if let Err(err) = … { warn_diag(&err) }`（严格抛错主线：命令层把失败上抛给前端可见反馈）；
+3. 前端 `ui/App.vue`：标题挂 `@dblclick` → `invoke("main_hide_to_tray")`，失败写既有 `actionError` 错误条；
+4. 前端新增 `ui/src/use-threshold-drag.ts`（移植 CT `useThresholdDrag.ts`：5px 阈值分流单击/拖拽 + `preventDefault` 抑制文本选择），挂 `.topbar`，`onUnmounted` 显式 destroy；
+5. `DRAG_INTERACTIVE` 补 `.topbar`（全局 mousedown 不再抢标题，把手归阈值件）；其余区域沿 PL010.1 全局立即拖不动；
+6. `ui/src/dev/mock-invoke.ts` 补 `main_hide_to_tray` 假路由（跨 Rust+前端+mock 全链镜像纪律）。
+
+**验证**：live——双击标题缩回托盘（托盘左键 / Alt+Shift+S 唤回）；单击标题不吞 click（板开着时点标题能收板）；按住标题位移 >5px 拖窗、<5px 不动窗；失败分支可见；`npm run build` + `cargo test` 绿。
+
+### 五、PATCH001.4 窗口位置记忆（✅ 已落，2026-10-11）
+
+**现象**：CP 每次启动固定在默认位（CT 记忆上次位置）。
+
+**做法**：
+
+1. `core/src/settings.rs`：新增 `WindowPos { x, y }` + `ReminderSettings` 加 `#[serde(default)] pub window_pos: Option<WindowPos>`（`None` = 从未保存 → 默认位；单一 config.json，与提醒设置同住一份）；
+2. `core/src/commands/reminder.rs`：`set_settings_inner` **继承**内存态 `window_pos` 后再落库（设置板提交整结构不得抹掉位置）；
+3. `core/src/lib.rs`：纯函数 `position_in_monitors(rects, x, y)`（可单测）；`default_position(window)`（主屏右上距边 40px，按 `inner_size()` 换算，不硬编码尺寸）；`save_window_position(app)`（失败 `warn_diag`）；setup 恢复位置；**保存点两处** = `hide_main_window()` 内 + 托盘 `"quit"` 分支（`app.exit(0)` 不经 `CloseRequested`，不补就漏）。
+
+**验证**：单测（save→load 往返 / 缺字段 None / 越界判定 / 设置保存不抹位置）；live——拖窗 → 隐藏 → 唤回位置不变；退出重开位置保持；存档改成屏外坐标 → 重启回默认右上；改一次设置板阈值后 config.json 的 `window_pos` 未被抹。
+
+### 验证方案（全组）
+
+- 门禁全量：`cargo fmt --check` / `clippy --all-targets -D warnings` / `cargo test`（现 95 lib + 1 探针）/ `cargo doc --no-deps` / `npm run build`（含 vue-tsc）/ `prettier --check`；
+- live 逐条见各子项；窗口框架整定（`.3`/`.5`）合并验一条：聚焦态无蓝框 + 顶部无 1px 框线 + 上角圆角，且 `data/pulse.log` 无新增；
+- 自动化 live 探针（落 `.temp/`，不入库）：`probe-particles.ts`（浏览器，手动泵帧规避 rAF 节流）/ `probe-threshold-drag.ts`（浏览器，假 `__TAURI_INTERNALS__` 记录 invoke）/ `probe-title-dblclick.ps1` + `probe-window-pos.ps1`（Win32 鼠标与窗口矩形，**首行须 `SetProcessDPIAware`**，否则坐标被虚拟化）；
+- 跨平台注记：`.3`/`.5` 为 Windows 专属（非 Windows 空实现），其余三条三端同构。
+
+### 明确不做（YAGNI 边界）
+
+- 不做 DWM 系统背板（聚焦真磨砂板）；
+- 不改分态纱浓度（失焦 30% / 聚焦 0% 维持 PL021.4 定案）；
+- 不引入主题三态 / 置顶 / 贴边吸附 / 托盘预览等（均入 `future-plan-001.md` 候选池）。
+
+### 拆分 todo
+
+PATCH001.1–PATCH001.5 见 x.progress.md「PATCH001」任务组。

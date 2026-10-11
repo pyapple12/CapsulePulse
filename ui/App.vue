@@ -14,6 +14,8 @@ import type { DaySummary, ReminderSettings } from "./types";
 import { hhmm } from "./format";
 // 标题粒子化视觉件（design initTitleParticles 1:1，reduced-motion 内部退避静态文字）
 import { initTitleParticles } from "./src/title-particles";
+// 标题阈值拖拽把手（PATCH001.2，移植 CT useThresholdDrag：单击/双击不吞、按住才拖窗）
+import { useThresholdDrag } from "./src/use-threshold-drag";
 // 提示音经 vite 打包（哈希进 dist）——不用 public/ 目录（publicDir 默认在根，曾有 404 教训）
 import chimeUrl from "../assets/house_alarm-clock_loud.mp3";
 
@@ -49,6 +51,8 @@ let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
 // 标题粒子视觉件清理句柄（组件卸载时解绑 window 监听并停帧）
 let destroyTitleParticles: (() => void) | undefined;
+// 标题阈值拖拽解绑句柄（PATCH001.2：卸载时摘把手监听并收尾未决手势）
+let destroyThresholdDrag: (() => void) | undefined;
 // 分态纱焦点态（CT 定案）：失焦 30% 纱、聚焦 0% 纱桌面直透——Rust 转发 window-focus 驱动
 // focused class；初值经 isFocused 查询兜底，错过启动期事件也不滞留错误纱态
 const windowFocused = ref(false);
@@ -57,15 +61,18 @@ let unlistenFocus: (() => void) | undefined;
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
 // 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）；
-// 浮层件全部在列（PL019：板区不拖不收、确认遮罩不拖，design 无拖拽语义）
+// 浮层件全部在列（PL019：板区不拖不收、确认遮罩不拖，design 无拖拽语义）；
+// .topbar 自 PATCH001.2 起在列——标题改走阈值拖拽把手（否则"按下即拖"会吞掉双击）
 const DRAG_INTERACTIVE =
-  "button, input, textarea, select, a, .sideButton, #stats-board, #settings-board, .overlay";
+  "button, input, textarea, select, a, .sideButton, #stats-board, #settings-board, .overlay, .topbar";
 
 // —— design flyBoard（PL019.2）：把开板按钮中心换算成板内坐标写入 transform-origin，
 // 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = boards.css 板位常量（design 同名）——
 const BOARD_TOP = 54;
 const BOARD_LEFT = 12;
 const winEl = ref<HTMLElement | null>(null);
+// 顶栏把手（PATCH001.2：阈值拖拽挂点，同时是双击缩回托盘的点击目标）
+const topbarEl = ref<HTMLElement | null>(null);
 const statsBtnEl = ref<HTMLElement | null>(null);
 const gearBtnEl = ref<HTMLElement | null>(null);
 const statsViewEl = ref<InstanceType<typeof StatsView> | null>(null);
@@ -105,6 +112,18 @@ function onWindowDown(e: MouseEvent): void {
     return;
   }
   void getCurrentWindow().startDragging();
+}
+
+/** 双击标题缩回托盘（PATCH001.2，CT 同款交互）：与 Alt+F4 / 托盘显隐同语义（隐藏到托盘，
+ * 真退仍走托盘菜单）；失败经既有错误条可见（严格抛错主线，不静默） */
+async function onTitleDblClick(): Promise<void> {
+  actionError.value = "";
+  try {
+    await invoke("main_hide_to_tray");
+  } catch (err) {
+    actionError.value = `缩回托盘失败：${String(err)}`;
+    console.error("main_hide_to_tray 调用失败", err);
+  }
 }
 
 /** 拉取当日明细（dial 弧段 + 电池数据源；统计的详细刷新在 StatsView 自持） */
@@ -237,6 +256,10 @@ onMounted(() => {
   if (winEl.value != null) {
     destroyTitleParticles = initTitleParticles(winEl.value);
   }
+  // 标题阈值拖拽把手（PATCH001.2）：按下不立即拖，位移超 5px 才拖窗——单击/双击照常派发
+  if (topbarEl.value != null) {
+    destroyThresholdDrag = useThresholdDrag(topbarEl.value);
+  }
   // 焦点态初值兜底：错过启动期事件也不至于滞留错误纱态（查询失败仅记录，退回常纱）
   getCurrentWindow()
     .isFocused()
@@ -299,14 +322,17 @@ onUnmounted(() => {
   unlistenAutoOut?.();
   unlistenFocus?.();
   destroyTitleParticles?.();
+  destroyThresholdDrag?.();
 });
 </script>
 
 <template>
   <main ref="winEl" class="window" id="win" :class="{ focused: windowFocused }">
     <div class="content">
-      <header class="topbar">
-        <h1 class="title">CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas></h1>
+      <header ref="topbarEl" class="topbar">
+        <h1 class="title" @dblclick="onTitleDblClick">
+          CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas>
+        </h1>
       </header>
 
       <!-- 文案条（提醒 / 自动下班 / 动作错误）：配方 = controls.css .banner 1:1，error 红字为 ui 功能胶水 -->

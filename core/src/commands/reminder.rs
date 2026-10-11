@@ -43,13 +43,18 @@ fn get_settings_inner<C: Clock>(ctx: &AppContext<C>) -> Result<ReminderSettings,
 }
 
 /// 设置保存：校验 → 持久化 → 更新内存态（任一步失败不污染内存态）。
+/// **窗口位置归 Rust 管辖**（PATCH001.4）：提交值只覆盖提醒字段，位置从内存态继承——否则
+/// 设置板提交的陈旧副本会把用户刚挪的窗口位置抹回旧值（前端不参与位置读写）。
 fn set_settings_inner<C: Clock>(
     ctx: &AppContext<C>,
     settings: &ReminderSettings,
 ) -> Result<(), CommandError> {
-    settings.save(&ctx.settings_path)?;
+    let inherited = poison("设置", ctx.settings.lock())?.window_pos;
+    let mut merged = settings.clone();
+    merged.window_pos = inherited;
+    merged.save(&ctx.settings_path)?;
     let mut current = poison("设置", ctx.settings.lock())?;
-    *current = settings.clone();
+    *current = merged;
     Ok(())
 }
 
@@ -72,6 +77,7 @@ pub fn set_settings(
 mod tests {
     use super::*;
     use crate::commands::test_support::{ctx, FakeClock};
+    use crate::settings::WindowPos;
 
     /// T4a：set_settings 校验 + 持久化 + 内存态更新；非法阈值被拒。
     #[test]
@@ -82,6 +88,7 @@ mod tests {
             sound_enabled: false,
             notify_enabled: true,
             workday_auto_out_hours: 9,
+            window_pos: None,
         };
         set_settings_inner(&ctx, &s).unwrap();
         assert_eq!(get_settings_inner(&ctx).unwrap(), s);
@@ -94,6 +101,7 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 8,
+            window_pos: None,
         };
         assert!(matches!(
             set_settings_inner(&ctx, &bad),
@@ -101,5 +109,40 @@ mod tests {
                 crate::settings::SettingsError::InvalidThreshold(0)
             ))
         ));
+    }
+
+    /// PATCH001.4：整结构覆盖不抹窗口位置（位置归 Rust 管辖，命令层从内存态继承）。
+    /// 播种方式与生产一致 = 直接写内存态（`save_window_position` 就是这么做的），
+    /// 再走设置板路径提交一份不含位置的副本，断言位置未被抹。
+    #[test]
+    fn settings_set_preserves_window_pos() {
+        let mut ctx = ctx(FakeClock::new());
+        // 独立设置文件：避免与同模块其他用例争用 temp_settings_path("ctx")（并行执行会互相覆盖）
+        ctx.settings_path =
+            crate::commands::test_support::temp_settings_path("preserve-window-pos");
+        {
+            let mut settings = ctx.settings.lock().unwrap();
+            settings.window_pos = Some(WindowPos { x: 320, y: 80 });
+            settings.save(&ctx.settings_path).unwrap();
+        }
+
+        // 前端提交的副本不含位置（None）→ 位置应保留，提醒字段照常覆盖
+        let incoming = ReminderSettings {
+            threshold_min: 30,
+            ..ReminderSettings::default()
+        };
+        assert_eq!(incoming.window_pos, None);
+        set_settings_inner(&ctx, &incoming).unwrap();
+
+        let after = get_settings_inner(&ctx).unwrap();
+        assert_eq!(after.threshold_min, 30, "提醒字段照常覆盖");
+        assert_eq!(
+            after.window_pos,
+            Some(WindowPos { x: 320, y: 80 }),
+            "窗口位置未被抹"
+        );
+        assert!(std::fs::read_to_string(&ctx.settings_path)
+            .unwrap()
+            .contains("\"x\": 320"));
     }
 }

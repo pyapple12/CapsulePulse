@@ -1,6 +1,8 @@
 //! 标题粒子化（design/index.html initTitleParticles 1:1 移植，PL021 前补口）：
 //! 画布接管标题视觉——文字 alpha 网格采样成粒子，光标进入窗口即排斥、离开后弹簧归位，
 //! 静止自动停帧省 GPU；reduced-motion 不初始化，保留静态文字（与 design 同款守卫）。
+//! 顶边滑出回位修复移植自 CapsuleTODO（2026-10-11，PATCH001.1）：标题贴窗顶时鼠标可
+//! 直接从顶边滑出，`mousemove` 停发 → 需补视口 `mouseleave` 作唯一离窗信号。
 //! 消费的 --panel-shadow / --input-focus-glow 两令牌 design 侧未定义，恒走 fallback
 //! （CT 软晕配方 1.7/1.7/8/0.35 与 --accent 辉光）；保留读取口子与设计同源。
 //! 样式依托 topbar.css 的 .title--particles（原文字透明让位）与 .title-canvas（外扩余量）。
@@ -268,7 +270,17 @@ export function initTitleParticles(win: HTMLElement): (() => void) | undefined {
     build();
     wake();
   };
+  /** 鼠标从窗口顶边直接滑出：`mousemove` 停发 → `track` 不再执行，`mouse` 冻结在标题内坐标
+   * → 粒子散开不回位也不停帧；视口 `mouseleave` 是该场景唯一的离窗信号，补同款弹回
+   *（移植 CapsuleTODO titleParticles.ts:281-286，CT 2026-09-29 实测同款缺陷） */
+  const onLeave = (): void => {
+    mouse.x = -9999;
+    mouse.y = -9999;
+    frames = 0;
+    wake();
+  };
   window.addEventListener("mousemove", onMove, { passive: true });
+  document.documentElement.addEventListener("mouseleave", onLeave);
   window.addEventListener("resize", onResize);
 
   build();
@@ -276,6 +288,7 @@ export function initTitleParticles(win: HTMLElement): (() => void) | undefined {
 
   return () => {
     window.removeEventListener("mousemove", onMove);
+    document.documentElement.removeEventListener("mouseleave", onLeave);
     window.removeEventListener("resize", onResize);
     if (raf) cancelAnimationFrame(raf);
     raf = 0;

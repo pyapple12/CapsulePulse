@@ -79,6 +79,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
     case "clock_out":
     case "session_start":
     case "session_pause":
+    case "main_hide_to_tray":
       return null;
     /* 窗口/事件插件面：isFocused 恒真（分态纱初值兜底）、拖拽空操作、listen/unlisten 发假 id */
     case "plugin:window|is_focused":

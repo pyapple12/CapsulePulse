@@ -5,7 +5,8 @@
 //! 装配层只在本文件——纯逻辑可脱离窗口 cargo test 直测。
 //! 玻璃效果：CT 分态纱方案（PL021.4 定案）——恒纯 alpha 透明窗（tauri.conf transparent），
 //! 观感由前端纱层承担（失焦 30% 纱、聚焦 0%），Rust 仅转发 window-focus 焦点态；
-//! DWM 系统背板材质（PL011）已随 CT 化退役；macOS/Linux 延后（y.problems.md #1）。
+//! DWM 系统背板材质（PL011）已随 CT 化退役，仅保留 Win11 激活描边隐藏（glass_backdrop.rs）；
+//! macOS/Linux 延后（y.problems.md #1）。
 
 pub mod commands;
 pub mod period;
@@ -16,6 +17,7 @@ pub mod storage;
 pub mod workday;
 
 mod diag;
+mod glass_backdrop;
 mod paths;
 
 use std::sync::Mutex;
@@ -30,7 +32,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use crate::commands::AppContext;
 use crate::reminder::ReminderFire;
 use crate::session::WorkSession;
-use crate::settings::ReminderSettings;
+use crate::settings::{ReminderSettings, WindowPos};
 use crate::storage::Storage;
 use crate::workday::WorkdayState;
 
@@ -58,12 +60,96 @@ fn show_main_window(app: &AppHandle) {
 }
 
 /// 隐藏主窗口到托盘（关闭语义 = 隐藏；退出走托盘菜单）。
-fn hide_main_window(app: &AppHandle) {
+/// 返回结果：命令层上抛给前端可见反馈；事件/托盘路径按容错白名单记日志、不阻断主流程。
+pub(crate) fn hide_main_window(app: &AppHandle) -> Result<(), String> {
+    save_window_position(app); // 位置记忆：每次隐藏都记一次（失败仅日志，容错白名单④同款纪律）
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("主窗口缺失，无法隐藏".to_string());
+    };
+    window.hide().map_err(|err| format!("窗口隐藏失败：{err}"))
+}
+
+/// 保存的位置是否落在任一显示器矩形内（纯函数：入参 (x, y, w, h) 物理坐标，可单测）。
+/// 显示器枚举失败与真越界同回 false（调用方回默认位）——落日志由调用方负责，此处不静默。
+fn position_in_monitors(rects: &[(i32, i32, u32, u32)], x: i32, y: i32) -> bool {
+    rects
+        .iter()
+        .any(|&(mx, my, mw, mh)| x >= mx && x < mx + mw as i32 && y >= my && y < my + mh as i32)
+}
+
+/// 显示器矩形清单（物理坐标）：枚举失败回空表 + 双写落日志（调用方按越界处理 → 默认位）。
+fn monitor_rects(window: &tauri::WebviewWindow) -> Vec<(i32, i32, u32, u32)> {
+    match window.available_monitors() {
+        Ok(monitors) => monitors
+            .iter()
+            .map(|m| {
+                let pos = m.position();
+                let size = m.size();
+                (pos.x, pos.y, size.width, size.height)
+            })
+            .collect(),
+        Err(err) => {
+            warn_diag(&format!("显示器枚举失败，按越界回默认位：{err}"));
+            Vec::new()
+        }
+    }
+}
+
+/// 主屏右上默认落位（距边 40px）：按窗口实际 `inner_size` 换算，不硬编码窗口尺寸。
+fn default_position(window: &tauri::WebviewWindow) -> Result<tauri::PhysicalPosition<i32>, String> {
+    const MARGIN_PX: i32 = 40;
+    let monitor = window
+        .primary_monitor()
+        .map_err(|err| format!("主显示器查询失败：{err}"))?
+        .ok_or_else(|| "无主显示器，无法计算默认落位".to_string())?;
+    let pos = monitor.position();
+    let size = monitor.size();
+    let inner = window
+        .inner_size()
+        .map_err(|err| format!("窗口尺寸查询失败：{err}"))?;
+    Ok(tauri::PhysicalPosition::new(
+        pos.x + size.width as i32 - inner.width as i32 - MARGIN_PX,
+        pos.y + MARGIN_PX,
+    ))
+}
+
+/// 启动落位（setup 调用）：存档位置在任一显示器内 → 用之；否则（从未保存 / 越界 / 枚举失败）
+/// → 默认右上落位。位置归 Rust 管辖（前端不读写，见 commands/reminder 的继承说明）。
+fn restore_window_position(app: &tauri::App, window: &tauri::WebviewWindow) -> Result<(), String> {
+    let saved = app
+        .state::<AppContext>()
+        .settings
+        .lock()
+        .map_err(|err| format!("设置锁中毒，位置未恢复：{err}"))?
+        .window_pos;
+    let position = match saved {
+        Some(pos) if position_in_monitors(&monitor_rects(window), pos.x, pos.y) => {
+            tauri::PhysicalPosition::new(pos.x, pos.y)
+        }
+        _ => default_position(window)?,
+    };
+    window
+        .set_position(position)
+        .map_err(|err| format!("窗口落位失败：{err}"))
+}
+
+/// 保存窗口位置到 config.json（隐藏/退出前调用）：失败落日志不阻断（容错白名单④同款纪律）。
+fn save_window_position(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    if let Err(err) = window.hide() {
-        warn_diag(&format!("窗口隐藏失败：{err}"));
+    let Ok(pos) = window.outer_position() else {
+        warn_diag("窗口位置读取失败（位置未保存）");
+        return;
+    };
+    let ctx = app.state::<AppContext>();
+    let Ok(mut settings) = ctx.settings.lock() else {
+        warn_diag("设置锁中毒，窗口位置未保存");
+        return;
+    };
+    settings.window_pos = Some(WindowPos { x: pos.x, y: pos.y });
+    if let Err(err) = settings.save(&ctx.settings_path) {
+        warn_diag(&format!("窗口位置保存失败：{err}"));
     }
 }
 
@@ -73,7 +159,11 @@ fn toggle_main_window(app: &AppHandle) {
         return;
     };
     match window.is_visible() {
-        Ok(true) => hide_main_window(app),
+        Ok(true) => {
+            if let Err(err) = hide_main_window(app) {
+                warn_diag(&err);
+            }
+        }
         Ok(false) => show_main_window(app),
         Err(err) => warn_diag(&format!("窗口可见性查询失败：{err}")),
     }
@@ -91,6 +181,8 @@ fn handle_action(app: &AppHandle, id: &str) {
         }
         "quit" => {
             let ctx = app.state::<AppContext>();
+            // 位置记忆（PATCH001.4）：托盘退出走 app.exit(0)、不经 CloseRequested，此处补一次
+            save_window_position(app);
             if let Err(err) = commands::session::persist_before_quit(&ctx) {
                 // 容错白名单 ④：退出前落库失败仍退出（退出意图优先）；双写助手统一出口（FIX005.5）
                 warn_diag(&format!("退出前落库失败（仍退出）：{err}"));
@@ -221,13 +313,16 @@ pub fn run() {
             commands::workday::clock_out,
             commands::workday::day_detail,
             commands::workday::week_detail,
-            commands::workday::workday_total
+            commands::workday::workday_total,
+            commands::window::main_hide_to_tray
         ])
         .on_window_event(|window, event| {
             // 关闭语义 = 隐藏到托盘（PL004 定案）；退出走托盘菜单
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                hide_main_window(window.app_handle());
+                if let Err(err) = hide_main_window(window.app_handle()) {
+                    warn_diag(&err);
+                }
             }
             // 焦点联动分态纱（PL021.4 CT 定案）：失焦 30% 纱、聚焦 0% 纱（桌面直透）——
             // DWM 系统背板材质已随 CT 化退役（恒纯 alpha 透明窗），此处仅转发焦点态给前端
@@ -252,6 +347,17 @@ pub fn run() {
             }));
             // 玻璃效果不在此挂载（CT 定案）：恒纯 alpha 透明（tauri.conf transparent），
             // 分态纱由前端 ::before 纱层承担（失焦 30%/聚焦 0%），Rust 仅转发 window-focus
+            // 主窗口整定：① 位置记忆（PATCH001.4）——存档在屏内 → 恢复，否则默认右上落位；
+            // ② 隐藏 Win11 激活描边——聚焦态 DWM 给活动窗口画一圈系统强调色描边，在透明无边框
+            //    窗上表现为"窗口外面一圈蓝框"（2026-10-11 用户实证）；③ 补系统圆角——tauri.conf
+            //    的 shadow:false 关掉 Tauri 投影后隐式圆角随之丢失，不补则上角露方角（CT e8d049b）
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(err) = restore_window_position(app, &window) {
+                    warn_diag(&err);
+                }
+                glass_backdrop::hide_active_border(&window);
+                glass_backdrop::apply_round_corners(&window);
+            }
             build_tray(app)?;
             register_global_shortcuts(app)?;
             Ok(())
@@ -261,4 +367,32 @@ pub fn run() {
             eprintln!("CapsulePulse 启动失败：{err}");
             std::process::exit(1);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::position_in_monitors;
+
+    /// PATCH001.4：位置在显示器矩形内 → true（多屏负坐标同样成立）。
+    #[test]
+    fn position_inside_monitor_is_true() {
+        let monitors = [(0, 0, 1920, 1080), (-1920, 0, 1920, 1080)];
+        assert!(position_in_monitors(&monitors, 0, 0), "主屏左上角");
+        assert!(position_in_monitors(&monitors, 1919, 1079), "主屏右下角内");
+        assert!(
+            position_in_monitors(&monitors, -1920, 0),
+            "副屏（负坐标）左上角"
+        );
+        assert!(position_in_monitors(&monitors, -1, 500), "副屏右缘内");
+    }
+
+    /// PATCH001.4：越界 / 空清单（枚举失败）→ false（调用方回默认落位）。
+    #[test]
+    fn position_outside_monitors_is_false() {
+        let monitors = [(0, 0, 1920, 1080)];
+        assert!(!position_in_monitors(&monitors, 1920, 0), "右缘外一格");
+        assert!(!position_in_monitors(&monitors, 0, -1), "上缘外一格");
+        assert!(!position_in_monitors(&monitors, -5000, 500), "远在屏外");
+        assert!(!position_in_monitors(&[], 10, 10), "显示器枚举失败（空表）");
+    }
 }

@@ -8,6 +8,7 @@
 pub mod reminder;
 pub mod session;
 pub mod stats;
+pub mod window;
 pub mod workday;
 
 use std::path::PathBuf;
