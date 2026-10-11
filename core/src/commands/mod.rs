@@ -60,6 +60,9 @@ pub enum CommandError {
     /// 设置层错误（载入/保存/校验失败）。
     #[error(transparent)]
     Settings(#[from] crate::settings::SettingsError),
+    /// 在岗期间禁止修改自动下班小时数（PL025.5：本班基准不可中途改，账目口径唯一）。
+    #[error("在岗期间不可修改自动下班小时数（本班按 {0} 小时计）")]
+    AutoOutLockedOnDuty(u32),
     /// 锁中毒（此前持锁线程 panic）——携带锁名严格报错，不静默续行（y.problems#5②：文案如实反映是哪把锁）。
     #[error("{0}锁已中毒（此前持锁线程异常终止）")]
     Poisoned(&'static str),

@@ -30,8 +30,9 @@ pub struct ReminderSettings {
     /// 系统通知开关。
     #[serde(default = "default_true")]
     pub notify_enabled: bool,
-    /// 自动下班时长（小时，1–72）：在岗满 N 小时未手动下班则按"上班 + N"回填下班
-    /// （PL005.4；serde default 使旧 config.json 无此字段时自动补 8，首启即开箱可用）。
+    /// 自动下班时长（小时，4–12）：在岗满 N 小时未手动下班则按"上班 + N"回填下班
+    /// （PL005.4；serde default 使旧 config.json 无此字段时自动补 8，首启即开箱可用；
+    /// PL025.5 收窄到 4–12，与设置板 stepper 口径统一）。
     #[serde(default = "default_auto_out_hours")]
     pub workday_auto_out_hours: u32,
     /// 窗口位置记忆（`None` = 从未保存 → 启动走默认右上落位，PATCH001.4）。
@@ -64,12 +65,12 @@ impl Default for ReminderSettings {
 }
 
 impl ReminderSettings {
-    /// 校验：提醒阈值 1–99 分钟；自动下班 1–72 小时。
+    /// 校验：提醒阈值 1–99 分钟；自动下班 4–12 小时（PL025.5 与设置板 stepper 口径统一）。
     pub fn validate(&self) -> Result<(), SettingsError> {
         if !(1..=99).contains(&self.threshold_min) {
             return Err(SettingsError::InvalidThreshold(self.threshold_min));
         }
-        if !(1..=72).contains(&self.workday_auto_out_hours) {
+        if !(4..=12).contains(&self.workday_auto_out_hours) {
             return Err(SettingsError::InvalidAutoOutHours(
                 self.workday_auto_out_hours,
             ));
@@ -120,8 +121,8 @@ pub enum SettingsError {
     /// 提醒阈值越界（合法范围 1–99 分钟）。
     #[error("提醒阈值非法：{0} 分钟（应为 1–99）")]
     InvalidThreshold(u32),
-    /// 自动下班小时数越界（合法范围 1–72 小时）。
-    #[error("自动下班小时数非法：{0}（应为 1–72）")]
+    /// 自动下班小时数越界（合法范围 4–12 小时）。
+    #[error("自动下班小时数非法：{0}（应为 4–12）")]
     InvalidAutoOutHours(u32),
 }
 
@@ -274,6 +275,34 @@ mod tests {
         let s = ReminderSettings::load(&p).unwrap();
         assert_eq!(s.threshold_min, 30);
         assert_eq!(s.window_pos, None);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// PL025.5：自动下班小时口径收窄到 4–12（与设置板 stepper 一致）——3/13 拒，4/12 收。
+    #[test]
+    fn auto_hours_range_is_four_to_twelve() {
+        let p = temp_path("auto-range-narrow");
+        for bad in [3, 13] {
+            let s = ReminderSettings {
+                workday_auto_out_hours: bad,
+                ..ReminderSettings::default()
+            };
+            assert!(
+                matches!(s.save(&p), Err(SettingsError::InvalidAutoOutHours(_))),
+                "{bad} 应被拒（合法 4–12）"
+            );
+        }
+        for ok in [4, 12] {
+            let s = ReminderSettings {
+                workday_auto_out_hours: ok,
+                ..ReminderSettings::default()
+            };
+            s.save(&p).unwrap();
+            assert_eq!(
+                ReminderSettings::load(&p).unwrap().workday_auto_out_hours,
+                ok
+            );
+        }
         let _ = std::fs::remove_file(&p);
     }
 

@@ -66,7 +66,13 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
     }
     case "workday_total":
       // 全历史三值总和 + 有数据天数（PL024.6：前端据此算各值平均与偏离）
-      return { duty_secs: 115_200, work_secs: 93_600, rest_secs: 21_600, days: 12 };
+      return {
+        duty_secs: 115_200,
+        work_secs: 93_600,
+        rest_secs: 21_600,
+        days: 12,
+        first_offset: -11,
+      };
     case "get_settings":
       return {
         threshold_min: 50,

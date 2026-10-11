@@ -415,6 +415,7 @@ onUnmounted(() => {
       :open="panelVisible"
       :settings="settings"
       :error="saveError"
+      :on-duty="day != null && day.duty_started_at != null && day.duty_ended_at == null"
       @save="onSaveSettings"
     />
   </main>

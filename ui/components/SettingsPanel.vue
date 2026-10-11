@@ -16,6 +16,8 @@ const props = defineProps<{
   settings: ReminderSettings;
   /** 保存失败文案（面板内可见反馈，FIX002.3 接线保留） */
   error?: string;
+  /** 在岗中（PL025.5）：在岗期间禁止改自动下班小时数——本班基准不可中途改（账目口径唯一） */
+  onDuty?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [s: ReminderSettings] }>();
@@ -60,8 +62,12 @@ function onSwitchChange(key: "sound_enabled" | "notify_enabled", e: Event): void
   emit("save", { ...props.settings, [key]: checked });
 }
 
-/** 步进 ±1（4~12 边界外静默：禁用态已挡，此处为键盘兜底，design stepAutoOut 同款守卫） */
+/** 步进 ±1（4~12 边界外静默：禁用态已挡，此处为键盘兜底，design stepAutoOut 同款守卫）；
+ * 在岗期间整体禁改（PL025.5：本班基准不可中途改）——UI 已置灰，此处再兜一层 */
 function stepAutoOut(delta: number): void {
+  if (props.onDuty) {
+    return;
+  }
   const v = props.settings.workday_auto_out_hours + delta;
   if (v < 4 || v > 12) {
     return;
@@ -135,7 +141,7 @@ function stepAutoOut(delta: number): void {
             class="stepper-btn"
             aria-label="减少"
             type="button"
-            :disabled="settings.workday_auto_out_hours <= 4"
+            :disabled="onDuty || settings.workday_auto_out_hours <= 4"
             @click="stepAutoOut(-1)"
           >
             <svg viewBox="0 0 26 22" aria-hidden="true">
@@ -148,7 +154,7 @@ function stepAutoOut(delta: number): void {
             class="stepper-btn"
             aria-label="增加"
             type="button"
-            :disabled="settings.workday_auto_out_hours >= 12"
+            :disabled="onDuty || settings.workday_auto_out_hours >= 12"
             @click="stepAutoOut(1)"
           >
             <svg viewBox="0 0 26 22" aria-hidden="true">

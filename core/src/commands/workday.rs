@@ -155,6 +155,9 @@ pub struct WorkdayTotal {
     pub rest_secs: i64,
     /// 有数据天数（当日存在打卡/计时记录，即 duty_secs > 0 的本地日；空日不计）。
     pub days: u32,
+    /// 最早记录所在本地日相对今天的偏移（负值或 0；空库 None）——统计"往前翻"的下界
+    /// （PL025.1：最早一条记录就是往前翻的最后一条）。
+    pub first_offset: Option<i64>,
 }
 
 /// 任意时刻所在本地日的零点。
@@ -179,6 +182,7 @@ pub(super) fn workday_total_inner<C: Clock>(
             work_secs: 0,
             rest_secs: 0,
             days: 0,
+            first_offset: None,
         });
     };
     let first_day = local_day_start(first_at)?;
@@ -201,6 +205,7 @@ pub(super) fn workday_total_inner<C: Clock>(
         work_secs: 0,
         rest_secs: 0,
         days: 0,
+        first_offset: Some(-span),
     };
     for step in 0..=span {
         let summary = day_summary_inner(ctx, -step, now_secs)?;
@@ -609,6 +614,27 @@ mod tests {
         assert_eq!(total.work_secs, 3 * 3_600);
         assert_eq!(total.rest_secs, 2 * 3_600);
         assert_eq!(total.days, 2, "仅两个有数据日");
+    }
+
+    /// PL025.1：最早记录所在本地日相对今天的偏移（统计"往前翻"的下界；空库 None）。
+    #[test]
+    fn workday_total_first_offset_bounds_history() {
+        let now = Local::now().timestamp();
+        let empty_ctx = ctx(FakeClock::new());
+        assert_eq!(
+            workday_total_inner(&empty_ctx, now).unwrap().first_offset,
+            None,
+            "空库无下界（前端按 0 处理）"
+        );
+
+        let ctx = ctx(FakeClock::new());
+        seed_day(&ctx, -2, 2 * 3_600, 3 * 3_600);
+        seed_day(&ctx, 0, 3_600, 2 * 3_600);
+        assert_eq!(
+            workday_total_inner(&ctx, now).unwrap().first_offset,
+            Some(-2),
+            "最早记录在前 2 日 → 下界 -2（再往前翻应被拦住）"
+        );
     }
 
     /// 自动下班：到点以回填时刻（上班 + N）关班，迟到发现账目准时；未到点/未上班不动。

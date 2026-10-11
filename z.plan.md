@@ -5,6 +5,7 @@
 
 ## 一、已完成 ✅
 
+- **PATCH001 聚焦态蓝框治理 + 窗口交互移植**（2026-10-11 收口，V0.1.2.7；隐藏 Win11 激活描边 + 关 DWM 投影消顶边 1px 框线 + 补系统圆角（根治聚焦态"外面一圈蓝框"）+ 标题粒子顶边滑出回位 + 标题阈值把手与双击缩回托盘 + 窗口位置记忆；PATCH 轨道首用，用户目测签认）→ 附录 PATCH001
 - **PL022 周卡自然周对齐 + 总日均**（2026-10-11 收口，V0.1.2.5；`week_detail` 加查看日参数走自然周（周一锚定 / "今"随真实星期 / 未来日空柱 / 跨周联动）+ 新命令 `workday_total` 全历史总日均（命令层逐日复用单日归约真单源）+ 前端七格动态标签 / 均线同源 / 选中环按真实日期定位）→ 附录 PL022
 - **PL021 总目验（唯一人类闸门）**（2026-10-09 用户签认"整个 APP 化没问题"；玻璃体系 CT 化换血——恒纯 alpha 透明窗 + 分态纱失焦 30%/聚焦 0%、DWM 背板退役，组件立体光影恢复，V0.1.2.4）→ 附录 PL021
 - **PL020 清场**（2026-10-08 收口，V0.1.2.3；旧样式删净 + 不迁核对与映射表 12 行销项 + 全量回归；映射期第 3 轮复查清场）→ 附录 PL020
@@ -43,7 +44,9 @@
 
 （APP 化映射 PL016–PL021 已随 V0.1.2.1–V0.1.2.4 收口，PL022 周卡自然周 + 总日均已随 V0.1.2.5 收口；`design/` 冻结归档）
 
-（PL023 两周测试数据准备、PL024 图谱染色修复 + 空态 + 三值百分比口径 + 锁中毒误报治理，均已随用户目测签认收口（V0.1.2.6）；**PATCH001 聚焦态蓝框治理 + CT 交互项移植代码面全落**（2026-10-11，`.1`–`.5` 均已实现并过自动验证；待用户 live 目测签认粒子回位观感后整组移入已完成区，方案见本文件附录 PATCH001）；其余 CT 可移植项候选池见 `future-plan-001.md`）
+（PL023 两周测试数据准备、PL024 图谱染色修复 + 空态 + 三值百分比口径 + 锁中毒误报治理，均已随用户目测签认收口（V0.1.2.6）；**PATCH001 聚焦态蓝框治理 + 窗口交互移植已收口**（V0.1.2.7，2026-10-11，`.1`–`.5` 实现 + 自动验证 + 用户目测签认，方案见本文件附录 PATCH001）；其余 CT 可移植项候选池见 `future-plan-001.md`）
+
+（**PL025 统计精修与数据日口径改造（含自动下班确认流）进行中**（V0.1.2.8，2026-10-11 立项，8 项口径已逐条拍板；`.1`–`.5` 已落（统计翻页下界 / 周卡标签对齐 / 明细列宽按最宽串定 / 日期卡四态 / 自动下班小时收窄 4–12 且在岗禁改），余 `.6`–`.9`；方案见本文件附录 PL025。依赖序：`.1`–`.5` 便宜先行 → `.6`/`.7` 数据口径与多段图谱 → `.8`/`.9` 自动下班确认流）
 
 （后续：Phase 6 打包分发 → Phase 7 三端适配，见计划书 §6/§7，未立项；远期与遗留项见 `y.problems.md`——#1 macOS/Linux 适配、#2 通知署名、#4 自动下班文案条启动竞态、#6 周卡 delta 与周起始日可配置；#5 已查明销项。另：设置板"基准切换（平均/前日）"待讨论）
 
@@ -1749,7 +1752,7 @@ PL024.1–PL024.4 见 x.progress.md「PL024」任务组。
 
 > 来源：CP ↔ CT（CapsuleTODO V0.2.2.3）全量对照——用户点名 CT 有而 CP 无的四项（粒子 mouseleave 回位 / 标题双击缩回托盘 / 聚焦态窗口外观 / 窗口位置记忆）；对照结论与其余候选池见 `future-plan-001.md`。
 > 编号：PATCH001（**PATCH 轨道首用**；PL 轨道已用到 PL024，FIX 为审计专用）。
-> 状态：✅ **代码面全落**（V0.1.2.7，2026-10-11 立项，`.1`–`.5` 均已实现并过自动验证）；待用户 live 目测签认（`.1` 粒子回位观感）。
+> 状态：✅ **已收口**（V0.1.2.7，2026-10-11；`.1`–`.5` 全部实现 + 自动验证 + **用户目测签认**，整组已移入 x.progress 已完成区）。
 > 红线：只做用户点名四项；零新依赖；**不引入 DWM 系统背板**（只隐藏激活描边）；不改计时/统计口径。
 
 ### 一、PATCH001.3 聚焦态窗口框架整定（✅ 已落，2026-10-11）
@@ -1828,7 +1831,7 @@ PL024.1–PL024.4 见 x.progress.md「PL024」任务组。
 
 - 门禁全量：`cargo fmt --check` / `clippy --all-targets -D warnings` / `cargo test`（现 95 lib + 1 探针）/ `cargo doc --no-deps` / `npm run build`（含 vue-tsc）/ `prettier --check`；
 - live 逐条见各子项；窗口框架整定（`.3`/`.5`）合并验一条：聚焦态无蓝框 + 顶部无 1px 框线 + 上角圆角，且 `data/pulse.log` 无新增；
-- 自动化 live 探针（落 `.temp/`，不入库）：`probe-particles.ts`（浏览器，手动泵帧规避 rAF 节流）/ `probe-threshold-drag.ts`（浏览器，假 `__TAURI_INTERNALS__` 记录 invoke）/ `probe-title-dblclick.ps1` + `probe-window-pos.ps1`（Win32 鼠标与窗口矩形，**首行须 `SetProcessDPIAware`**，否则坐标被虚拟化）；
+- 自动化 live 探针（落 `.temp/`，不入库）：`probe-particles.ts`（浏览器，手动泵帧规避 rAF 节流）/ `probe-threshold-drag.ts`（浏览器，假 `__TAURI_INTERNALS__` 记录 invoke）/ `probe-title-dblclick.ps1` + `probe-window-pos.ps1`（Win32 鼠标与窗口矩形，**首行须 `SetProcessDPIAware`**，否则坐标被虚拟化）；（**探针文件已按用户要求删除，仅存验证记录**）
 - 跨平台注记：`.3`/`.5` 为 Windows 专属（非 Windows 空实现），其余三条三端同构。
 
 ### 明确不做（YAGNI 边界）
@@ -1840,3 +1843,100 @@ PL024.1–PL024.4 见 x.progress.md「PL024」任务组。
 ### 拆分 todo
 
 PATCH001.1–PATCH001.5 见 x.progress.md「PATCH001」任务组。
+
+## 附录 PL025：统计精修与数据日口径改造（含自动下班确认流）（2026-10-11 立项）
+
+> 来源：用户 2026-10-11 逐条提出的 8 项问题/需求（统计翻页下界 / 周卡标签对齐 / 明细条宽 / 休假日文案 / 数据日归属 / 自动下班确认流 / 自动下班小时门禁 / 多段日图谱），当日逐条拍板口径。
+> 编号：PL025（PL012 永久废弃；PL013–PL024、PATCH001 已用）。
+> 状态：🚧 **进行中**（V0.1.2.8，2026-10-11 立项，口径已定；`.1`–`.5` 已落 + 自动验证 + 用户目测签认；余 `.6`–`.9`）。
+> 红线：不改 schema（无迁移）；零新依赖；明细填充口径与"在岗 = 各区间之和"**均不变**（除 `.6` 的归属规则外不动记账口径）。
+> **口径变更告知**：`.6` 会把"按本地零点切分"改为"按上班打卡日归属"——**历史跨零点日期的三值会重新分配**（原被劈到两天的数字合并回打卡日），属预期变化，不写迁移脚本。
+
+### 方向定案（2026-10-11 用户逐条拍板）
+
+| #   | 问题                       | 定案                                                                                                                                                       |
+| --- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 统计可往前翻到最早记录之前 | **最早记录日 = 往前翻的最后一条**（翻到即禁用箭头）                                                                                                        |
+| 2   | 周卡星期标签与柱错位       | 修根因：标签层 `gap` 造成 `+(i−3)px` 累积偏移 → 去 gap 使标签盒宽 = `W/7`                                                                                  |
+| 3   | 明细透明条长度不一致       | **文字列（`.dur`）按最宽标签 `999分` 定宽** → 所有透明条等宽；填充口径**不变**（当日最大块 = 满格）                                                        |
+| 4   | 过去无数据日显示"已下班"   | 过去无打卡 → **"休假日"**；顺带修今天无打卡显示"在岗中" → **"未上班"**                                                                                     |
+| 5   | 跨零点被劈成两天           | **数据日归属 = 上班打卡所在本地日**；次日 09:00 又打卡 → 次日只画 09:00 之后                                                                               |
+| 6   | 自动下班应弹框确认         | **到点前 60s 弹框**（N 小时 → N−1 分整）+ 60s 倒计时；**记录恒 = 上班 + N**（60s 内任意秒按下班都写满 N）；无人响应同样写满 N；**Rust 侧必须自带兜底定时** |
+| 6b  | 加班                       | **固定拉到 12h**；到 `12h−1min` 再弹一次，**只能下班**（无加班钮），倒计时照跑                                                                             |
+| 7   | 在岗时无法增减自动下班小时 | ① 后端 validate **收窄到 4..=12**（与 UI 一致）；② **在岗期间禁止改该字段**（前端置灰 + 后端严格拒绝）                                                     |
+| 8   | 一天多段上下班的图谱画法   | **每段在岗区间末尾打 D**；区间内蓝 + W/R 节点；**区间之间的空隙画灰色**（不计入在岗，三值口径不变）                                                        |
+
+### 实现措施（按层拆解到文件/函数级）
+
+**PL025.1 统计翻页下界**
+
+- 后端 `core/src/commands/workday.rs`：`WorkdayTotal` 扩 `first_offset: Option<i64>`——最早记录（`storage::first_record_at`，已有）所在**本地日**相对今天的偏移（负值或 0；空库 None）；单测补两例（有记录 / 空库）。
+- 前端 `ui/components/StatsView.vue`：`workday_total` 回填时存 `firstOffset`；"前一日"箭头加 `:disabled="offset <= (firstOffset ?? 0)"`（空库时也禁用）；`offset--` 处夹取。
+
+**PL025.2 周卡标签对齐**
+
+- `ui/src/styles/stats.css`：`.wc-days` 删 `gap: 7px`（`gap: 0`）——标签盒宽 = `W/7`，中心与 `renderWeek` 的柱中心 `i*slot + slot/2` 重合。
+
+**PL025.3 明细文字列定宽**
+
+- `ui/src/styles/stats.css`：`.dl .dur` 加 `width: 46px; text-align: right`（按 `999分` 定宽）→ 所有 `.dl .track` 等宽。
+
+**PL025.4 日期卡四态**
+
+- `ui/components/StatsView.vue` `dayLabelText`：`offset<0 && duty_started_at==null` → "休假日"；`offset<0` → "已下班"；`offset==0 && duty_started_at==null` → "未上班"；`offset==0 && duty_ended_at==null` → "在岗中"；否则"已下班"（`day` 未加载时回退不炸）。
+
+**PL025.5 自动下班小时：口径统一 + 在岗门禁**
+
+- `core/src/settings.rs`：`validate` 的 `workday_auto_out_hours` 由 `1..=72` 改 **`4..=12`**（错误文案同步）；单测改边界（3/13 拒，4/12 收）。
+- `core/src/commands/reminder.rs` `set_settings_inner`：**先锁 workday 判在岗**（锁序 workday → settings 合法），在岗且提交值与现值不同 → 返回错误（新增 `CommandError` 变体，如 `AutoOutLockedOnDuty`）；其余字段照常。
+- 前端 `ui/components/SettingsPanel.vue`：自动下班 ± 加 `on-duty` prop 门禁（`:disabled="onDuty || …"`）；`ui/App.vue` 传 `:on-duty="day?.duty_ended_at == null && day?.duty_started_at != null"`。
+
+**PL025.6 数据日归属 = 上班打卡日**
+
+- `core/src/storage.rs`：新增 `workday_rows_between(start, end) -> Vec<(id, clock_in_at, Option<clock_out_at>)>`（`clock_in_at` 落在 `[start, end)` 的行；区间查询）。
+- `core/src/workday.rs`：`reduce_day` 入参由 `(events, day_start, day_end, now)` 改为 `(windows, events, now)`——`windows` = 该日数据日的在岗区间（clock_out 空则闭于 now）；区间内空隙为休息、段事件只按所属区间归属；**跨零点尾巴天然随区间带入**（不再有"孤儿 clock_out 从 day_start 起算"分支）。
+- `core/src/commands/workday.rs` `day_summary_inner`：`day_bounds(offset)` 取该本地日 → `workday_rows_between` 取区间 → 取区间内 events → 归约；`workday_total_inner` / `week_detail_inner` 逐日复用（自动跟随）。
+- 边界用例（TDD）：跨零点班（22:00→次日 02:00）归打卡日、次日不出现；次日 09:00 再打卡 → 次日只有 09:00 之后；跨零点 + 次日再打卡 → 两日各一段；自动下班跨零点 → 归打卡日。
+
+**PL025.7 多段日图谱**
+
+- `ui/components/StatsView.vue` `renderGraph`：由 `d.blocks` 的**空洞**推区间间空隙（blocks 在区间内连续铺满，空洞必为段间空隙）→ 插入 `gap` 段；每个在岗区间末尾（该段最后一个 block 的 end）打 **D** 节点；今天仍在岗沿现有 `endTs` 行为。
+- `ui/src/styles/graph.css`：新增 `.graph-seg.gap`（灰色，`color-mix(in srgb, var(--ink) 28%, transparent)`）。
+- 三值口径不变（在岗 = 各区间之和）。
+
+**PL025.8 自动下班确认流**
+
+- 后端 `core/src/commands/workday.rs`（`try_auto_clock_out` 拆分）+ `core/src/commands/session.rs`（`status_snapshot`）：
+  - 新增"待决"判定：`now ≥ clock_in + N*3600 − 60` 且 `< clock_in + N*3600` → 发事件 `workday-auto-out-pending`（载荷 = 到点时刻）+ 调 `lib::show_main_window`（show → unminimize → set_focus，**顺序不可颠倒**：tao 的 `set_focus` 在 `is_minimized` 时直接早退）；
+  - **Rust 兜底定时**（前端死也必自动下班）：打卡/加班时 `std::thread::spawn` 到点唤醒线程（持 `AppHandle`），唤醒后核对当前基准（基准存 `AppContext`，加班/下班会改）→ 一致则执行自动下班，不一致则按新基准重排；
+  - 执行口径：自动下班时刻恒 = `clock_in + N*3600`（沿"账目准时"定案）。
+- 前端：新增确认框（复用 `ConfirmModal.vue` 形态）——倒计时显示 + 「下班」/「加班」双按钮；按「下班」→ `clock_out`；收到 `workday-auto-out`（后端已执行）→ 关框。
+
+**PL025.9 加班拉满 12h**
+
+- `core/src/workday.rs` `EventKind` 加变体 `Overtime`（`as_str`/`parse` 同步；events.kind 是 TEXT，**零迁移**）；`reduce_day` 显式忽略该事件（不影响在岗/工作/休息归约）。
+- `core/src/commands/workday.rs` 新增命令 `overtime`：把当前在岗区间的下班基准改为 `clock_in + 12h`；写 `overtime` 事件；已 ≥12h → 严格报错（`AlreadyAtOvertimeCap`）；重排兜底定时到 `clock_in + 12h`。
+- 前端：确认框在"已满 12h"时隐藏加班钮；点加班 → invoke 后关框（计时继续）；到 `12h−1min` 再弹（只能下班）。
+
+### 验证方案（全部可执行、可断言）
+
+- 门禁全量：`cargo fmt --check` / `clippy --all-targets -D warnings` / `cargo test` / `cargo doc --no-deps` / `npm run build`（含 vue-tsc）/ `prettier --check`；
+- 单测：`.1` 首日偏移（有/无记录）、`.5` 4/12 边界 + 在岗拒绝该字段 + 在岗放行其他字段、`.6` 四组跨零点边界用例、`.8` 待决判定 59/60/61s 边界 + 兜底执行 + 基准变更重排、`.9` 加班事件写入 + 基准改 12h + 已满 12h 报错 + 归约忽略；
+- live：`.1` 一直往前翻 → 最早那天箭头置灰；`.2`/`.3` 几何探针 `.temp/probe-stats-geometry.ts`（import 真实 `stats.css` + 抄源码柱坐标公式）量标签中心 vs 柱中心（≤0.5px）与四行 `.track` 等宽，并带"还原旧样式"反证段（**探针文件已按用户要求删除，仅存验证记录**）；`.4` 四种日态各看一次；`.5` 在岗时 ± 置灰；`.6`/`.7` 用种子里的 10-01 双班日看两段蓝 + 各自 D + 中间灰，且三值不变；`.8`/`.9` 把自动下班设 4h 实测（3:59 弹框 / 不操作 4:00 自动下班 / 60s 内按下班同样写满 4h / 加班后到 11:59 再弹且只能下班）。
+
+### 验收标准
+
+- 8 条现象逐条消失，口径按上表落地；跨零点日的历史数字按新口径重算（如实登记，不视为缺陷）；
+- 记账口径唯一性：自动下班/加班的写入时刻恒为"上班 + 基准"，与按下时刻无关；
+- 在岗期间设置里的自动下班小时数不可改（UI 置灰 + 后端拒绝双保险）。
+
+### 明确不做（YAGNI 边界）
+
+- 明细填充**不做**固定 999 上限（维持"当日最大块 = 满格"）；
+- 多段日的**区间间空隙不计入在岗**（只画灰色）；
+- **不做 12h 以上**的加班；不做"次日凌晨自动回算归属"（归属只看 `clock_in` 所在日）；
+- 不改 schema、不写历史数据迁移脚本；不做跨零点归属的可配置开关。
+
+### 拆分 todo
+
+PL025.1–PL025.9 见 x.progress.md「PL025」任务组。

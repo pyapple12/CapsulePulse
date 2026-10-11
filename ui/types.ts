@@ -65,4 +65,6 @@ export interface WorkdayTotal {
   rest_secs: number;
   /** 有数据天数（当日存在打卡/计时记录） */
   days: number;
+  /** 最早记录所在本地日相对今天的偏移（负值或 0；空库 null）——统计往前翻的下界（PL025.1） */
+  first_offset: number | null;
 }

@@ -45,16 +45,28 @@ fn get_settings_inner<C: Clock>(ctx: &AppContext<C>) -> Result<ReminderSettings,
 /// 设置保存：校验 → 持久化 → 更新内存态（任一步失败不污染内存态）。
 /// **窗口位置归 Rust 管辖**（PATCH001.4）：提交值只覆盖提醒字段，位置从内存态继承——否则
 /// 设置板提交的陈旧副本会把用户刚挪的窗口位置抹回旧值（前端不参与位置读写）。
+/// **在岗禁改自动下班小时**（PL025.5）：本班基准不可中途改（账目口径唯一）；锁序
+/// workday → settings 单向合法（见 AppContext 注释）。
 fn set_settings_inner<C: Clock>(
     ctx: &AppContext<C>,
     settings: &ReminderSettings,
 ) -> Result<(), CommandError> {
-    let inherited = poison("设置", ctx.settings.lock())?.window_pos;
+    let (inherited_pos, current_hours, on_duty) = {
+        let workday = poison("工作日", ctx.workday.lock())?;
+        let current = poison("设置", ctx.settings.lock())?;
+        (
+            current.window_pos,
+            current.workday_auto_out_hours,
+            workday.is_on_duty(),
+        )
+    };
+    if on_duty && settings.workday_auto_out_hours != current_hours {
+        return Err(CommandError::AutoOutLockedOnDuty(current_hours));
+    }
     let mut merged = settings.clone();
-    merged.window_pos = inherited;
+    merged.window_pos = inherited_pos;
     merged.save(&ctx.settings_path)?;
-    let mut current = poison("设置", ctx.settings.lock())?;
-    *current = merged;
+    *poison("设置", ctx.settings.lock())? = merged;
     Ok(())
 }
 
@@ -76,7 +88,7 @@ pub fn set_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::{ctx, FakeClock};
+    use crate::commands::test_support::{begin_duty, ctx, FakeClock};
     use crate::settings::WindowPos;
 
     /// T4a：set_settings 校验 + 持久化 + 内存态更新；非法阈值被拒。
@@ -144,5 +156,40 @@ mod tests {
         assert!(std::fs::read_to_string(&ctx.settings_path)
             .unwrap()
             .contains("\"x\": 320"));
+    }
+
+    /// PL025.5：在岗期间禁改自动下班小时数（本班基准不可中途改）；其余字段照常可改；
+    /// 未在岗可改。
+    #[test]
+    fn settings_set_rejects_auto_hours_change_on_duty() {
+        let duty_ctx = ctx(FakeClock::new());
+        begin_duty(&duty_ctx); // 上班 → 在岗（默认 8h）
+
+        let changed = ReminderSettings {
+            workday_auto_out_hours: 9,
+            ..ReminderSettings::default()
+        };
+        assert!(matches!(
+            set_settings_inner(&duty_ctx, &changed),
+            Err(CommandError::AutoOutLockedOnDuty(8))
+        ));
+
+        // 其余字段照常可改（hours 维持 8）
+        let others = ReminderSettings {
+            threshold_min: 30,
+            ..ReminderSettings::default()
+        };
+        set_settings_inner(&duty_ctx, &others).unwrap();
+        let after = get_settings_inner(&duty_ctx).unwrap();
+        assert_eq!(after.threshold_min, 30, "在岗不拦其他字段");
+        assert_eq!(after.workday_auto_out_hours, 8, "小时数未被改动");
+
+        // 未在岗：可改
+        let off_ctx = ctx(FakeClock::new());
+        set_settings_inner(&off_ctx, &changed).unwrap();
+        assert_eq!(
+            get_settings_inner(&off_ctx).unwrap().workday_auto_out_hours,
+            9
+        );
     }
 }

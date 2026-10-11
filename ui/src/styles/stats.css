@@ -350,7 +350,8 @@
   right: 0;
   bottom: 0;
   display: flex;
-  gap: 7px;
+  /* 无 gap（PL025.2）：标签盒宽须等于柱槽宽 W/7，柱中心 = i*slot + slot/2 才与标签中心重合；
+     原 gap:7px 使第 i 个标签中心 = 柱中心 + (i−3)px（左偏→右偏的累积偏移根因） */
 }
 .wc-days span {
   flex: 1;
@@ -377,7 +378,11 @@
 .dl .time {
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
-  width: 86px;
+  /* 列宽 = 最宽时间串 ink 宽（PL025.3 追问实测：`HH:MM–HH:MM` 恒等宽 68.6px → 取 69px；
+     原 86px 多出的 17.4px 全落进"文字→条"的可见间距）。对齐方式不动（保持默认左对齐）——
+     故「至今」那行只显示开始时间（文字较短）时，该行文字→条的间距会比其他行大 */
+  width: 69px;
+  flex: none;
 }
 .dl .track {
   flex: 1;
@@ -401,6 +406,12 @@
 .dl .dur {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+  /* 定宽（PL025.3）：按最宽串「999分」的 ink 宽（实测 34.2px → 取 35px）——否则文字列宽度
+     随「60分/180分」变化，各行透明条（.dl .track）宽度不等、长短不可比。
+     右对齐保持（数字右缘成一条线）；故 2 位数字行的"条→文字"间距会比 3 位行略大 */
+  width: 35px;
+  text-align: right;
+  flex: none;
 }
 .dl .ongoing {
   font-size: 10.5px;

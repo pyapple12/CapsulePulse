@@ -13,7 +13,13 @@ const day = ref<DaySummary | null>(null);
 // 周视图（PL022）：查看日所在自然周（周一~周日，恒 7 行），Rust 侧归约，本组件零聚合
 const week = ref<WeekDay[]>([]);
 // 总日均（PL022）：全历史工作时长总和 ÷ 有数据天数（后端聚合，前端只做除法展示）
-const total = ref<WorkdayTotal>({ duty_secs: 0, work_secs: 0, rest_secs: 0, days: 0 });
+const total = ref<WorkdayTotal>({
+  duty_secs: 0,
+  work_secs: 0,
+  rest_secs: 0,
+  days: 0,
+  first_offset: null,
+});
 const loadError = ref("");
 
 async function refresh(): Promise<void> {
@@ -55,11 +61,31 @@ watch(
    ============================================================ */
 const WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
+/** 日期卡状态文案（PL025.4 四态）：过去无打卡 = 休假日；今天无打卡 = 未上班；有打卡按在岗/已下班 */
+function dayState(): string {
+  const duty = day.value?.duty_started_at ?? null;
+  const ended = day.value?.duty_ended_at ?? null;
+  if (duty == null) {
+    return offset.value < 0 ? "休假日" : "未上班";
+  }
+  return ended == null && offset.value === 0 ? "在岗中" : "已下班";
+}
+
 const dayLabelText = computed(() => {
   const d = new Date(Date.now() + offset.value * 86_400_000);
-  const state = offset.value < 0 || day.value?.duty_ended_at != null ? "已下班" : "在岗中";
-  return `${d.getMonth() + 1}月${d.getDate()}日 · ${WEEKDAY_CN[(d.getDay() + 6) % 7]} · ${state}`;
+  return `${d.getMonth() + 1}月${d.getDate()}日 · ${WEEKDAY_CN[(d.getDay() + 6) % 7]} · ${dayState()}`;
 });
+
+/** 往前翻的下界（PL025.1）：最早记录日偏移；空库/未加载 = 0（今天）→ 不许往前翻 */
+const firstOffset = computed(() => total.value.first_offset ?? 0);
+
+/** 前一日：最早记录日即最后一条（箭头 disabled 之外再兜一层，防程序化改 offset） */
+function prevDay(): void {
+  if (offset.value <= firstOffset.value) {
+    return;
+  }
+  offset.value -= 1;
+}
 
 /* ============================================================
    时间图谱（design renderGraph 1:1）：bars/nodes 属性更新 + comet 白纹发射
@@ -619,7 +645,13 @@ onUnmounted(() => {
         <!-- 正面：统计五区 -->
         <section class="stats sheet flip-face front">
           <div class="daynav">
-            <button class="arrow" type="button" title="前一日" @click="offset--">
+            <button
+              class="arrow"
+              type="button"
+              title="前一日"
+              :disabled="offset <= firstOffset"
+              @click="prevDay"
+            >
               <svg
                 width="7"
                 height="7"
