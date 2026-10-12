@@ -94,7 +94,9 @@ mod tests {
     /// T4a：set_settings 校验 + 持久化 + 内存态更新；非法阈值被拒。
     #[test]
     fn settings_set_persists_and_validates() {
-        let ctx = ctx(FakeClock::new());
+        let mut ctx = ctx(FakeClock::new());
+        // 独立设置文件：避免与同模块其他用例争用 temp_settings_path("ctx")（并行执行会互相覆盖）
+        ctx.settings_path = crate::commands::test_support::temp_settings_path("settings-set");
         let s = ReminderSettings {
             threshold_min: 30,
             sound_enabled: false,

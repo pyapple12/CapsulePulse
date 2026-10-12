@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use super::workday::require_on_duty;
-use super::{lock, poison, wall_now_secs, AppContext, CommandError};
+use super::{lock, now_secs, poison, AppContext, CommandError};
 use crate::reminder::ReminderConfig;
 use crate::session::{Clock, SessionState, TimerAction};
 use crate::workday::EventKind;
@@ -35,22 +35,15 @@ pub struct ReminderDecision {
     pub(super) notify_enabled: bool,
 }
 
-/// 落一个工作段并记段末事件（单事务，FIX002.9）：零秒段跳过会话行但事件照记；
-/// 会话行 started_at 与事件时刻取同一 wall 基准，at 为 None = 记账当下（自动下班传回填时刻）。
+/// 落一个段末事件（PL027：段时长由流水配对推出，**不再写 sessions 行**；单事务写入）。
+/// at 为 None = 记账当下（自动下班传回填时刻）。
 fn persist_session_with_end<C: Clock>(
     ctx: &AppContext<C>,
-    segment: Duration,
+    _segment: Duration,
     at: Option<i64>,
 ) -> Result<(), CommandError> {
-    let now = wall_now_secs()?;
-    let at = at.unwrap_or(now);
-    let started_at = now - segment.as_secs() as i64;
-    poison("存储", ctx.storage.lock())?.record_session_with_event(
-        started_at,
-        segment.as_secs() as i64,
-        at,
-        EventKind::SegmentEnd,
-    )?;
+    let at = at.unwrap_or(now_secs(ctx)?);
+    poison("存储", ctx.storage.lock())?.insert_event(at, EventKind::SegmentEnd)?;
     Ok(())
 }
 
@@ -62,7 +55,7 @@ fn clear_reminder_fire<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError
 
 /// 记录段起止事件（按下时间点留痕；时刻取当前真实时钟，供时间图谱归约）。
 fn mark_segment<C: Clock>(ctx: &AppContext<C>, kind: EventKind) -> Result<(), CommandError> {
-    let at = wall_now_secs()?;
+    let at = now_secs(ctx)?;
     poison("存储", ctx.storage.lock())?.insert_event(at, kind)?;
     Ok(())
 }
@@ -78,6 +71,7 @@ pub(super) fn start_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), Command
         lock(ctx)?.reset(); // 回滚：留痕失败回到 start 前态（Idle，累计恒零），计时未开始
         return Err(err);
     }
+    super::workday::beat_after_action(ctx);
     Ok(())
 }
 
@@ -108,6 +102,7 @@ pub(super) fn pause_session_at<C: Clock>(
         lock(ctx)?.undo_pause(SessionState::Running { start }, segment);
         return Err(err);
     }
+    super::workday::beat_after_action(ctx);
     Ok(())
 }
 
@@ -128,6 +123,7 @@ fn resume_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
         lock(ctx)?.restore_state(snapshot);
         return Err(err);
     }
+    super::workday::beat_after_action(ctx);
     Ok(())
 }
 
@@ -199,6 +195,7 @@ fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     require_on_duty(ctx)?;
     close_running_segment(ctx, None)?;
     lock(ctx)?.reset_to_paused();
+    super::workday::beat_after_action(ctx);
     Ok(())
 }
 
@@ -285,7 +282,7 @@ pub async fn session_status(
     let (status, decision) = status_snapshot(&handle)?;
     super::reminder::deliver_reminder(&app, decision)?;
     // 自动下班待决（PL025.8）：到点前 60s 提示一次——发事件（前端弹倒计时框）+ 把窗口拉到前台
-    if let Some(due_at) = super::workday::auto_out_pending_inner(&handle, wall_now_secs()?)? {
+    if let Some(due_at) = super::workday::auto_out_pending_inner(&handle, now_secs(&handle)?)? {
         app.emit("workday-auto-out-pending", due_at)
             .map_err(|e| CommandError::Event(e.to_string()))?;
         crate::show_main_window(&app);

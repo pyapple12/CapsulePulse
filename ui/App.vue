@@ -8,6 +8,7 @@ import ConfirmModal from "./components/ConfirmModal.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import StatsView from "./components/StatsView.vue";
 import TimerCard from "./components/TimerCard.vue";
+import type { RecoveryNotice } from "./types";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
 import type { DaySummary, ReminderSettings } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
@@ -44,6 +45,8 @@ const autoOutVisible = ref(false);
 const autoOutAt = ref(0);
 // PL025.8 自动下班待决：到点前 60s 弹确认框（倒计时 + 下班/加班）——到点由后端执行，前端只展示
 const autoOutDue = ref<number | null>(null);
+/** 崩溃恢复提示（PL027.8）：一次性——仅"判下班"分支有值（无缝续静默），取过即不再显示 */
+const recoveryNotice = ref<number | null>(null);
 const autoOutLeft = ref(0);
 let autoOutCountdown: number | undefined;
 let unlistenAutoOutPending: (() => void) | undefined;
@@ -360,6 +363,15 @@ onMounted(() => {
       actionError.value = `提醒监听注册失败：${String(err)}`;
       console.error("reminder-due 监听注册失败", err);
     });
+  // PL027.8 崩溃恢复提示（一次性）：启动恢复结果自后端取一次——仅"判下班"分支有值，弹文案条；
+  // 无缝续分支返回 null（静默，不打扰）
+  invoke<RecoveryNotice | null>("take_recovery_notice")
+    .then((notice) => {
+      if (notice?.closed_at != null) {
+        recoveryNotice.value = notice.closed_at;
+      }
+    })
+    .catch((err) => console.error("take_recovery_notice 调用失败", err));
   // workday-auto-out：payload = 回填下班时刻（上班 + N），文案条告知 + 界面即刷；
   // 30s 后自隐（FIX005.1：此前无任何清理点会滞留至重启），新触发重置计时
   listen<number>("workday-auto-out", (event) => {
@@ -430,6 +442,10 @@ onUnmounted(() => {
       </div>
       <div v-if="autoOutVisible" class="banner auto">
         <span class="dot"></span><span>已于 {{ hhmm(autoOutAt) }} 自动下班</span>
+      </div>
+      <div v-if="recoveryNotice != null" class="banner auto">
+        <span class="dot"></span
+        ><span>上次异常退出，已按 {{ hhmm(recoveryNotice) }} 结束工作记账；要继续请重新打卡</span>
       </div>
       <div v-if="actionError" class="banner error" role="alert">{{ actionError }}</div>
 

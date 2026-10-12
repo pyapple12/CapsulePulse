@@ -37,6 +37,29 @@ pub struct AutoOutWatch {
     pub pending_notified: bool,
 }
 
+/// 墙钟抽象（PL027.6）：命令层取"当下 Unix 秒"的统一入口——生产用 [`SystemWallClock`]，
+/// 测试注入与假单调钟同步的假墙钟（"时间源可注入"纪律的墙钟面；段时长由事件时间戳推出后，
+/// 墙钟可控是既有用例保住强度的前提）。
+pub trait WallClock: Send + Sync {
+    /// 当前 Unix 秒。
+    fn now_secs(&self) -> Result<i64, CommandError>;
+}
+
+/// 系统墙钟（生产实现）：`SystemTime` 直取。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SystemWallClock;
+
+impl WallClock for SystemWallClock {
+    fn now_secs(&self) -> Result<i64, CommandError> {
+        wall_now_secs()
+    }
+}
+
+/// 取当下 Unix 秒（经注入墙钟）：命令实现统一走它，勿直取系统时钟。
+pub(crate) fn now_secs<C: Clock>(ctx: &AppContext<C>) -> Result<i64, CommandError> {
+    ctx.wall.now_secs()
+}
+
 /// 应用级共享上下文：工作日状态 + 会话状态机 + 存储 + 提醒设置与触发状态。
 /// lib.rs 经 `.manage()` 注册，各命令经 State 访问。泛型默认 [`RealClock`]；测试注入假钟。
 /// rusqlite Connection 非 Sync，故 Storage 亦入 Mutex；
@@ -58,6 +81,10 @@ pub struct AppContext<C: Clock = RealClock> {
     pub auto_out: Mutex<AutoOutWatch>,
     /// 设置文件路径（set_settings 持久化目标）。
     pub settings_path: PathBuf,
+    /// 墙钟（PL027.6 注入点）：生产 = 系统时钟，测试 = 假墙钟。
+    pub wall: Box<dyn WallClock>,
+    /// 一次性启动恢复提示（PL027.8）：仅"判下班"分支有值；前端取一次即清空。
+    pub recovery: Mutex<Option<workday::RecoveryOutcome>>,
 }
 
 /// 命令层错误：跨 IPC 序列化为字符串（前端在 promise reject 的 message 中读到文案）。
@@ -126,39 +153,59 @@ pub(super) fn wall_now_secs() -> Result<i64, CommandError> {
 pub(crate) mod test_support {
     //! 跨子模块测试共享：假钟 + 内存库上下文（仅测试编译期存在）。
 
-    use std::cell::Cell;
     use std::path::PathBuf;
-    use std::rc::Rc;
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::*;
     use crate::settings::ReminderSettings;
     use crate::workday::WorkdayState;
 
-    /// 手拨假钟：clone 与 AppContext 共享同一时间轴。
+    /// 手拨假钟（PL027.6：偏移改原子共享）：`Arc<AtomicU64>` 毫秒偏移——与假墙钟共享同一
+    /// 时间轴，且满足 `Box<dyn WallClock>` 的 Send + Sync 约束；clone 后仍同轴。
     #[derive(Clone)]
     pub struct FakeClock {
-        offset: Rc<Cell<Duration>>,
+        millis: Arc<AtomicU64>,
     }
 
     impl FakeClock {
         /// 新建零点假钟（时间源注入测试用）。
         pub fn new() -> Self {
             Self {
-                offset: Rc::new(Cell::new(Duration::ZERO)),
+                millis: Arc::new(AtomicU64::new(0)),
             }
         }
 
         /// 前拨假钟推进时间轴。
         pub fn advance(&self, d: Duration) {
-            self.offset.set(self.offset.get() + d);
+            self.millis
+                .fetch_add(d.as_millis() as u64, Ordering::SeqCst);
+        }
+
+        /// 共享毫秒句柄（假墙钟与假单调钟同轴，镜像生产"两者同刻"）。
+        pub fn shared_millis(&self) -> Arc<AtomicU64> {
+            self.millis.clone()
         }
     }
 
     impl Clock for FakeClock {
         fn now(&self) -> Duration {
-            self.offset.get()
+            Duration::from_millis(self.millis.load(Ordering::SeqCst))
+        }
+    }
+
+    /// 假墙钟（PL027.6）：`base + 假钟偏移`——与假单调钟共享同一原子时间轴，
+    /// 故"假钟前拨 N 秒"事件时间戳同步前拨 N 秒；`base` 取 1_000 与既有夹具打卡锚对齐。
+    #[derive(Clone)]
+    pub struct FakeWall {
+        base: i64,
+        millis: Arc<AtomicU64>,
+    }
+
+    impl WallClock for FakeWall {
+        fn now_secs(&self) -> Result<i64, CommandError> {
+            Ok(self.base + (self.millis.load(Ordering::SeqCst) / 1_000) as i64)
         }
     }
 
@@ -166,12 +213,17 @@ pub(crate) mod test_support {
     pub fn ctx(clock: FakeClock) -> AppContext<FakeClock> {
         AppContext {
             workday: Mutex::new(WorkdayState::Off),
-            session: Mutex::new(WorkSession::new(clock)),
+            session: Mutex::new(WorkSession::new(clock.clone())),
             storage: Mutex::new(Storage::open_in_memory().unwrap()),
             settings: Mutex::new(ReminderSettings::default()),
             fire: Mutex::new(ReminderFire::default()),
             auto_out: Mutex::new(AutoOutWatch::default()),
             settings_path: temp_settings_path("ctx"),
+            wall: Box::new(FakeWall {
+                base: 1_000,
+                millis: clock.shared_millis(),
+            }),
+            recovery: Mutex::new(None),
         }
     }
 

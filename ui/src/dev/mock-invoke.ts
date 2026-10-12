@@ -40,6 +40,9 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
     case "session_status":
       return { state: mockState, total_ms: mockTotalMs(), on_duty: mockOnDuty };
+    case "take_recovery_notice":
+      // PL027.8：一次性崩溃恢复提示——基座恒返回 null（无缝续静默路径）
+      return null;
     case "session_stats":
       return { today_secs: 12_600, week_secs: 54_300, all_secs: 93_600 };
     case "day_detail": {

@@ -68,3 +68,11 @@ export interface WorkdayTotal {
   /** 最早记录所在本地日相对今天的偏移（负值或 0；空库 null）——统计往前翻的下界（PL025.1） */
   first_offset: number | null;
 }
+
+/** 崩溃恢复提示返回体（镜像 core/src/commands/workday.rs RecoveryOutcome，PL027.8）：
+ * `closed_at` = 补下班记账时刻（仅"判下班"分支有值；无缝续为 null，前端静默） */
+export interface RecoveryNotice {
+  closed_at: number | null;
+  /** 该次补下班是否以"自动下班"名义（越过自动下班点） */
+  auto: boolean;
+}

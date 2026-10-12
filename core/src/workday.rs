@@ -24,6 +24,12 @@ pub enum EventKind {
     SegmentEnd,
     /// 加班（PL025.9）：把本班下班基准拉满到 `clock_in + 12h`；只作留痕，不参与归约。
     Overtime,
+    /// 重置标记（PL027.5）：重置按钮 = 收段落库 + 大计时器归零 + 回休息态；只作留痕，
+    /// 不参与归约——"大计时器累计"的基准 = 最后一条本事件或本次打卡，使累计可由流水推出。
+    SessionReset,
+    /// 崩溃补下班（PL027.4）：重启恢复判定"已断"时按最后心跳补记的下班；只作留痕，
+    /// 不参与归约（与 `ClockOut`/`AutoClockOut` 同性质，仅用于区分"这次下班是补记的"）。
+    CrashClockOut,
 }
 
 impl EventKind {
@@ -36,6 +42,8 @@ impl EventKind {
             EventKind::SegmentStart => "segment_start",
             EventKind::SegmentEnd => "segment_end",
             EventKind::Overtime => "overtime",
+            EventKind::SessionReset => "session_reset",
+            EventKind::CrashClockOut => "crash_clock_out",
         }
     }
 
@@ -48,6 +56,8 @@ impl EventKind {
             "segment_start" => Some(EventKind::SegmentStart),
             "segment_end" => Some(EventKind::SegmentEnd),
             "overtime" => Some(EventKind::Overtime),
+            "session_reset" => Some(EventKind::SessionReset),
+            "crash_clock_out" => Some(EventKind::CrashClockOut),
             _ => None,
         }
     }
@@ -68,19 +78,17 @@ pub enum WorkdayError {
 }
 
 /// 工作日状态机：Off（未上班）/ OnDuty（在岗中）。
-/// OnDuty 携带 clock_in_at（自动下班回填的基准）与 id（下班关行的库句柄）——
-/// id 属库行引用而非业务语义，随态流转避免命令层二次查询。
+/// OnDuty 只携带 clock_in_at（自动下班回填基准 + 与流水交叉校验）——**PL027 起不再携带库行 id**：
+/// 存储改为 events 单表后不存在"班行"可关，下班只追加事件，状态无需行句柄。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkdayState {
     /// 未上班。
     #[default]
     Off,
-    /// 在岗中：clock_in_at = 上班时刻，id = workdays 行 id。
+    /// 在岗中：clock_in_at = 上班时刻。
     OnDuty {
         /// 上班打卡时刻（Unix 秒）。
         clock_in_at: i64,
-        /// workdays 表行 id。
-        id: i64,
     },
 }
 
@@ -88,18 +96,15 @@ impl WorkdayState {
     /// 上班转移：仅 Off 合法。
     /// # 错误
     /// 已在岗返回 [`WorkdayError::AlreadyOnDuty`]。
-    pub fn clock_in(&mut self, at: i64, id: i64) -> Result<(), WorkdayError> {
+    pub fn clock_in(&mut self, at: i64) -> Result<(), WorkdayError> {
         if self.is_on_duty() {
             return Err(WorkdayError::AlreadyOnDuty);
         }
-        *self = WorkdayState::OnDuty {
-            clock_in_at: at,
-            id,
-        };
+        *self = WorkdayState::OnDuty { clock_in_at: at };
         Ok(())
     }
 
-    /// 下班转移：仅 OnDuty 合法（落库关行所需的上班时刻与 id 在转移前由命令层读取）。
+    /// 下班转移：仅 OnDuty 合法（下班只追加事件，无行句柄可读）。
     /// # 错误
     /// 未上班返回 [`WorkdayError::NotOnDuty`]。
     pub fn clock_out(&mut self) -> Result<(), WorkdayError> {
@@ -115,14 +120,17 @@ impl WorkdayState {
         matches!(self, WorkdayState::OnDuty { .. })
     }
 
-    /// 启动恢复：库行 clock_out 为空 = 在岗恢复；已关行或无行 = Off。
-    /// # 参数
-    /// latest 为 workday_latest 查询结果 (id, clock_in_at, clock_out_at)。
-    pub fn from_latest(latest: Option<(i64, i64, Option<i64>)>) -> Self {
-        match latest {
-            Some((id, clock_in_at, None)) => WorkdayState::OnDuty { clock_in_at, id },
-            Some(_) | None => WorkdayState::Off,
+    /// 在岗打卡时刻（未在岗 None）——自动下班基准重建 / 心跳取数用。
+    pub fn clock_in_at(&self) -> Option<i64> {
+        match self {
+            WorkdayState::OnDuty { clock_in_at } => Some(*clock_in_at),
+            WorkdayState::Off => None,
         }
+    }
+
+    /// 由流水重建在岗态（PL027.4 启动恢复"继续"分支）：入参 = 未配对打卡时刻。
+    pub fn restore_on_duty(clock_in_at: i64) -> Self {
+        WorkdayState::OnDuty { clock_in_at }
     }
 }
 
@@ -169,10 +177,165 @@ pub fn auto_out_step(
 /// 自动下班待决窗口（秒）：到点前 60s 内弹确认框（PL025.8）。
 pub const AUTO_OUT_PENDING_SECS: i64 = 60;
 
+/// 崩溃恢复宽限（秒，PL027.4）：停机 ≤ 此值视为"没断"（无缝续），> 此值视为"断了"（按最后心跳补下班）。
+pub const CRASH_GRACE_SECS: i64 = 600;
+
+/// 启动恢复判定入参（运行态缓存的只读投影；纯逻辑层不依赖存储类型）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecoveryInput {
+    /// 最后心跳时刻（"最后已知活着"的下界，误差 ≤ 心跳间隔）。
+    pub last_beat_at: i64,
+    /// 在岗打卡时刻（段起点与自动下班基准的锚）。
+    pub duty_clock_in_at: i64,
+    /// 崩溃时是否在工作态（决定收口时是否需要补一条段末事件）。
+    pub working: bool,
+    /// 工作段起点（休息态 None）。
+    pub segment_start_at: Option<i64>,
+    /// 断开前的累计秒数。
+    pub accumulated_secs: i64,
+    /// 自动下班基准（未武装 None；含加班重算后的值）。
+    pub auto_out_at: Option<i64>,
+}
+
+/// 启动恢复判定结果（PL027.4）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryDecision {
+    /// 无需处理（无未闭合打卡 / 无缓存）：交给常规启动路径。
+    Nothing,
+    /// 停机 ≤ 宽限：**无缝续**——恢复在岗与会话（停机时长计入当前段），不写任何流水。
+    Continue {
+        /// 在岗打卡时刻。
+        duty_clock_in_at: i64,
+        /// 当前是否工作态。
+        working: bool,
+        /// 工作段起点（休息态 None）。
+        segment_start_at: Option<i64>,
+        /// 断开前累计秒数。
+        accumulated_secs: i64,
+    },
+    /// 停机 > 宽限：**按最后心跳补下班**。
+    CloseAt {
+        /// 记账时刻 = min(最后心跳, 自动下班点)。
+        at: i64,
+        /// 是否以"自动下班"名义记账（已越过自动下班点）。
+        auto: bool,
+        /// 是否在补下班前补一条段末事件（崩溃时在工作态）。
+        close_segment: bool,
+    },
+}
+
+/// 启动恢复判定（PL027.4 纯函数，时间可注入）：三分支见 [`RecoveryDecision`]。
+/// 口径：停机 = `now − last_beat_at`；收口时刻 = `min(last_beat_at, auto_out_at)`
+/// （越过自动下班点即用该点，避免虚记加班——发现可迟到、账目准时）。
+pub fn decide_recovery(input: Option<&RecoveryInput>, now: i64) -> RecoveryDecision {
+    let Some(input) = input else {
+        return RecoveryDecision::Nothing;
+    };
+    if now - input.last_beat_at <= CRASH_GRACE_SECS {
+        return RecoveryDecision::Continue {
+            duty_clock_in_at: input.duty_clock_in_at,
+            working: input.working,
+            segment_start_at: input.segment_start_at,
+            accumulated_secs: input.accumulated_secs,
+        };
+    }
+    let cap = input.auto_out_at.unwrap_or(input.last_beat_at);
+    let at = input.last_beat_at.min(cap);
+    RecoveryDecision::CloseAt {
+        at,
+        auto: input.auto_out_at.is_some() && at == cap && cap < input.last_beat_at,
+        close_segment: input.working,
+    }
+}
+
+/// 脏数据归一化（PL027.9）：检出"前一条打卡未闭合又出现新打卡"（历史/异常路径遗留的重叠班），
+/// 返回**需要追加的纠正事件**——把前一条班视为在**新打卡前一秒**结束：若此刻仍有未闭合工作段，
+/// 先补一条 `segment_end`，再补一条 `clock_out`（同一时刻，顺序即此）。
+/// 用"前一秒"而非"同刻"是**幂等必需**：同刻事件按 id 排序，追加的纠正会排在触发它的打卡之后，
+/// 重扫时依旧看到嵌套 → 永远不收敛；前移一秒后重扫即见"先关后开"，零新增。
+/// 纯函数：入参为按时间升序的全部流水，出参为按顺序追加的纠正事件（可能为空）。
+pub fn nested_clock_in_fixes(events: &[(i64, EventKind)]) -> Vec<(i64, EventKind)> {
+    let mut fixes = Vec::new();
+    let mut duty_open = false;
+    let mut work_open = false;
+    for &(at, kind) in events {
+        match kind {
+            EventKind::ClockIn => {
+                if duty_open {
+                    let close_at = at - 1;
+                    if work_open {
+                        fixes.push((close_at, EventKind::SegmentEnd));
+                        work_open = false;
+                    }
+                    fixes.push((close_at, EventKind::ClockOut));
+                }
+                duty_open = true;
+            }
+            EventKind::ClockOut | EventKind::AutoClockOut | EventKind::CrashClockOut => {
+                duty_open = false;
+                work_open = false;
+            }
+            EventKind::SegmentStart => work_open = true,
+            EventKind::SegmentEnd => work_open = false,
+            _ => {}
+        }
+    }
+    fixes
+}
+
 /// 待决判定纯函数：`now` 落在 `[due − 60, due)` 内即待决（返回到点时刻）；其余 None。
 pub fn auto_out_pending(due_at: Option<i64>, now: i64) -> Option<i64> {
     let due = due_at?;
     (now >= due - AUTO_OUT_PENDING_SECS && now < due).then_some(due)
+}
+
+/// 由流水推"某个数据日的在岗窗口"（PL027.6 单一事实源）：`clock_in` 开窗，其后最近的
+/// 下班事件（`clock_out` / `auto_clock_out` / `crash_clock_out`）关窗；**前班未关又出现新打卡
+/// 时视为前班在该刻结束**（脏数据兜底，归一化见 PL027.9）；末班未关则闭于 `now`（在岗中）。
+/// 只收 `clock_in ∈ [day_start, day_end)` 的窗口（数据日 = 打卡日，跨零点不切分）。
+/// # 参数
+/// events 为本数据日及其后紧邻区间的流水（升序）；now 为当前 Unix 秒。
+/// # 返回
+/// (窗口列表（升序、半开）、末窗是否仍未关（在岗中且属于本数据日）)
+pub fn duty_windows_for_day(
+    events: &[(i64, EventKind)],
+    day_start: i64,
+    day_end: i64,
+    now: i64,
+) -> (Vec<(i64, i64)>, bool) {
+    let mut windows: Vec<(i64, i64)> = Vec::new();
+    let mut open: Option<i64> = None;
+    for &(at, kind) in events {
+        match kind {
+            EventKind::ClockIn => {
+                if let Some(start) = open.replace(at) {
+                    if at > start {
+                        windows.push((start, at));
+                    }
+                }
+            }
+            EventKind::ClockOut | EventKind::AutoClockOut | EventKind::CrashClockOut => {
+                if let Some(start) = open.take() {
+                    if at > start {
+                        windows.push((start, at));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut open_tail = false;
+    if let Some(start) = open {
+        if now > start {
+            windows.push((start, now));
+        }
+        open_tail = start >= day_start && start < day_end;
+    }
+    let day_windows = windows
+        .into_iter()
+        .filter(|(start, _)| *start >= day_start && *start < day_end)
+        .collect();
+    (day_windows, open_tail)
 }
 
 /// 图谱区块类型：工作（计时段）/ 休息（在岗内空隙）。
@@ -248,11 +411,13 @@ pub fn reduce_day(
                 }
             }
             EventKind::SegmentEnd => take_work(&mut pending_work, &mut work_windows, at),
-            // 窗口由 windows 给定：打卡/自动下班/加班只作留痕，不参与窗口推导
+            // 窗口由 windows 给定：打卡/自动下班/加班/重置标记/崩溃补下班只作留痕，不参与窗口推导
             EventKind::ClockIn
             | EventKind::ClockOut
             | EventKind::AutoClockOut
-            | EventKind::Overtime => {}
+            | EventKind::Overtime
+            | EventKind::SessionReset
+            | EventKind::CrashClockOut => {}
         }
     }
     // 未收段（崩溃残留）闭于末窗末尾——按"一直在工作"处理，与旧口径未闭段闭合一致
@@ -344,44 +509,34 @@ mod tests {
 
     // —— W2：WorkdayState 状态机 ——
 
-    /// Off 态上班：进入 OnDuty 且携带 clock_in_at 与库行 id。
+    /// Off 态上班：进入 OnDuty 且携带 clock_in_at（PL027 起不再携带库行 id）。
     #[test]
     fn clock_in_from_off_enters_on_duty() {
         let mut s = WorkdayState::Off;
-        s.clock_in(1_000, 7).unwrap();
-        assert_eq!(
-            s,
-            WorkdayState::OnDuty {
-                clock_in_at: 1_000,
-                id: 7
-            }
-        );
+        s.clock_in(1_000).unwrap();
+        assert_eq!(s, WorkdayState::OnDuty { clock_in_at: 1_000 });
         assert!(s.is_on_duty());
+        assert_eq!(s.clock_in_at(), Some(1_000));
     }
 
     /// 重复上班严格报错（AlreadyOnDuty），状态不被破坏。
     #[test]
     fn clock_in_while_on_duty_errors() {
         let mut s = WorkdayState::Off;
-        s.clock_in(1_000, 7).unwrap();
-        assert_eq!(s.clock_in(2_000, 8), Err(WorkdayError::AlreadyOnDuty));
-        assert_eq!(
-            s,
-            WorkdayState::OnDuty {
-                clock_in_at: 1_000,
-                id: 7
-            }
-        );
+        s.clock_in(1_000).unwrap();
+        assert_eq!(s.clock_in(2_000), Err(WorkdayError::AlreadyOnDuty));
+        assert_eq!(s, WorkdayState::OnDuty { clock_in_at: 1_000 });
     }
 
     /// OnDuty 下班：转移回 Off（在岗信息由命令层转移前读取，此处只管状态）。
     #[test]
     fn clock_out_exits_duty() {
         let mut s = WorkdayState::Off;
-        s.clock_in(1_000, 7).unwrap();
+        s.clock_in(1_000).unwrap();
         s.clock_out().unwrap();
         assert_eq!(s, WorkdayState::Off);
         assert!(!s.is_on_duty());
+        assert_eq!(s.clock_in_at(), None);
     }
 
     /// 未上班下班严格报错（NotOnDuty）。
@@ -391,21 +546,95 @@ mod tests {
         assert_eq!(s.clock_out(), Err(WorkdayError::NotOnDuty));
     }
 
-    /// 启动恢复语义：库行 clock_out 为空 = 在岗恢复；已关行/无行 = Off（W3 恢复判定源）。
+    /// 启动恢复语义（PL027.4）：由未配对打卡时刻重建在岗态。
     #[test]
-    fn from_latest_restores_open_duty() {
+    fn restore_on_duty_builds_on_duty_state() {
+        let restored = WorkdayState::restore_on_duty(1_000);
+        assert_eq!(restored, WorkdayState::OnDuty { clock_in_at: 1_000 });
+        assert!(restored.is_on_duty());
+        assert_eq!(WorkdayState::Off.clock_in_at(), None);
+    }
+
+    // —— PL027.6：由流水推在岗窗口 ——
+
+    /// 单班：打卡开窗、下班关窗；窗口只收本数据日的打卡。
+    #[test]
+    fn duty_windows_single_shift() {
+        let events = [
+            ev(DAY + 9 * HOUR, EventKind::ClockIn),
+            ev(DAY + 17 * HOUR, EventKind::ClockOut),
+        ];
+        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 20 * HOUR);
+        assert_eq!(w, vec![(DAY + 9 * HOUR, DAY + 17 * HOUR)]);
+        assert!(!open);
+    }
+
+    /// 跨零点班：打卡在当日、下班在次日 → 窗口随打卡日归（不按自然日切分）；次日无窗口。
+    #[test]
+    fn duty_windows_cross_midnight_belongs_to_clock_in_day() {
+        let events = [
+            ev(DAY + 20 * HOUR, EventKind::ClockIn),
+            ev(DAY + 26 * HOUR, EventKind::AutoClockOut),
+        ];
+        let now = DAY + 30 * HOUR;
+        let (today, open_today) = duty_windows_for_day(&events, DAY, DAY + 86_400, now);
+        assert_eq!(today, vec![(DAY + 20 * HOUR, DAY + 26 * HOUR)]);
+        assert!(!open_today);
+        let (next, open_next) = duty_windows_for_day(&events, DAY + 86_400, DAY + 2 * 86_400, now);
+        assert!(next.is_empty(), "次日无打卡 → 无窗口");
+        assert!(!open_next);
+    }
+
+    /// 未关班闭于 now 且标记在岗（在岗中的今日视图）。
+    #[test]
+    fn duty_windows_open_tail_closes_at_now() {
+        let events = [ev(DAY + 9 * HOUR, EventKind::ClockIn)];
+        let now = DAY + 12 * HOUR;
+        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, now);
+        assert_eq!(w, vec![(DAY + 9 * HOUR, now)]);
+        assert!(open, "末班未关 = 在岗中");
+    }
+
+    /// 脏数据兜底：前班未关又出现新打卡 → 前班在该刻结束（窗口不重叠）。
+    #[test]
+    fn duty_windows_normalizes_nested_clock_in() {
+        let events = [
+            ev(DAY + 9 * HOUR, EventKind::ClockIn),
+            ev(DAY + 10 * HOUR, EventKind::ClockIn),
+            ev(DAY + 11 * HOUR, EventKind::ClockOut),
+        ];
+        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 12 * HOUR);
         assert_eq!(
-            WorkdayState::from_latest(Some((7, 1_000, None))),
-            WorkdayState::OnDuty {
-                clock_in_at: 1_000,
-                id: 7
-            }
+            w,
+            vec![
+                (DAY + 9 * HOUR, DAY + 10 * HOUR),
+                (DAY + 10 * HOUR, DAY + 11 * HOUR)
+            ],
+            "前班在新打卡刻结束，窗口不重叠"
         );
+        assert!(!open);
+    }
+
+    /// 孤儿下班事件（无打卡）不产生窗口；多班按时间升序返回。
+    #[test]
+    fn duty_windows_orphan_close_and_multi_shift_order() {
+        let events = [
+            ev(DAY + 8 * HOUR, EventKind::ClockOut),
+            ev(DAY + 11 * HOUR, EventKind::ClockIn),
+            ev(DAY + 12 * HOUR, EventKind::ClockOut),
+            ev(DAY + 14 * HOUR, EventKind::ClockIn),
+            ev(DAY + 15 * HOUR, EventKind::CrashClockOut),
+        ];
+        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 16 * HOUR);
         assert_eq!(
-            WorkdayState::from_latest(Some((7, 1_000, Some(2_000)))),
-            WorkdayState::Off
+            w,
+            vec![
+                (DAY + 11 * HOUR, DAY + 12 * HOUR),
+                (DAY + 14 * HOUR, DAY + 15 * HOUR)
+            ],
+            "孤儿下班不产窗口；两班升序"
         );
-        assert_eq!(WorkdayState::from_latest(None), WorkdayState::Off);
+        assert!(!open);
     }
 
     // —— EventKind 序列化 ——
@@ -677,6 +906,85 @@ mod tests {
         assert_eq!(plain.work_secs, overtime.work_secs);
         assert_eq!(plain.rest_secs, overtime.rest_secs);
         assert_eq!(plain.blocks, overtime.blocks);
+    }
+
+    // —— PL027.2：重置标记与崩溃补下班 ——
+
+    /// PL027.2：两类新事件编解码往返（events.kind TEXT 零迁移）。
+    #[test]
+    fn session_reset_and_crash_clock_out_roundtrip() {
+        assert_eq!(EventKind::SessionReset.as_str(), "session_reset");
+        assert_eq!(
+            EventKind::parse("session_reset"),
+            Some(EventKind::SessionReset)
+        );
+        assert_eq!(EventKind::CrashClockOut.as_str(), "crash_clock_out");
+        assert_eq!(
+            EventKind::parse("crash_clock_out"),
+            Some(EventKind::CrashClockOut)
+        );
+    }
+
+    /// PL027.2：两类新事件不参与归约——三值与区块与不含它们时完全一致。
+    #[test]
+    fn reset_and_crash_events_are_ignored_by_reduce() {
+        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let base = [
+            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
+            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+        ];
+        let extra = [
+            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
+            ev(DAY + 11 * HOUR, EventKind::SessionReset),
+            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+            ev(DAY + 13 * HOUR, EventKind::CrashClockOut),
+        ];
+        let plain = reduce_day(&windows, &base, false);
+        let with_extra = reduce_day(&windows, &extra, false);
+        assert_eq!(plain.duty_secs, with_extra.duty_secs);
+        assert_eq!(plain.work_secs, with_extra.work_secs);
+        assert_eq!(plain.rest_secs, with_extra.rest_secs);
+        assert_eq!(plain.blocks, with_extra.blocks);
+    }
+
+    /// PL027.9：脏数据归一化——嵌套打卡被纠正为"前班在新打卡刻结束"（段末在前、下班在后）。
+    #[test]
+    fn nested_clock_in_fixes_close_previous_duty() {
+        let events = [
+            ev(DAY, EventKind::ClockIn),
+            ev(DAY, EventKind::SegmentStart),
+            ev(DAY + HOUR, EventKind::ClockIn),
+            ev(DAY + 2 * HOUR, EventKind::ClockOut),
+        ];
+        assert_eq!(
+            nested_clock_in_fixes(&events),
+            vec![
+                (DAY + HOUR - 1, EventKind::SegmentEnd),
+                (DAY + HOUR - 1, EventKind::ClockOut)
+            ],
+            "补段末 + 补下班（新打卡前一秒，保证重扫收敛）"
+        );
+
+        let clean = [
+            ev(DAY, EventKind::ClockIn),
+            ev(DAY, EventKind::SegmentStart),
+            ev(DAY + HOUR, EventKind::SegmentEnd),
+            ev(DAY + HOUR, EventKind::ClockOut),
+            ev(DAY + 2 * HOUR, EventKind::ClockIn),
+        ];
+        assert!(nested_clock_in_fixes(&clean).is_empty(), "干净流水零纠正");
+
+        let duty_only = [
+            ev(DAY, EventKind::ClockIn),
+            ev(DAY, EventKind::SegmentStart),
+            ev(DAY + HOUR, EventKind::SegmentEnd),
+            ev(DAY + 2 * HOUR, EventKind::ClockIn),
+        ];
+        assert_eq!(
+            nested_clock_in_fixes(&duty_only),
+            vec![(DAY + 2 * HOUR - 1, EventKind::ClockOut)],
+            "段已收 → 只补下班"
+        );
     }
 
     /// 兜底决策：无基准 → 停；未到点 → 睡（上限 60s）；到点 → 以基准时刻执行；换代 → 让位。

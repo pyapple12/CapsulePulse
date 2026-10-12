@@ -273,19 +273,21 @@ pub fn run() {
             std::process::exit(1);
         }
     };
-    // 工作日恢复（PL005）：上次 clock_out 为空 = 在岗中，重启即回到在岗态
-    let workday = match storage.workday_latest() {
-        Ok(latest) => WorkdayState::from_latest(latest),
+    // 工作日恢复（PL027.6 单一事实源）：库中"最后一条打卡未配对"= 在岗中。
+    // （PL027.4 起由崩溃恢复三分支细化：停机 ≤10 分钟无缝续、>10 分钟按最后心跳补下班）
+    let workday = match storage.open_duty_clock_in() {
+        Ok(Some(clock_in_at)) => {
+            // 用户可感知的关键状态（上次下班打卡缺失），双写落档备查
+            warn_diag("已恢复在岗状态（上次下班打卡缺失）");
+            WorkdayState::restore_on_duty(clock_in_at)
+        }
+        Ok(None) => WorkdayState::Off,
         Err(err) => {
             diag::log(&format!("工作日状态恢复失败：{err}"));
             eprintln!("工作日状态恢复失败：{err}");
             std::process::exit(1);
         }
     };
-    if workday.is_on_duty() {
-        // 用户可感知的关键状态（上次下班打卡缺失，班账从恢复时刻起算），双写落档备查
-        warn_diag("已恢复在岗状态（上次下班打卡缺失）");
-    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 二次启动：唤起已有主窗口（单实例，防双开写同一 data/pulse.db）
@@ -301,8 +303,11 @@ pub fn run() {
             fire: Mutex::new(ReminderFire::default()),
             auto_out: Mutex::new(AutoOutWatch::default()),
             settings_path,
+            wall: Box::new(commands::SystemWallClock),
+            recovery: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            commands::workday::take_recovery_notice,
             commands::session::session_start,
             commands::session::session_pause,
             commands::session::session_resume,
@@ -364,6 +369,52 @@ pub fn run() {
             }
             build_tray(app)?;
             register_global_shortcuts(app)?;
+            // 惰性按天汇总（PL027.7）：启动时把"已封口但未滚"的过去日滚进 days（幂等；
+            // 失败仅落档——汇总只是加速层，不影响主流程）
+            let ctx = app.state::<AppContext>();
+            let now = match commands::now_secs(&ctx) {
+                Ok(now) => now,
+                Err(err) => {
+                    warn_diag(&format!("按天汇总跳过（时钟异常）：{err}"));
+                    0
+                }
+            };
+            // 脏数据归一化（PL027.9）：嵌套打卡 → "前班在新打卡刻结束"（幂等；失败不阻断启动）
+            if now > 0 {
+                match commands::workday::normalize_dirty_data_inner(&ctx) {
+                    Ok(0) => {}
+                    Ok(n) => warn_diag(&format!("启动归一化：追加 {n} 条纠正事件")),
+                    Err(err) => warn_diag(&format!("启动归一化失败（忽略）：{err}")),
+                }
+            }
+            // 旧模型一次性迁移（PL027.1b）：备份 → 校验 → 删旧两表 → 回填汇总 → 置版本。
+            // 失败不阻断启动（新代码只读流水，旧表留着无害），仅落档、下次启动重试。
+            if now > 0 {
+                commands::workday::migrate_on_start(&ctx, now);
+            }
+            if now > 0 {
+                if let Err(err) = commands::workday::seal_days_inner(&ctx, now) {
+                    warn_diag(&format!("按天汇总失败（忽略）：{err}"));
+                }
+            }
+            // 心跳线程（PL027.3）：在岗期间每 60 秒刷新运行态缓存（未上班空转）
+            commands::workday::spawn_beat_thread(&app.handle().clone());
+            // 启动恢复三分支（PL027.4）：无缝续（≤10 分钟）/ 按最后心跳补下班（>10 分钟）/ 无事。
+            // 幂等；失败不阻断启动（按常规启动路径继续）
+            if now > 0 {
+                match commands::workday::recover_on_startup(&ctx, now) {
+                    Ok(outcome) => {
+                        if let Some(at) = outcome.closed_at {
+                            warn_diag(&format!("启动恢复：已按 {at} 补下班记账"));
+                            // 一次性提示（PL027.8）：仅"判下班"分支留痕供前端弹条
+                            if let Ok(mut slot) = ctx.recovery.lock() {
+                                *slot = Some(outcome);
+                            }
+                        }
+                    }
+                    Err(err) => warn_diag(&format!("启动恢复失败（按常规启动继续）：{err}")),
+                }
+            }
             // 兜底自动下班武装（PL025.8）：在岗恢复时按"上班 + N"重建基准并起线程——
             // 重启后 tick 之外仍有第二道保险（与打卡路径同源：arm → spawn）
             let ctx = app.state::<AppContext>();

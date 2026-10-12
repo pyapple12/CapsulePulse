@@ -1,10 +1,12 @@
 //! 统计命令：今日/本周/累计三值聚合（前端低频拉取）。
+//! PL027.6 起**统一走单日管道口径**（与三值/图谱同源）——不再读 sessions 表求和；
+//! PL027.7 起由 `days` 汇总表加速已封口数据日的聚合。
 
-use chrono::Local;
 use serde::Serialize;
 use tauri::State;
 
-use super::{poison, AppContext, CommandError};
+use super::workday::{day_summary_inner, week_detail_inner, workday_total_inner};
+use super::{now_secs, AppContext, CommandError};
 use crate::session::Clock;
 
 /// stats 命令返回体：三值统计（秒；serde 结构单一来源，TS 侧镜像）。
@@ -18,14 +20,20 @@ pub struct SessionStats {
     pub all_secs: i64,
 }
 
-/// 统计快照：三值聚合（统计按当前真实本地时间定界）。
+/// 统计快照：今日 = 当日管道工作秒；本周 = 本周 7 日管道求和；累计 = 全历史逐日求和
+/// （PL027.7 起由 `days` 汇总表加速）。三者与三值/图谱**同源**（单一事实源）。
 fn stats_snapshot<C: Clock>(ctx: &AppContext<C>) -> Result<SessionStats, CommandError> {
-    let storage = poison("存储", ctx.storage.lock())?;
-    let now = Local::now();
+    let now = now_secs(ctx)?;
+    let today_secs = day_summary_inner(ctx, 0, now)?.work_secs;
+    let week_secs: i64 = week_detail_inner(ctx, 0, now)?
+        .iter()
+        .map(|day| day.work_secs)
+        .sum();
+    let all_secs = workday_total_inner(ctx, now)?.work_secs;
     Ok(SessionStats {
-        today_secs: storage.today_total(&now)?,
-        week_secs: storage.week_total(&now)?,
-        all_secs: storage.all_total()?,
+        today_secs,
+        week_secs,
+        all_secs,
     })
 }
 
@@ -37,36 +45,45 @@ pub async fn session_stats(handle: State<'_, AppContext>) -> Result<SessionStats
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
+    use chrono::{Local, TimeZone};
 
     use super::*;
     use crate::commands::test_support::{ctx, FakeClock};
+    use crate::workday::EventKind;
 
-    /// T3：stats 三值聚合——按当前真实本地时间定界注入边界内/外记录。
+    /// PL027.6：stats 三值统一走单日管道——构造"打卡 + 工作段"流水，今日/累计同源。
     #[test]
-    fn stats_forwarding_aggregates_periods() {
+    fn stats_snapshot_uses_single_day_pipeline() {
         let ctx = ctx(FakeClock::new());
-        let now = Local::now();
-        let today = crate::period::day_start_secs(&now);
-        let week = crate::period::week_start_secs(&now);
-        ctx.storage
-            .lock()
-            .unwrap()
-            .add_session(today + 3600, 100)
-            .unwrap();
-        ctx.storage
-            .lock()
-            .unwrap()
-            .add_session(week + 7200, 200)
-            .unwrap();
-        ctx.storage.lock().unwrap().add_session(0, 400).unwrap();
+        // 注入墙钟基准 = 假钟 base（1_000）：数据日随注入时钟定界（不用真实"今天"，
+        // 否则管道认的"今日"与夹具落点不同日）
+        let injected = crate::commands::now_secs(&ctx).unwrap();
+        let now_dt = Local.timestamp_opt(injected, 0).single().unwrap();
+        let today0 = crate::period::day_start_secs(&now_dt);
+        let yesterday0 = today0 - 86_400;
+        let shift = |day0: i64| {
+            vec![
+                (day0 + 9 * 3600, EventKind::ClockIn),
+                (day0 + 9 * 3600, EventKind::SegmentStart),
+                (day0 + 10 * 3600, EventKind::SegmentEnd),
+                (day0 + 10 * 3600, EventKind::ClockOut),
+            ]
+        };
+        {
+            let storage = ctx.storage.lock().unwrap();
+            storage.insert_events(&shift(today0)).unwrap();
+            storage.insert_events(&shift(yesterday0)).unwrap();
+        }
 
         let s = stats_snapshot(&ctx).unwrap();
-        // 运行日归一（FIX005 顺带修复）：周一起算时 week_start == day_start，
-        // "周内早于今日"那笔（week+7200）落回今日内，今日三值应随之合并为 300
-        let is_monday = today == week;
-        assert_eq!(s.today_secs, if is_monday { 300 } else { 100 });
-        assert_eq!(s.week_secs, 300);
-        assert_eq!(s.all_secs, 700);
+        assert_eq!(s.today_secs, 3600, "今日 = 当日管道工作秒");
+        assert_eq!(s.all_secs, 7200, "累计 = 全历史逐日求和");
+        let week0 = crate::period::week_start_secs(&now_dt);
+        let yesterday_in_week = yesterday0 >= week0;
+        assert_eq!(
+            s.week_secs,
+            if yesterday_in_week { 7200 } else { 3600 },
+            "本周 = 本周 7 日管道求和（昨日是否在本周内随星期而定）"
+        );
     }
 }
