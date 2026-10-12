@@ -3,7 +3,11 @@
    PL018.1 自 design/assets/css/graph.css 1:1 落位；单一来源 = design 侧，零差异 */
 #graphSvg {
   display: block;
-  width: 100%;
+  /* PATCH003.1/.5：画布左右各扩 6px（= 圆角半径），吃进板子已有的 12px 内边距——
+     底槽（透明条）与两个裁剪层保持满画布 [0, W]，其圆角帽心 = 6 / W − 6，
+     正好压住首 W / 末 D 的圆心（节点坐在圆角帽中心、整颗落在条子内） */
+  width: calc(100% + 12px);
+  margin: 0 -6px;
   height: 12px;
 }
 /* 空槽（未推进段） */

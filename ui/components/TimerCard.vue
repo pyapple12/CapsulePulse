@@ -218,9 +218,12 @@ const dialArcsSvg = computed(() => {
   if (segs.length === 0) {
     return "";
   }
-  // 底轨口径（PL026.6）：在岗 = **当前班**打卡 → +N（蓝条只在岗时画）；已下班/过去日 = 不画蓝条，
-  // 块弧也不按预测裁剪（终点 = 当天末块末尾）
-  const onDutyNow = onDuty.value && d.duty_ended_at == null;
+  // 底轨口径（PL026.6；PATCH003.2/.3）：在岗 = **当前班**打卡 → +N（蓝条只在岗时画）；
+  // 已下班/过去日 = 不画蓝条，块弧也不按预测裁剪（终点 = 当天末块末尾）。
+  // 判据两来源（PATCH003.3 定案 a）：`day.duty_ended_at == null` 负责**即时**（打卡/下班动作后
+  // `day` 立即刷，实测 0–3ms）；`onDuty`（100ms 轮询）负责**纠偏**——万一某次 `day_detail`
+  // 拉取失败，`onDuty` 一变即可在 ≤100ms 内把在岗态纠正回来。代价仅"下班后蓝条最多多留 100ms"。
+  const onDutyNow = onDuty.value || d.duty_ended_at == null;
   const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
   const shiftStart = lastGap ? lastGap.t1 : (segs[0]?.t0 ?? 0);
   const trackEnd = shiftStart + autoOutMs.value;

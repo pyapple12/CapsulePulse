@@ -42,22 +42,35 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
       return { state: mockState, total_ms: mockTotalMs(), on_duty: mockOnDuty };
     case "session_stats":
       return { today_secs: 12_600, week_secs: 54_300, all_secs: 93_600 };
-    case "day_detail":
+    case "day_detail": {
       // 单位对齐真实后端：时间戳一律秒（SessionStatus.total_ms 例外为毫秒）
+      const start = Math.floor(todayStart.getTime() / 1000);
+      const nowSec = Math.floor(now / 1000);
+      // PATCH003.2：让 DEV 基座能复现"已下班 → 再打卡"过渡（此前恒返回在岗态，验不了）
+      if (mockOnDuty) {
+        return {
+          duty_started_at: start,
+          duty_ended_at: null,
+          duty_secs: Math.floor(elapsedMs / 1000),
+          work_secs: Math.floor(elapsedMs / 1000),
+          rest_secs: 0,
+          blocks: [{ start, end: nowSec, kind: "work" }],
+        };
+      }
+      const noon = start + 12 * 3_600;
+      const onePm = start + 13 * 3_600;
       return {
-        duty_started_at: Math.floor(todayStart.getTime() / 1000),
-        duty_ended_at: null,
-        duty_secs: Math.floor(elapsedMs / 1000),
-        work_secs: Math.floor(elapsedMs / 1000),
-        rest_secs: 0,
+        duty_started_at: start,
+        duty_ended_at: onePm,
+        duty_secs: 3 * 3_600,
+        work_secs: 2 * 3_600,
+        rest_secs: 3_600,
         blocks: [
-          {
-            start: Math.floor(todayStart.getTime() / 1000),
-            end: Math.floor(now / 1000),
-            kind: "work",
-          },
+          { start, end: noon, kind: "work" },
+          { start: noon, end: onePm, kind: "rest" },
         ],
       };
+    }
     case "week_detail": {
       // 自然周（PL022）：查看日所在周固定周一~周日 7 行，"今"随真实星期、未来日零值
       const offset = Number(args?.offset ?? 0);

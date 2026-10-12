@@ -172,6 +172,11 @@ function renderGraph(): void {
   const isToday = offset.value >= 0;
   const onDutyToday = isToday && d.duty_ended_at == null;
   const nowMs = Date.now();
+  // PATCH003.1/.5：画布左右各扩 PAD（= 圆角半径 6px，吃进板子的 12px 内边距）——时间轴两端
+  // 落在画布内 [PAD, W − PAD]；底槽（透明条）与两个裁剪层保持满画布 [0, W]（rx = 6）→
+  // 底槽圆角帽心 = PAD / W − PAD，正好压住首 W / 末 D 的圆心：节点坐在圆角帽中心、整颗落在
+  // 条子内，填色圆心对圆心，透明条两端各比填色多撑一个圆角半径
+  const PAD = 6;
 
   // 段源：真实块（秒 → ms）；同态延伸只做同 kind（异态分界由下次刷新的块数据承担）
   const blocks: GraphSeg[] = d.blocks.map((b) => ({
@@ -208,7 +213,10 @@ function renderGraph(): void {
   if (W > 0 && svg.viewBox.baseVal.width !== W) {
     svg.setAttribute("viewBox", `0 0 ${W} 12`);
   }
-  const xpx = (ts: number): number => ((ts - clockIn) / (endTs - clockIn)) * W;
+  // PATCH003.5：底槽与两个裁剪层**不再内缩**，保持模板的满画布（width="100%" + rx="6"）——
+  // 底槽圆角帽心因此与端头节点圆心重合（见上）；首帧/空态也不再出现"满画布 → 内缩"的跳变
+  const plotW = Math.max(1, W - 2 * PAD);
+  const xpx = (ts: number): number => PAD + ((ts - clockIn) / (endTs - clockIn)) * plotW;
 
   // bars：数量对齐 + 改属性（design 复用策略）
   interface Bar {
@@ -240,7 +248,8 @@ function renderGraph(): void {
     }
   });
   if (nowTs < endTs) {
-    list.push({ st: "duty", x: xpx(nowTs), w: W - xpx(nowTs), active: false });
+    // 在岗尾巴：画到时间轴右端（W − PAD = 末 D 圆心，与填色口径一致）
+    list.push({ st: "duty", x: xpx(nowTs), w: W - PAD - xpx(nowTs), active: false });
   }
   nodes.push({ ts: endTs, ch: "D", kind: "end" });
 
@@ -263,12 +272,12 @@ function renderGraph(): void {
   const nodesG = svg.querySelector<SVGGElement>("#graphNodes");
   if (nodesG) {
     nodesG.innerHTML = "";
-    nodes.forEach((n, i) => {
-      // PL025.10 节点贴边三态：① 首节点内缩（x=0 时 off=6 会被左圆角裁掉一半）；
-      // ② 中段 D（班末，进灰处）与 R/W 一样**骑交界**（off=6，圆心落在交界线上）；
-      // ③ 轴末 D（列表末位 = "下班 D"）**右贴端**（off=12，圆占 [x−12, x] 防右圆角裁半，设计原样）
-      const isAxisEnd = i === nodes.length - 1;
-      const off = isAxisEnd ? 12 : n.ts <= clockIn ? 0 : 6;
+    nodes.forEach((n) => {
+      // PATCH003.4 定案 a：**所有节点统一 `off = 6`**（圆心一律落在它的真实时刻上）——
+      // 覆盖顺序因此 = 纯时间顺序（DOM 追加序 = 时间序；SVG 同层后画在上）。
+      // 端头节点圆心 = 底槽圆角帽心（见 PATCH003.5），节点整颗落在圆角帽内（r 5.4 < 圆角 6）；
+      // 端头圆角被首 W / 末 D 占住属预期形态（用户 2026-10-12 明确，非缺陷）。
+      const off = 6;
       const g = document.createElementNS(SVG_NS, "g");
       g.setAttribute("class", `graph-node ${n.kind}${n.ts <= nowTs ? " lit" : ""}`);
       g.setAttribute("transform", `translate(${(xpx(n.ts) - off).toFixed(2)} 0)`);
@@ -290,7 +299,9 @@ function renderGraph(): void {
     return;
   }
   const birthX = xpx(segs[segs.length - 1]!.t0);
-  cometWalk = isToday ? W - birthX + 24 : 0;
+  // PATCH003.5：行程与走廊同源——走廊右端 = 时间轴右端（W − PAD = 末 D 圆心），
+  // 故 walk = 走廊宽 + 24（24 = 斜纹自身宽度：走完即完全退出走廊，回收时不留硬切）
+  cometWalk = isToday ? W - PAD - birthX + 24 : 0;
   if (comet.dataset.awake !== "1") {
     comet.dataset.awake = "1";
     cometEpoch =
@@ -328,8 +339,9 @@ function renderGraph(): void {
     const wasHidden = comet.style.display === "none";
     comet.style.display = "";
     comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
+    // 彗星走廊右端 = 时间轴右端（W − PAD = 末 D 圆心；与 cometWalk 同源，PATCH003.5）
     clipRect.setAttribute("x", birthX.toFixed(2));
-    clipRect.setAttribute("width", (W - birthX).toFixed(2));
+    clipRect.setAttribute("width", (W - PAD - birthX).toFixed(2));
     if (wasHidden) {
       launchComet(true);
     }
