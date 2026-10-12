@@ -2,11 +2,18 @@
 /** 统计板（PL018 design 换装）：日期导航 + 时间图谱（分段/RWD 节点/彗星发射流）+ 三值卡
  * + 周卡（堆叠柱/均线/选中环闪现）+ 翻面今日明细。纯展示组件：数据来自 day_detail/week_detail
  * （Rust 侧归约），渲染算法 1:1 自 design index.html 内联脚本翻译（数据源换真实命令）。 */
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DaySummary, WeekDay, WorkdayTotal } from "../types";
-const props = defineProps<{ refreshKey: number; autoOutHours: number | null; open: boolean }>();
+import { useGlassBar } from "../src/use-glass-bar";
+const props = defineProps<{
+  refreshKey: number;
+  autoOutHours: number | null;
+  open: boolean;
+  /** 有浮层盖住统计板（确认框遮罩等）：玻璃浮钮随之淡出（PL026.3） */
+  veiled?: boolean;
+}>();
 
 const offset = ref(0);
 const day = ref<DaySummary | null>(null);
@@ -61,14 +68,19 @@ watch(
    ============================================================ */
 const WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
-/** 日期卡状态文案（PL025.4 四态）：过去无打卡 = 休假日；今天无打卡 = 未上班；有打卡按在岗/已下班 */
+/** 日期卡状态文案（PL025.4 四态 + PL026.2 第五态）：过去无打卡 = 休假日；今天无打卡 = 未上班；
+ * 有打卡：今天未下班 = 在岗中、今天已下班 = 暂下班（多段工作可再打卡，故当天只算"暂时"下班）、
+ * 过去日 = 已下班 */
 function dayState(): string {
   const duty = day.value?.duty_started_at ?? null;
   const ended = day.value?.duty_ended_at ?? null;
   if (duty == null) {
     return offset.value < 0 ? "休假日" : "未上班";
   }
-  return ended == null && offset.value === 0 ? "在岗中" : "已下班";
+  if (offset.value === 0) {
+    return ended == null ? "在岗中" : "暂下班";
+  }
+  return "已下班";
 }
 
 const dayLabelText = computed(() => {
@@ -436,8 +448,11 @@ function renderWeek(): void {
     work: d.work_secs / 60,
     rest: (d.duty_secs - d.work_secs) / 60,
   }));
-  const maxTotal = Math.max(...days.map((d) => d.work + d.rest), 1);
+  // PL026.1 尺度下限：分母取"当周峰值"与"总日均"的较大者——当周偏弱时柱整体变矮（相对总日均
+  // 的真实表达），均线也不再被夹到 100%（此前 min(100,…) 会让它顶格当"最高点"，看不出高出多少）
+  const weekPeak = Math.max(...days.map((d) => d.work + d.rest), 1);
   const avgWork = avgWorkMin.value;
+  const scaleMax = Math.max(weekPeak, avgWork, 1);
 
   const W = svg.clientWidth;
   const H = svg.clientHeight;
@@ -450,7 +465,7 @@ function renderWeek(): void {
   let inner = "";
   days.forEach((d, i) => {
     const barTotal = d.work + d.rest;
-    const barH = barTotal ? (barTotal / maxTotal) * plotH : 0;
+    const barH = barTotal ? (barTotal / scaleMax) * plotH : 0;
     const restH = barTotal ? (d.rest / barTotal) * barH : 0;
     const workH = barTotal ? (d.work / barTotal) * barH : 0;
     const x = Math.round(i * slot + (slot - 20) / 2); // 柱缘取整（根治小数左缘）
@@ -473,9 +488,10 @@ function renderWeek(): void {
     bars.innerHTML = inner;
   }
 
-  // 均线（design 1:1；高度 = 总日均占本周峰值的比例，越顶夹取 100%）
+  // 均线（design 1:1；高度 = 总日均占尺度分母的比例——PL026.1 起分母 = max(当周峰值, 总日均)，
+  // 故不再需要越顶夹取；当周偏弱时均线自然成为最高点且高度真实可读）
   if (wcAvgLine.value) {
-    wcAvgLine.value.style.bottom = `${Math.min(100, (avgWork / maxTotal) * 100).toFixed(1)}%`;
+    wcAvgLine.value.style.bottom = `${((avgWork / scaleMax) * 100).toFixed(1)}%`;
   }
 
   // 选中环闪现：查看日偏移变化时触发（design flashSel 1:1）——
@@ -489,7 +505,7 @@ function renderWeek(): void {
     }
     lastViewDay = offset.value;
     const barTotal = days[i]!.work + days[i]!.rest;
-    const barH = barTotal ? (barTotal / maxTotal) * plotH : 0;
+    const barH = barTotal ? (barTotal / scaleMax) * plotH : 0;
     const x = Math.round(i * slot + (slot - 20) / 2);
     const y = H - 1.5 - barH;
     const r = 3;
@@ -620,10 +636,41 @@ const restDelta = computed(() => deltaView(day.value?.rest_secs ?? 0, avgRest.va
 
 /** 明细进行中段的时长增长由每秒 renderDetail 重算覆盖（design sig 语义同效） */
 
+/* ============================================================
+   PL026.3 玻璃滚动浮钮（照抄 CT）：原生滑杆隐藏，缝里浮一枚 4×16 透明玻璃钮
+   ============================================================ */
+const frontFaceEl = ref<HTMLElement | null>(null);
+const backFaceEl = ref<HTMLElement | null>(null);
+let glassBar: {
+  sync: () => void;
+  setVeiled: (veiled: boolean) => void;
+  destroy: () => void;
+} | null = null;
+
 onMounted(() => {
   cometClipRect.value = document.querySelector<SVGRectElement>("#graphClipCometRect");
+  // PL026.3 玻璃滚动浮钮（照抄 CT）：锚在底板层（#win），落在统计板右缘与窗口右缘之间的缝里；
+  // 两个翻转面都参与（隐藏原生滑杆 + 滚动同步），几何取当前活动面
+  const faces = [frontFaceEl.value, backFaceEl.value].filter((el): el is HTMLElement => el != null);
+  if (faces.length > 0) {
+    glassBar = useGlassBar(faces, {
+      right: 4.5,
+      inset: true,
+      active: () => (flipped.value ? backFaceEl.value : frontFaceEl.value),
+    });
+    glassBar.setVeiled(props.veiled === true);
+  }
   void refresh();
 });
+
+// 翻面 / 开合不派发 scroll（几何变了但没滚动）→ 手动同步浮钮
+watch([flipped, () => props.open], () => {
+  void nextTick(() => glassBar?.sync());
+});
+watch(
+  () => props.veiled,
+  (veiled) => glassBar?.setVeiled(veiled === true),
+);
 
 watch(
   () => props.refreshKey,
@@ -648,6 +695,7 @@ const secTimer = window.setInterval(() => {
 
 onUnmounted(() => {
   destroyed = true;
+  glassBar?.destroy();
   window.clearInterval(secTimer);
   if (cometRaf !== 0) {
     cancelAnimationFrame(cometRaf);
@@ -666,7 +714,7 @@ onUnmounted(() => {
     <div class="board-glass flip-scene">
       <div class="flip-inner">
         <!-- 正面：统计五区 -->
-        <section class="stats sheet flip-face front">
+        <section ref="frontFaceEl" class="stats sheet flip-face front">
           <div class="daynav">
             <button
               class="arrow"
@@ -930,7 +978,7 @@ onUnmounted(() => {
         </section>
 
         <!-- 背面：今日/当日明细 -->
-        <section class="detail-face sheet flip-face back">
+        <section ref="backFaceEl" class="detail-face sheet flip-face back">
           <h3>{{ detailTitle() }}</h3>
           <div class="detail">
             <div v-for="(r, i) in detailRows" :key="i" class="dl">

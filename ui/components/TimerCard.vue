@@ -113,14 +113,48 @@ const isDaytime = computed(() => {
 });
 
 /* ============================================================
-   ② dial 区间时钟（design renderDial/arcPath 1:1）：上班角起底轨 + 块弧 + 三针
+   ② dial 区间时钟（design renderDial/arcPath 1:1；PL026.4 起双圈化）：
+   外圈 = 当天 AM（00–12）、内圈 = 当天 PM（12–24）、内内圈 = 次日 AM（24–36）；
+   半径 72/63/54、线宽 7、圈间恒 2px；**空圈什么都不画**；跨 12:00 的段与灰弧按边界切开；
+   三针不动（12h 钟表、落外圈刻度）。
    ============================================================ */
 const DIAL_C = 90;
-const DIAL_R = 72;
+/** 三圈半径（PL026.4）：外圈 AM / 内圈 PM / 内内圈 次日 AM（线宽 7、圈间 2px：72−7−2=63、63−7−2=54） */
+const DIAL_RINGS = [72, 63, 54];
+const RING_MS = 12 * 3_600_000;
 
-function angleOf(ts: number): number {
+/** 本地当天零点（毫秒）——分圈基准（跨零点后仍以"当天"为圈 0/1 的基准） */
+function dayStartMs(ts: number): number {
   const d = new Date(ts);
-  return (((d.getHours() % 12) * 60 + d.getMinutes() + d.getSeconds() / 60) / 720) * 360;
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** 时间戳 → (圈号, 圈内角度)：**以 day0（当天零点毫秒）为基准**——圈 0 = 00–12、圈 1 = 12–24、
+ * 圈 2 = 24–36（次日 AM）。基准必须由调用方传入（不能用"ts 自己那天的零点"：跨零点后
+ * 那会跳回圈 0，令切分原地打转）。 */
+function ringPos(day0: number, ts: number): { ring: number; angle: number } {
+  const hours = (ts - day0) / 3_600_000; // 距基准零点的小时数（跨零点 > 24）
+  const ring = Math.min(DIAL_RINGS.length - 1, Math.max(0, Math.floor(hours / 12)));
+  return { ring, angle: ((hours - ring * 12) / 12) * 360 };
+}
+
+/** 把 [t0, t1) 按 12h 圈边界切成若干 (圈, 起角, 止角) 片段（跨 12:00 / 跨零点逐圈画） */
+function splitByRing(t0: number, t1: number): { ring: number; a0: number; a1: number }[] {
+  const day0 = dayStartMs(t0);
+  const out: { ring: number; a0: number; a1: number }[] = [];
+  let cur = t0;
+  while (cur < t1) {
+    const { ring, angle } = ringPos(day0, cur);
+    const ringStart = day0 + ring * RING_MS;
+    const end = Math.min(t1, ringStart + RING_MS);
+    if (end <= cur) {
+      break; // 兜底：不前进即停（超出第三圈 36h 的区间不再画，绝不原地打转）
+    }
+    out.push({ ring, a0: angle, a1: ((end - ringStart) / RING_MS) * 360 });
+    cur = end;
+  }
+  return out;
 }
 
 function polar(r: number, deg: number): [number, number] {
@@ -129,6 +163,12 @@ function polar(r: number, deg: number): [number, number] {
 }
 
 function arcPath(r: number, a0: number, a1: number): string {
+  // 整圈（恰好 12h）：两段半圆收口（单段 360° 会被归一化成 0 而画不出来）
+  if (a1 - a0 >= 359.5) {
+    const [x0, y0] = polar(r, 0);
+    const [x1, y1] = polar(r, 180);
+    return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 1 1 ${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 1 1 ${x0.toFixed(2)} ${y0.toFixed(2)}`;
+  }
   const delta = (((a1 - a0) % 360) + 360) % 360;
   if (delta < 0.5) {
     return "";
@@ -156,27 +196,73 @@ const secondStyle = computed(() => ({
   transform: `rotate(${new Date(secTs.value).getSeconds() * 6}deg)`,
 }));
 
-/** dial 弧整层 SVG（design 1:1）：底轨 + 各块弧（记录只画到当前时刻） */
+/** dial 弧整层 SVG（design 1:1；PL026.4–.6：三圈 + 班间灰弧 + 底轨在岗/下班口径） */
 const dialArcsSvg = computed(() => {
-  if (!props.day?.duty_started_at) {
+  const d = props.day;
+  if (!d?.duty_started_at) {
     return "";
   }
-  const clockIn = clockInMs.value;
-  const autoOut = autoOutMs.value;
-  let svg = `<path class="dial-track" d="${arcPath(DIAL_R, angleOf(clockIn), angleOf(clockIn) + (autoOut / 3_600_000 / 12) * 360)}" />`;
-  const nowTsMs = Date.now();
-  const endTs = clockIn + autoOut;
-  for (const b of props.day.blocks) {
+  const nowMs = Date.now();
+  // 段源：真实块（秒 → 毫秒）；块序列的空洞 = 班间空档（blocks 只覆盖在岗窗口）
+  const segs: { t0: number; t1: number; kind: string }[] = [];
+  let lastEnd: number | null = null;
+  for (const b of d.blocks) {
     const t0 = b.start * 1000;
-    const t1 = Math.min(b.end * 1000, nowTsMs, endTs);
-    if (t1 <= t0) {
-      continue;
+    const t1 = b.end * 1000;
+    if (lastEnd != null && t0 > lastEnd) {
+      segs.push({ t0: lastEnd, t1: t0, kind: "gap" });
     }
-    const sa = angleOf(t0);
-    const delta = ((t1 - t0) / (12 * 3_600_000)) * 360;
-    svg += `<path class="dial-arc ${b.kind}" d="${arcPath(DIAL_R, sa, sa + delta)}" />`;
+    segs.push({ t0, t1, kind: b.kind });
+    lastEnd = t1;
   }
-  return svg;
+  if (segs.length === 0) {
+    return "";
+  }
+  // 底轨口径（PL026.6）：在岗 = **当前班**打卡 → +N（蓝条只在岗时画）；已下班/过去日 = 不画蓝条，
+  // 块弧也不按预测裁剪（终点 = 当天末块末尾）
+  const onDutyNow = onDuty.value && d.duty_ended_at == null;
+  const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
+  const shiftStart = lastGap ? lastGap.t1 : (segs[0]?.t0 ?? 0);
+  const trackEnd = shiftStart + autoOutMs.value;
+  const clipEnd = onDutyNow ? trackEnd : Number.POSITIVE_INFINITY;
+  const parts: string[] = [];
+
+  /** 逐片段按所属圈画弧（跨 12:00 / 跨零点自动切开；裁剪到 now 与当前班底轨末端） */
+  const draw = (kind: string, t0: number, t1: number): void => {
+    const end = Math.min(t1, nowMs, clipEnd);
+    if (end <= t0) {
+      return;
+    }
+    for (const frag of splitByRing(t0, end)) {
+      const path = arcPath(DIAL_RINGS[frag.ring] ?? DIAL_RINGS[0]!, frag.a0, frag.a1);
+      if (path) {
+        parts.push(`<path class="dial-arc ${kind}" d="${path}" />`);
+      }
+    }
+  };
+
+  // ① 底轨（在岗才画；垫在块弧之下）
+  if (onDutyNow) {
+    for (const frag of splitByRing(shiftStart, trackEnd)) {
+      const path = arcPath(DIAL_RINGS[frag.ring] ?? DIAL_RINGS[0]!, frag.a0, frag.a1);
+      if (path) {
+        parts.push(`<path class="dial-track" d="${path}" />`);
+      }
+    }
+  }
+  // ② 真实块弧（work / rest）
+  for (const s of segs) {
+    if (s.kind !== "gap") {
+      draw(s.kind, s.t0, s.t1);
+    }
+  }
+  // ③ 班间灰弧（PL026.5：中性灰；无 D / 无字母 / 无小圆）
+  for (const s of segs) {
+    if (s.kind === "gap") {
+      draw("gap", s.t0, s.t1);
+    }
+  }
+  return parts.join("");
 });
 
 /* ============================================================

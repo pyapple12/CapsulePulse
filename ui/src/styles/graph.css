@@ -48,7 +48,8 @@
 #graphSvg .graph-seg.duty {
   fill: url(#gDuty);
 }
-/* PL025.7：不在岗空档（同日两班之间等）——中性灰，既非工作也非休息 */
+/* PL025.7：不在岗空档（同日两班之间等）——中性灰，既非工作也非休息（配置保持原样，
+   与表盘灰弧刻意不统一） */
 #graphSvg .graph-seg.gap {
   fill: color-mix(in srgb, var(--ink) 28%, transparent);
 }

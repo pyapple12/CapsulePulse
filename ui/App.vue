@@ -452,6 +452,7 @@ onUnmounted(() => {
       :open="statsOpen"
       :refresh-key="statsRefreshKey"
       :auto-out-hours="settings?.workday_auto_out_hours ?? null"
+      :veiled="confirmMode != null || autoOutDue != null"
     />
 
     <!-- 侧角按钮（左统计 · 右设置，对称落位）：两板互斥飞出 -->
@@ -535,6 +536,7 @@ onUnmounted(() => {
 @import "./src/styles/stats.css";
 @import "./src/styles/graph.css";
 @import "./src/styles/boards.css";
+@import "./src/styles/glass-bar.css";
 
 /* —— 最小功能胶水（非设计定稿样式）：错误条红字 + 动效退避，仅此两件 —— */
 /* 文案条错误条红字（remind/auto 配方在 controls.css） */
