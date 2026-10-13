@@ -10,7 +10,7 @@ import StatsView from "./components/StatsView.vue";
 import TimerCard from "./components/TimerCard.vue";
 import type { RecoveryNotice } from "./types";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
-import type { DaySummary, ReminderSettings } from "./types";
+import type { DaySummary, ReminderSettings, SessionStatus } from "./types";
 import { OVERTIME_CAP_HOURS } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
@@ -28,6 +28,8 @@ const STATS_TICK_MS = 30_000;
 
 // 当日明细（PL017 dial 弧段 + 电池上班时刻的数据源；30s 兜底 + 动作后即刷）
 const day = ref<DaySummary | null>(null);
+/** 当前数据日偏移（PATCH005.4）：时钟与统计的取数锚点（`session_status.data_day_offset`） */
+const dataDayOffset = ref(0);
 const settings = ref<ReminderSettings | null>(null);
 const panelVisible = ref(false);
 const reminderVisible = ref(false);
@@ -137,12 +139,16 @@ async function onTitleDblClick(): Promise<void> {
   }
 }
 
-/** 拉取当日明细（dial 弧段 + 电池数据源；统计的详细刷新在 StatsView 自持） */
+/** 拉取当日明细（dial 弧段 + 电池数据源；统计的详细刷新在 StatsView 自持）。
+ * PATCH005.4：取数锚定**当前数据日**（`session_status.data_day_offset`）——跨零点夜班没下班就
+ * 不切换、锚在打卡日；下班 / 自动下班后偏移回 0，视图随之切回"今日未上班"。 */
 async function refreshStats(): Promise<void> {
   try {
-    day.value = await invoke<DaySummary>("day_detail", { offset: 0 });
+    const status = await invoke<SessionStatus>("session_status");
+    dataDayOffset.value = status.data_day_offset;
+    day.value = await invoke<DaySummary>("day_detail", { offset: status.data_day_offset });
   } catch (err) {
-    console.error("day_detail 调用失败", err);
+    console.error("session_status / day_detail 调用失败", err);
   }
 }
 
@@ -474,6 +480,7 @@ onUnmounted(() => {
       ref="statsViewEl"
       :open="statsOpen"
       :refresh-key="statsRefreshKey"
+      :data-day-offset="dataDayOffset"
       :veiled="confirmMode != null || autoOutDue != null"
     />
 

@@ -22,6 +22,9 @@ pub struct SessionStatus {
     pub total_ms: u64,
     /// 是否在岗中（未上班时前端置灰计时按钮；后端门禁是第二道保险）。
     pub on_duty: bool,
+    /// 当前数据日偏移（PATCH005.4）：在岗 → 该班打卡日相对日历今日的天数偏移（正常 0 / −1）；
+    /// 未在岗 → 0。时钟与统计据此锚定"进行中的数据日"（跨零点夜班没下班就不切换）。
+    pub data_day_offset: i64,
 }
 
 /// 提醒决策（评估纯逻辑的输出载体；副作用由提醒子模块执行）。
@@ -223,10 +226,12 @@ pub(super) fn status_snapshot<C: Clock>(
             session.total().as_millis() as u64,
         )
     };
+    let on_duty_now = poison("工作日", ctx.workday.lock())?.is_on_duty();
     let status = SessionStatus {
         state,
         total_ms,
-        on_duty: poison("工作日", ctx.workday.lock())?.is_on_duty(),
+        on_duty: on_duty_now,
+        data_day_offset: super::workday::data_day_offset(ctx, now_secs(ctx)?)?,
     };
     let segment = lock(ctx)?.segment_secs();
     let decision = {

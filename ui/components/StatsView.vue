@@ -9,12 +9,15 @@ import type { DaySummary, WeekDay, WorkdayTotal } from "../types";
 import { useGlassBar } from "../src/use-glass-bar";
 const props = defineProps<{
   refreshKey: number;
+  /** 当前数据日偏移（PATCH005.4，来自 App 的 `session_status`）：统计的锚点与默认页 */
+  dataDayOffset: number;
   open: boolean;
   /** 有浮层盖住统计板（确认框遮罩等）：玻璃浮钮随之淡出（PL026.3） */
   veiled?: boolean;
 }>();
 
-const offset = ref(0);
+// 默认页 = 当前数据日（PATCH005.4：跨零点夜班没下班就停在前一天）；锚点变化由下面的 watch 跟随
+const offset = ref(props.dataDayOffset);
 const day = ref<DaySummary | null>(null);
 // 周视图（PL022）：查看日所在自然周（周一~周日，恒 7 行），Rust 侧归约，本组件零聚合
 const week = ref<WeekDay[]>([]);
@@ -73,10 +76,11 @@ const WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", 
 function dayState(): string {
   const duty = day.value?.duty_started_at ?? null;
   const ended = day.value?.duty_ended_at ?? null;
+  // PATCH005.4：分界与"在岗中"判据都相对**当前数据日**（不再相对日历今日）
   if (duty == null) {
-    return offset.value < 0 ? "休假日" : "未上班";
+    return offset.value < props.dataDayOffset ? "休假日" : "未上班";
   }
-  if (offset.value === 0) {
+  if (offset.value === props.dataDayOffset) {
     return ended == null ? "在岗中" : "暂下班";
   }
   return "已下班";
@@ -167,8 +171,10 @@ function renderGraph(): void {
     return;
   }
   const clockIn = d.duty_started_at * 1000;
-  const isToday = offset.value >= 0;
-  const onDutyToday = isToday && d.duty_ended_at == null;
+  // PATCH005.4：判据由"日历今日（offset >= 0）"改为"**是不是当前数据日**"——跨零点夜班的数据日
+  // 是打卡那一天（offset −1），视图仍按"在岗"渲染（蓝条 / 在岗尾巴 / 轴末 / 彗星都跟着它）
+  const isCurrentDataDay = offset.value === props.dataDayOffset;
+  const onDutyToday = isCurrentDataDay && d.duty_ended_at == null;
   const nowMs = Date.now();
   // PATCH004.3：**单一坐标**（照抄 design/index.html）——画布本身就是时间轴：0 = 上班、W = 轴末；
   // 底槽（透明条）与两个裁剪层保持满画布 [0, W]（rx = 6），两端圆角由它们裁出。填色、在岗尾巴、
@@ -209,7 +215,7 @@ function renderGraph(): void {
   const endTs = onDutyToday
     ? Math.max(currentShiftStart + d.remaining_secs * 1000, nowMs)
     : segs[segs.length - 1]!.t1;
-  const nowTs = isToday ? nowMs : endTs;
+  const nowTs = isCurrentDataDay ? nowMs : endTs;
   const W = svg.clientWidth;
   if (W > 0 && svg.viewBox.baseVal.width !== W) {
     svg.setAttribute("viewBox", `0 0 ${W} 12`);
@@ -308,7 +314,7 @@ function renderGraph(): void {
   // PATCH004.3：行程与走廊同源——走廊右端 = 画布右缘 W（设计稿原口径；斜纹由此被裁剪层
   // rx=6 裁成半圆，端头圆角里也能看到斜纹），故 walk = 走廊宽 + 24（24 = 斜纹自身宽度：
   // 走完即完全退出走廊，回收时不留硬切）
-  cometWalk = isToday ? W - birthX + 24 : 0;
+  cometWalk = isCurrentDataDay ? W - birthX + 24 : 0;
   if (comet.dataset.awake !== "1") {
     comet.dataset.awake = "1";
     cometEpoch =
@@ -342,7 +348,7 @@ function renderGraph(): void {
       );
     })();
   }
-  if (isToday && cometWalk > 24) {
+  if (isCurrentDataDay && cometWalk > 24) {
     const wasHidden = comet.style.display === "none";
     comet.style.display = "";
     comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
@@ -432,9 +438,10 @@ let weekSig = "";
 /** 周卡七格单字标签（行序 = 周一~周日，PL022） */
 const WEEKDAY_SINGLE = ["一", "二", "三", "四", "五", "六", "日"];
 
-/** 今天的 MM-DD（"今"标记判定 = 周卡行 date 与之一致） */
+/** 当前**数据日**的 MM-DD（"今"标记判定 = 周卡行 date 与之一致；PATCH005.4：跨零点后
+ * 在岗日不变 ⇒ "今"仍落在前一天，与"在岗中"一致） */
 const todayMmdd = computed(() => {
-  const d = new Date();
+  const d = new Date(Date.now() + props.dataDayOffset * 86_400_000);
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 });
 
@@ -701,6 +708,16 @@ watch(
 watch(offset, () => {
   void refresh();
 });
+// PATCH005.4：锚点跟随当前数据日——用户没翻走（仍停在旧锚点）时锚点变化即跟随（下班 / 自动下班
+// 后偏移回 0，视图随之切回"今日未上班"）；用户手动翻页时不动（尊重其浏览）
+watch(
+  () => props.dataDayOffset,
+  (next, prev) => {
+    if (offset.value === prev) {
+      offset.value = next;
+    }
+  },
+);
 // 渲染节拍：数据到位后重建 + 每秒重算（design 1s 节流同效）
 watch([day, week], () => {
   renderGraph();

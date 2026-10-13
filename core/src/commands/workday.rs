@@ -143,10 +143,14 @@ pub(super) fn day_summary_inner<C: Clock>(
     };
     let fetch_end = windows.last().map(|&(_, end)| end).unwrap_or(now_secs) + 1;
     let seg_events = poison("存储", ctx.storage.lock())?.events_between(fetch_start, fetch_end)?;
-    // PATCH005.3：今日预算字段（仅 offset 0 = 今天；过去日保持 0——前端只用今日）。
-    // used_secs 恒填；budget/remaining 仅在岗（末窗未关）时填——暂下班不画蓝条、轴末取末段末尾。
+    // PATCH005.3 / PATCH005.4：预算字段（上限 / 已用 / 剩余）填**该 offset 是否为当前数据日**——
+    // 判据取自**数据本身**（该日是否有未闭合的班 = `open_tail`）而非工作日锁：`clock_out_inner`
+    // 持有「工作日」锁时经 `seal_days_inner` 调到这里，若再取该锁即自死锁（Mutex 非重入）。
+    // 口径：跨零点夜班的数据日是"打卡那一天"（−1，末窗未关）；`used_secs` 在"日历今日或末窗未关"
+    // 时填（到顶置灰的取数源），`budget/remaining` 仅在岗（末窗未关）时填——暂下班不画蓝条、
+    // 轴末取末段末尾。
     let mut summary = reduce_day(&windows, &seg_events, open_tail);
-    if offset == 0 {
+    if offset == 0 || open_tail {
         summary.used_secs = crate::workday::day_used_secs(&windows);
         if open_tail {
             if let Some(&(shift_start, _)) = windows.last() {
@@ -239,12 +243,28 @@ pub struct WorkdayTotal {
 }
 
 /// 任意时刻所在本地日的零点。
-fn local_day_start(at: i64) -> Result<i64, CommandError> {
+pub(super) fn local_day_start(at: i64) -> Result<i64, CommandError> {
     let dt = Local
         .timestamp_opt(at, 0)
         .single()
         .ok_or(CommandError::Clock)?;
     Ok(period::day_start_secs(&dt))
+}
+
+/// 当前数据日偏移（PATCH005.4 **单一来源**）：在岗 → 该班打卡日相对 `now` 所在日历日的天数偏移
+/// （0 = 同日、−1 = 跨零点夜班锚定昨天；未在岗 → 0）。判据 = **有未闭合的班**——时钟与统计据此
+/// 锚定"进行中的数据日"，跨零点夜班只要没下班就不切换（`now` 由调用方给出，与本次取数同刻，
+/// 避免与显式时间基准错位）。**注意：不在地锁持有期内调用**（`clock_out_inner` 持「工作日」锁
+/// 经 `seal_days_inner` → `day_summary_inner` 的路径不再取此锁，见该处注释）。
+pub(super) fn data_day_offset<C: Clock>(
+    ctx: &AppContext<C>,
+    now: i64,
+) -> Result<i64, CommandError> {
+    let clock_in_at = match *poison("工作日", ctx.workday.lock())? {
+        WorkdayState::OnDuty { clock_in_at } => clock_in_at,
+        WorkdayState::Off => return Ok(0),
+    };
+    Ok((local_day_start(clock_in_at)? - local_day_start(now)?) / 86_400)
 }
 
 /// 惰性按天汇总（PL027.7）：把"数据日已封口但还没滚"的过去日滚进 `days` 表——**过滤条件 =
@@ -2067,5 +2087,65 @@ mod tests {
             Err(CommandError::DayBudgetExhausted(12))
         ));
         assert_eq!(event_kinds(&ctx).len(), before, "拒绝时不落任何事件");
+    }
+
+    /// PATCH005.4：当前数据日偏移 = 有未闭合的班 → 该班打卡日；无 → 日历今日（时钟与统计的锚点）。
+    #[test]
+    fn data_day_offset_follows_open_shift() {
+        let duty_ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        let at_9 = day_start + 9 * 3_600;
+        assert_eq!(
+            data_day_offset(&duty_ctx, at_9).unwrap(),
+            0,
+            "未上班 = 日历今日"
+        );
+        clock_in_inner(&duty_ctx, at_9).unwrap();
+        assert_eq!(
+            data_day_offset(&duty_ctx, at_9 + 1_800).unwrap(),
+            0,
+            "当日班 = 0"
+        );
+        clock_out_inner(&duty_ctx, at_9 + 3_600, EventKind::ClockOut).unwrap();
+        assert_eq!(
+            data_day_offset(&duty_ctx, at_9 + 4 * 3_600).unwrap(),
+            0,
+            "下班后回到日历今日"
+        );
+
+        // 跨零点夜班：昨日 22:00 打卡、未下班 → 锚定打卡日（昨天）
+        let night_ctx = ctx(FakeClock::new());
+        clock_in_inner(&night_ctx, day_start - 2 * 3_600).unwrap();
+        assert_eq!(
+            data_day_offset(&night_ctx, day_start + 2 * 3_600).unwrap(),
+            -1,
+            "夜班锚定打卡日"
+        );
+    }
+
+    /// PATCH005.4：预算字段只填**当前数据日**——跨零点夜班时数据日（−1）有值、日历今日（0）仍为 0。
+    #[test]
+    fn day_summary_fills_budget_for_current_data_day() {
+        let ctx = ctx(FakeClock::new());
+        ctx.settings.lock().unwrap().workday_auto_out_hours = 6;
+        let day_start = period::day_start_secs(&Local::now());
+        let in_at = day_start - 2 * 3_600; // 昨日 22:00
+        let now = day_start + 2 * 3_600; // 今日 02:00
+        clock_in_inner(&ctx, in_at).unwrap();
+
+        let night = day_summary_inner(&ctx, -1, now).unwrap();
+        assert_eq!(night.budget_hours, 6, "数据日 = 昨天 → 预算字段有值");
+        assert_eq!(
+            night.remaining_secs,
+            6 * 3_600,
+            "本班剩余 = 上限 − 本班前已累计(0)"
+        );
+        assert_eq!(night.used_secs, 4 * 3_600, "已用 = 22:00 → 02:00");
+        assert_eq!(night.duty_ended_at, None, "末窗未关 = 在岗");
+
+        let today = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(today.budget_hours, 0, "日历今日不是数据日 → 字段保持 0");
+        assert_eq!(today.remaining_secs, 0);
+        assert_eq!(today.used_secs, 0);
     }
 }

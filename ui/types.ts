@@ -8,6 +8,9 @@ export interface SessionStatus {
   state: "idle" | "running" | "paused";
   total_ms: number;
   on_duty: boolean;
+  /** 当前数据日偏移（PATCH005.4）：在岗 → 该班打卡日相对日历今日的天数偏移（0 / −1）；未在岗 → 0。
+   * 时钟与统计据此锚定"进行中的数据日"（跨零点夜班没下班就不切换）。 */
+  data_day_offset: number;
 }
 
 /** 加班硬顶小时数（镜像 core/src/workday.rs `OVERTIME_CAP_HOURS`，单一来源在后端）：

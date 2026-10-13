@@ -39,7 +39,13 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
 
   switch (cmd) {
     case "session_status":
-      return { state: mockState, total_ms: mockTotalMs(), on_duty: mockOnDuty };
+      return {
+        state: mockState,
+        total_ms: mockTotalMs(),
+        on_duty: mockOnDuty,
+        // PATCH005.4：当前数据日偏移（基座恒当日；跨零点夜班场景由自查时临时置 −1）
+        data_day_offset: 0,
+      };
     case "take_recovery_notice":
       // PL027.8：一次性崩溃恢复提示——基座恒返回 null（无缝续静默路径）
       return null;
