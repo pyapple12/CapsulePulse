@@ -325,10 +325,12 @@ pub fn duty_windows_for_day(
         }
     }
     let mut open_tail = false;
+    // 在岗末窗闭于 `now`；**同秒也保底 1 秒**（PATCH006.1）：打卡当秒若按零长丢窗，当日摘要
+    // 就只剩上一班，"当前班起点 = 末个班间空档之后第一块（无空档则当天首块）"的推法会退回
+    // 当天首块 → 表盘底轨蓝条短暂锚到上一班起点（被上一班色块盖住后恰好从块末露出），
+    // 下一秒窗口非零才自纠。保底 1 秒让新班当秒即产块，锚点从第一帧就是打卡刻。
     if let Some(start) = open {
-        if now > start {
-            windows.push((start, now));
-        }
+        windows.push((start, now.max(start + 1)));
         open_tail = start >= day_start && start < day_end;
     }
     let day_windows = windows
@@ -593,6 +595,16 @@ mod tests {
         let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, now);
         assert_eq!(w, vec![(DAY + 9 * HOUR, now)]);
         assert!(open, "末班未关 = 在岗中");
+    }
+
+    /// 在岗末窗保底 1 秒（PATCH006.1）：打卡当秒 `now == start` 不得丢窗——否则当日摘要里
+    /// 只剩上一班，"当前班起点 = 末个班间空档之后"的推法会退回到当天首块（表盘底轨锚错）。
+    #[test]
+    fn duty_windows_open_tail_keeps_min_one_second() {
+        let events = [ev(DAY + 9 * HOUR, EventKind::ClockIn)];
+        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 9 * HOUR);
+        assert_eq!(w, vec![(DAY + 9 * HOUR, DAY + 9 * HOUR + 1)]);
+        assert!(open, "同秒也是在岗中");
     }
 
     /// 脏数据兜底：前班未关又出现新打卡 → 前班在该刻结束（窗口不重叠）。

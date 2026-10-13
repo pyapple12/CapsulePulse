@@ -1504,6 +1504,43 @@ mod tests {
         assert_eq!(sum.duty_ended_at, None, "未下班 → 在岗中");
     }
 
+    /// PATCH006.1 表盘底轨锚点回归：当天已有一段班、又在**打卡当秒**开新班——新班必须立刻
+    /// 在归约里产出区块。否则前端"当前班起点 = 末个班间空档之后的第一块（无空档则当天首块）"
+    /// 会退回当天首块，底轨蓝条短暂锚到上一班起点，下一秒才自纠。
+    #[test]
+    fn day_summary_keeps_block_for_shift_opened_this_second() {
+        let ctx = ctx(FakeClock::new());
+        let now = Local::now().timestamp();
+        let day_start = period::day_start_secs(&Local::now());
+        // 第一班取"现在之前"（不得晚于 now，否则新班会排在它前面 → 就不是末窗了）
+        let first_in = day_start + 600;
+        let first_out = day_start + 900;
+        {
+            let storage = ctx.storage.lock().unwrap();
+            let first = storage
+                .workday_open_with_events(first_in, &[EventKind::ClockIn, EventKind::SegmentStart])
+                .unwrap();
+            storage
+                .insert_event(first_out, EventKind::SegmentEnd)
+                .unwrap();
+            storage
+                .workday_close_with_event(first, first_out, EventKind::ClockOut)
+                .unwrap();
+            // 第二班开在"现在"这一秒：now == start（同秒窗口）
+            storage
+                .workday_open_with_events(now, &[EventKind::ClockIn, EventKind::SegmentStart])
+                .unwrap();
+        }
+        let sum = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(sum.duty_ended_at, None, "新班未关 → 在岗");
+        assert_eq!(sum.blocks.len(), 2, "两班各一块：新班不得因同秒零长被丢");
+        assert_eq!(
+            sum.blocks.last().map(|b| b.start),
+            Some(now),
+            "新班块起点 = 打卡刻（前端底轨锚点）"
+        );
+    }
+
     /// 把某"今日零点 + N 日"的秒时间戳格式化为 MM-DD（周用例的期望值锚）。
     fn mmdd(ts: i64) -> String {
         Local

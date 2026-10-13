@@ -186,14 +186,17 @@ pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), C
 }
 
 /// 重开（先落库再归零；PATCH002 语义更新）：班内运行段先经 `close_running_segment` 收段落库
-/// （复用 pause_session_at 的落库/留痕/回滚链，FIX002.14），再把会话重置为**归零休息**
-/// （`reset_to_paused`）——大计时器清零且**不自动开跑**，等用户按「工作」再计。
-/// 未上班严格拒绝（重开隐含"在岗"前提）。
+/// （复用 pause_session_at 的落库/留痕/回滚链，FIX002.14），再在流水里留一条 `session_reset`
+/// 标记（PL027 定案 B5 / PATCH006.2：归约忽略它，但它是"累计基准 = 最后一条 `session_reset`
+/// 或本次打卡"的锚点），最后把会话重置为**归零休息**（`reset_to_paused`）——大计时器清零且
+/// **不自动开跑**，等用户按「工作」再计。未上班严格拒绝（重开隐含"在岗"前提）。
 /// 沿革：原实现 reset+start（立即开跑）并额外写一条 SegmentStart；新语义下重置落在休息态、
-/// 无工作段开始，故该事件写入与其留痕回滚分支（FIX003.9）随本次语义变更退役。
+/// 无工作段开始，故该事件写入与其留痕回滚分支（FIX003.9）随本次语义变更退役——标记写入改为
+/// 收段之后、归零之前的独立一步，写失败整令报错（严格抛错主线：段已收、计时未归零）。
 fn restart_session<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     require_on_duty(ctx)?;
     close_running_segment(ctx, None)?;
+    mark_segment(ctx, EventKind::SessionReset)?;
     lock(ctx)?.reset_to_paused();
     super::workday::beat_after_action(ctx);
     Ok(())
@@ -467,6 +470,35 @@ mod tests {
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 1);
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 50);
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+    }
+
+    /// PATCH006.2：重置必须落一条 `session_reset` 标记（PL027 定案 B5）。归约忽略它，但它是
+    /// "大计时器累计基准 = 最后一条 `session_reset` 或本次打卡"的流水锚点——此前实现只收段、
+    /// 无标记，于是重置后的累计在流水里无法重推（只存在于 runtime 缓存）。
+    #[test]
+    fn restart_appends_session_reset_marker() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx);
+        clock.advance(secs(100));
+        restart_session(&ctx).unwrap();
+
+        let events = ctx
+            .storage
+            .lock()
+            .unwrap()
+            .events_between(0, 10_000)
+            .unwrap();
+        let kinds: Vec<EventKind> = events.into_iter().map(|(_, k)| k).collect();
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|k| **k == EventKind::SessionReset)
+                .count(),
+            1,
+            "重置落且仅落一条 session_reset"
+        );
+        assert!(kinds.contains(&EventKind::SegmentEnd), "收段落库照旧");
     }
 
     /// T3+N1：提醒决策随 status 评估——49 分钟不发、50 分钟发、5 分钟内不重发；动作清零触发点。

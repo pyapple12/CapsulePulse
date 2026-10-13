@@ -216,11 +216,18 @@ impl<C: Clock> WorkSession<C> {
 
     /// 按"本段已走时长 + 此前累计"恢复运行态（PL027.4 崩溃恢复专用）：内部以当前单调时刻
     /// 回推本段起点，故调用方只需给墙钟算出的 `elapsed`（= now − 段起点）；任意态合法。
+    /// PATCH006.4：单调钟起点 = 本进程启动（[`RealClock`] 契约），而 `elapsed` 来自**墙钟**——
+    /// 段起于进程之前时 `elapsed` 会超过"本进程已运行时长"，直接相减即 Duration 下溢 panic
+    /// （实机表现：停机 ≤10 分钟重启后主线程崩、应用起不来）。故把超出部分**折进基线**：
+    /// 本段起点落在单调零，读数一分不减（累计 = 此前累计 + 超出部分，total() 不变量仍成立）。
     pub fn restore_running_elapsed(&mut self, elapsed: Duration, accumulated: Duration) {
-        self.accumulated = accumulated;
-        self.state = SessionState::Running {
-            start: self.clock.now() - elapsed,
+        let now = self.clock.now();
+        let (start, carry) = match elapsed.checked_sub(now) {
+            Some(extra) => (Duration::ZERO, extra),
+            None => (now - elapsed, Duration::ZERO),
         };
+        self.accumulated = accumulated + carry;
+        self.state = SessionState::Running { start };
     }
 
     /// 按给定累计恢复为暂停态（PL027.5 崩溃恢复专用，休息中崩溃）：读数停在基线上，
@@ -542,6 +549,32 @@ mod tests {
         assert_eq!(s.total(), secs(420), "恢复后继续走");
         assert_eq!(s.pause().unwrap(), secs(120), "本段时长 = 起点到暂停");
         assert_eq!(s.total(), secs(420));
+    }
+
+    /// PATCH006.4：单调钟起点 = **本进程启动**（[`RealClock`] 契约），而恢复段的 `elapsed` 由
+    /// **墙钟**算出——段起于进程之前时 `elapsed` 会大于"本进程已运行时长"，直接相减即 Duration
+    /// 下溢（实机表现：停机 ≤10 分钟重启 → 主线程 panic、应用起不来）。恢复须把超出部分折进基线。
+    #[test]
+    fn restore_running_elapsed_survives_elapsed_beyond_monotonic_origin() {
+        /// 可控单调钟：起点 0（模拟"进程刚启动"的单调轴），可手拨。
+        #[derive(Clone)]
+        struct StepClock {
+            at: std::sync::Arc<std::sync::Mutex<Duration>>,
+        }
+        impl Clock for StepClock {
+            fn now(&self) -> Duration {
+                *self.at.lock().unwrap()
+            }
+        }
+        let clock = StepClock {
+            at: std::sync::Arc::new(std::sync::Mutex::new(Duration::ZERO)),
+        };
+        let mut s = WorkSession::new(clock.clone());
+        // 进程刚起来（单调 = 0），恢复"本段已走 27 分钟、此前累计 5 分钟"的班
+        s.restore_running_elapsed(secs(27 * 60), secs(5 * 60));
+        assert_eq!(s.total(), secs(32 * 60), "读数 = 此前累计 + 本段已走");
+        *clock.at.lock().unwrap() = secs(5);
+        assert_eq!(s.total(), secs(32 * 60 + 5), "恢复后继续走字");
     }
 
     /// PL027.5：按给定累计恢复暂停态（休息中崩溃）——读数停在基线上、不自动开跑。

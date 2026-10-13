@@ -35,19 +35,42 @@ SessionState:
 - 暂停后 `total()` 返回累计值；恢复时 `Instant::now() - elapsed` 继承累计
 - ✅ 已落地（PL001）：实现演进两笔——`reset()` 第五操作（重开归零）；内部"段起点/段累计"分离，`pause()` 返回本段时长（落库取数源）
 
-### 2.2 数据模型（SQLite，rusqlite）
+### 2.2 数据模型（SQLite，rusqlite；PL027 重做，2026-10-13）
 
 ```sql
-CREATE TABLE sessions (
+-- 唯一事实源（只追加）：班 = clock_in/clock_out 配对，段 = segment_start/segment_end 配对
+CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at INTEGER NOT NULL,   -- Unix 秒
-    seconds INTEGER NOT NULL       -- 会话时长
+    at INTEGER NOT NULL,   -- Unix 秒
+    kind TEXT NOT NULL     -- clock_in / clock_out / auto_clock_out / segment_start /
+                           -- segment_end / overtime / session_reset / crash_clock_out
+);
+-- 运行态缓存（单行；除 last_beat_at 外均可由流水重建）
+CREATE TABLE runtime (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    on_duty INTEGER NOT NULL,
+    mode TEXT NOT NULL,
+    segment_start_at INTEGER,
+    duty_clock_in_at INTEGER,
+    auto_out_at INTEGER,
+    accumulated_secs INTEGER NOT NULL,
+    last_beat_at INTEGER NOT NULL
+);
+-- 按天汇总（已封口数据日；加速层，可随时重算）
+CREATE TABLE days (
+    date TEXT PRIMARY KEY,
+    duty_secs INTEGER NOT NULL,
+    work_secs INTEGER NOT NULL,
+    rest_secs INTEGER NOT NULL,
+    first_in_at INTEGER,
+    last_out_at INTEGER,
+    sealed_at INTEGER NOT NULL
 );
 ```
 
 - 存储位置（2026-09-10 翻案）：双落址——config.json 落 `configs/`、pulse.db 落 `data/`；dev=项目根、release=exe 同级（杜绝机器用户目录，paths.rs 解析）
-- v1 查询：今日 SUM、本周 SUM、全部 SUM
-- 会话落库时机：暂停 / 重开 / 退出前（Running 先落库）各写入一条（零秒段跳过，崩溃最多丢当前段）
+- 取数口径：**单一事实源**——今日/本周/累计与三值/图谱同走单日归约（流水 → 在岗窗口 → 工作/休息块）；已封口数据日读 `days` 汇总（加速），今天现算
+- 落库时机：暂停 / 重开 / 退出前 **+ 在岗每分钟心跳 + 启动崩溃恢复**（停机 ≤10 分钟无缝续、>10 分钟按最后心跳补下班）；`workdays`/`sessions` 两表与"崩溃最多丢当前段"旧口径随 PL027 退役
 
 ### 2.3 提醒调度
 
@@ -57,40 +80,38 @@ CREATE TABLE sessions (
 - 降级：通知不可用（部分 Linux）时仅声音；反之亦然
 - ✅ 已落地（PL003）
 
-### 2.4 玻璃效果（window-vibrancy crate）
+### 2.4 玻璃效果（PL021.4 CT 化定案：恒纯 alpha 透明窗 + 前端分态纱）
 
-| 平台    | 实现                                                | 效果                                    |
-| ------- | --------------------------------------------------- | --------------------------------------- |
-| macOS   | `apply_vibrancy(NSVisualEffectMaterial::HudWindow)` | 真玻璃（延后，problems#1）              |
-| Windows | `apply_acrylic`                                     | 系统 Acrylic（✅ 实测通过，主验证平台） |
-| Linux   | `apply_blur` + 半透明                               | 依赖 compositor，妥协方案（延后）       |
-
-- 编译期分支：`#[cfg(target_os = "...")]`，三端互不影响
-- 前端玻璃卡片：CSS `backdrop-filter: blur()` 叠加系统级模糊
+- 窗体：`tauri.conf` `transparent: true`，**恒纯 alpha 透明常驻**——不挂任何 OS 材质 API
+- 分态纱：前端 `::before` 纱层——**失焦 30% 纱 / 聚焦 0%**（桌面直透），双主题三态令牌锁暗；CT 配方（`blur(40px) saturate(1.6)` + 白纱 + 描边/投影）
+- 三端同构：纯 CSS 实现，**无 OS 材质依赖**——原 macOS `apply_vibrancy` / Windows `apply_acrylic` / Linux `apply_blur` 三分支与 `window-vibrancy` 依赖随换血退役，亦**不再有 `#[cfg(target_os)]` 编译分支**
+- Rust 侧仅两件：转发 `window-focus` 焦点态给前端；setup 一次性隐藏 Win11 激活描边（`DWMWA_BORDER_COLOR`）+ 补系统圆角（`glass_backdrop.rs`，DWM 属性级 FFI，零新依赖）
+- 浮板毛玻璃：板上 0.25 黑纱 + `backdrop-filter: blur(40px)`（窗内采样有效）+ 被盖内容自雾化
+- macOS/Linux：天然同构，仅需常规回归验证（problems#1）
 
 ### 2.5 工作日/打卡模型（2026-09-10 定案，待实现）
 
 - 两层状态机：现有计时器之上加工作日层 `Off → OnDuty（上班，确认框）→ Off（下班，确认框）`
-- 新增两表：`workdays`（clock_in/clock_out，跨重启在岗）+ `events`（每次按下的事件流，时间图谱数据源）
+- 事件流水 `events`（每次按下的事件流 = **唯一事实源**，时间图谱/三值数据源；PL027 起原 `workdays` 行表已退役——在岗态由 `clock_in` 配对 + `runtime` 运行态缓存承担）
 - 语义：OnDuty 期间的计时段 = 工作；段间空隙 = 休息；在岗 = 下班 − 上班；三值仅在统计视图按打卡区间呈现
 - 未上班禁用计时按钮；忘记下班 → 满 N 小时（默认 8h，⚙ 可调）自动下班，记账回填至上班 + N 小时（发现可迟到、账目准时）
 - 统计视图：主界面双标签切换（计时｜统计）+ 时间图谱（工作/休息区块的起止时刻，几点几分粒度）+ 在岗/工作/休息三值 + 历史翻看
-- 口径：现有"今日/本周/累计"自然日口径不动；工作日三值双口径并存不混用
+- 口径（PL027 收敛）：今日/本周/累计与三值/图谱同走**单一日归约**，不再"sessions 自然日 vs workdays 打卡"双口径并存
 
 ## 3. 技术栈
 
-| 层     | 选型                           | 理由                                                         |
-| ------ | ------------------------------ | ------------------------------------------------------------ |
-| 框架   | Tauri 2（Rust + 系统 WebView） | 三端玻璃插件成熟、包体小（~10MB）                            |
-| 语言   | Rust（后端全部业务）           | 学习目标 + 状态机/SQLite 表达自然                            |
-| 前端   | Vue 3 + TypeScript + Vite      | 与系列一致，组件化玻璃卡片                                   |
-| 存储   | rusqlite（SQLite）             | 零配置本地库                                                 |
-| 玻璃   | window-vibrancy                | 三端统一 API                                                 |
-| 通知   | tauri-plugin-notification      | 系统通知                                                     |
-| 托盘   | Tauri 内置 tray API            | 常驻 + 菜单（PL004 已落地）                                  |
-| 热键   | tauri-plugin-global-shortcut   | 全局快捷键（PL004 已落地）                                   |
-| 单实例 | tauri-plugin-single-instance   | 防双开（PL004 已落地）                                       |
-| 测试   | cargo test（Rust 单测）        | 41 项核心逻辑全测；vitest 前端测试未启用（前端纯展示，可选） |
+| 层     | 选型                                     | 理由                                                                 |
+| ------ | ---------------------------------------- | -------------------------------------------------------------------- |
+| 框架   | Tauri 2（Rust + 系统 WebView）           | 三端玻璃插件成熟、包体小（~10MB）                                    |
+| 语言   | Rust（后端全部业务）                     | 学习目标 + 状态机/SQLite 表达自然                                    |
+| 前端   | Vue 3 + TypeScript + Vite                | 与系列一致，组件化玻璃卡片                                           |
+| 存储   | rusqlite（SQLite）                       | 零配置本地库                                                         |
+| 玻璃   | 前端 CSS（CT 分态纱）+ 恒纯 alpha 透明窗 | 三端天然同构、无 OS 材质依赖；Rust 仅转发焦点态与 Win11 窗口框架整定 |
+| 通知   | tauri-plugin-notification                | 系统通知                                                             |
+| 托盘   | Tauri 内置 tray API                      | 常驻 + 菜单（PL004 已落地）                                          |
+| 热键   | tauri-plugin-global-shortcut             | 全局快捷键（PL004 已落地）                                           |
+| 单实例 | tauri-plugin-single-instance             | 防双开（PL004 已落地）                                               |
+| 测试   | cargo test（Rust 单测）                  | 41 项核心逻辑全测；vitest 前端测试未启用（前端纯展示，可选）         |
 
 ## 4. 界面设计（玻璃艺术）
 
