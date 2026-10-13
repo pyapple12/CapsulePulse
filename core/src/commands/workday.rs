@@ -569,7 +569,8 @@ pub struct RecoveryOutcome {
     pub resumed_secs: Option<i64>,
 }
 
-/// 启动恢复（PL027.4）：读运行态缓存 → 三分支执行——
+/// 启动对账（PL027.4；**崩溃 / 正常退出皆走**——判据只看停机时长 `now − last_beat_at`，
+/// 与进程是怎么没的无关）：读运行态缓存 → 三分支执行——
 /// `Nothing` 原样（无未闭合打卡 / 无缓存，交给常规启动路径）；
 /// `Continue` 恢复工作日态与会话（停机时长计入当前段）并刷心跳，**零流水写入**；
 /// `CloseAt` 以 `at` 补段末事件（工作态）与下班事件（`crash_clock_out`；越过自动下班点则
@@ -1626,9 +1627,13 @@ mod tests {
     #[test]
     fn day_summary_keeps_block_for_shift_opened_this_second() {
         let ctx = ctx(FakeClock::new());
-        let now = Local::now().timestamp();
         let day_start = period::day_start_secs(&Local::now());
-        // 第一班取"现在之前"（不得晚于 now，否则新班会排在它前面 → 就不是末窗了）
+        // 固定时刻（12:00）——本用例只依赖"数据日"、**不依赖真实钟表**：原先取 Local::now()，
+        // 在 00:00–00:15 之间运行时"第一班"（day_start+600/+900 = 00:10/00:15）会晚于 now ⇒
+        // 第二班打卡在时间序上倒排到前面 → 被当成"前班未关又出现新打卡" → 末窗变成第一班、
+        // duty_ended_at 非 None，断言失败（跨零点 15 分钟失败窗口；2026-10-14 00:0x 实测抓到）。
+        let now = day_start + 12 * 3_600;
+        // 第一班取"now 之前"（恒在 12:00 之前，绝不晚于 now ⇒ 新班恒为末窗）
         let first_in = day_start + 600;
         let first_out = day_start + 900;
         {

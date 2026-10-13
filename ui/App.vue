@@ -48,7 +48,7 @@ const autoOutVisible = ref(false);
 const autoOutAt = ref(0);
 // PL025.8 自动下班待决：到点前 60s 弹确认框（倒计时 + 下班/加班）——到点由后端执行，前端只展示
 const autoOutDue = ref<number | null>(null);
-/** 崩溃恢复提示（PL027.8）：一次性——仅"判下班"分支有值（无缝续静默），取过即不再显示 */
+/** 启动对账提示（PL027.8；崩溃 / 正常退出皆走）：一次性——仅"判下班"分支有值（无缝续静默），取过即不再显示 */
 const recoveryNotice = ref<number | null>(null);
 const autoOutLeft = ref(0);
 let autoOutCountdown: number | undefined;
@@ -377,7 +377,7 @@ onMounted(() => {
       actionError.value = `提醒监听注册失败：${String(err)}`;
       console.error("reminder-due 监听注册失败", err);
     });
-  // PL027.8 崩溃恢复提示（一次性）：启动恢复结果自后端取一次——仅"判下班"分支有值，弹文案条；
+  // PL027.8 启动对账提示（一次性；崩溃 / 正常退出皆走）：对账结果自后端取一次——仅"判下班"分支有值，弹文案条；
   // 无缝续分支返回 null（静默，不打扰）
   invoke<RecoveryNotice | null>("take_recovery_notice")
     .then((notice) => {
@@ -459,7 +459,10 @@ onUnmounted(() => {
       </div>
       <div v-if="recoveryNotice != null" class="banner auto">
         <span class="dot"></span
-        ><span>上次异常退出，已按 {{ hhmm(recoveryNotice) }} 结束工作记账；要继续请重新打卡</span>
+        ><span
+          >上次未打卡下班就离开了，已按
+          {{ hhmm(recoveryNotice) }} 结束工作记账；要继续请重新打卡</span
+        >
       </div>
       <div v-if="actionError" class="banner error" role="alert">{{ actionError }}</div>
 
