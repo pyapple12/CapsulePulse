@@ -18,6 +18,9 @@ const props = defineProps<{
   error?: string;
   /** 在岗中（PL025.5）：在岗期间禁止改自动下班小时数——本班基准不可中途改（账目口径唯一） */
   onDuty?: boolean;
+  /** 今日已开启上班（PATCH005.3 整日锁定）：小时数**整日**禁改（含今天下班后），
+   * 仅"第二天且未上班"可改——判据 = 今天有打卡（前端用 `day.duty_started_at != null`）。 */
+  autoOutLocked?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [s: ReminderSettings] }>();
@@ -65,7 +68,7 @@ function onSwitchChange(key: "sound_enabled" | "notify_enabled", e: Event): void
 /** 步进 ±1（4~12 边界外静默：禁用态已挡，此处为键盘兜底，design stepAutoOut 同款守卫）；
  * 在岗期间整体禁改（PL025.5：本班基准不可中途改）——UI 已置灰，此处再兜一层 */
 function stepAutoOut(delta: number): void {
-  if (props.onDuty) {
+  if (props.onDuty || props.autoOutLocked) {
     return;
   }
   const v = props.settings.workday_auto_out_hours + delta;
@@ -134,14 +137,16 @@ function stepAutoOut(delta: number): void {
       <div class="setting-row inline">
         <div>
           <p class="setting-name">自动下班（小时）</p>
-          <p class="setting-desc">上限 4~12 小时</p>
+          <p class="setting-desc">
+            {{ autoOutLocked ? "今日已开启上班，明日上班前可改" : "上限 4~12 小时" }}
+          </p>
         </div>
         <div class="stepper">
           <button
             class="stepper-btn"
             aria-label="减少"
             type="button"
-            :disabled="onDuty || settings.workday_auto_out_hours <= 4"
+            :disabled="onDuty || autoOutLocked || settings.workday_auto_out_hours <= 4"
             @click="stepAutoOut(-1)"
           >
             <svg viewBox="0 0 26 22" aria-hidden="true">
@@ -154,7 +159,7 @@ function stepAutoOut(delta: number): void {
             class="stepper-btn"
             aria-label="增加"
             type="button"
-            :disabled="onDuty || settings.workday_auto_out_hours >= 12"
+            :disabled="onDuty || autoOutLocked || settings.workday_auto_out_hours >= 12"
             @click="stepAutoOut(1)"
           >
             <svg viewBox="0 0 26 22" aria-hidden="true">

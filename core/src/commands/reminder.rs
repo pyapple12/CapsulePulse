@@ -45,8 +45,9 @@ fn get_settings_inner<C: Clock>(ctx: &AppContext<C>) -> Result<ReminderSettings,
 /// 设置保存：校验 → 持久化 → 更新内存态（任一步失败不污染内存态）。
 /// **窗口位置归 Rust 管辖**（PATCH001.4）：提交值只覆盖提醒字段，位置从内存态继承——否则
 /// 设置板提交的陈旧副本会把用户刚挪的窗口位置抹回旧值（前端不参与位置读写）。
-/// **在岗禁改自动下班小时**（PL025.5）：本班基准不可中途改（账目口径唯一）；锁序
-/// workday → settings 单向合法（见 AppContext 注释）。
+/// **在岗禁改自动下班小时**（PL025.5）：本班基准不可中途改（账目口径唯一）；**整日锁定**
+/// （PATCH005.3）：今天一旦开启上班 → 基准今天内（含今天下班后）不可改，仅"第二天未上班"可改；
+/// 锁序 workday → settings 单向合法（见 AppContext 注释）。
 fn set_settings_inner<C: Clock>(
     ctx: &AppContext<C>,
     settings: &ReminderSettings,
@@ -60,8 +61,24 @@ fn set_settings_inner<C: Clock>(
             workday.is_on_duty(),
         )
     };
-    if on_duty && settings.workday_auto_out_hours != current_hours {
-        return Err(CommandError::AutoOutLockedOnDuty(current_hours));
+    // PATCH005.3 整日锁定：今天**一旦开启上班**（今天日历日内有打卡）→ 基准整日不可改（含今天
+    // 下班后）；仅"第二天且未上班"可改——跨零点夜班过了零点即视为第二天，可改（与用户定案一致）。
+    let today_start = crate::period::day_start_secs(
+        &chrono::TimeZone::timestamp_opt(&chrono::Local, super::now_secs(ctx)?, 0)
+            .single()
+            .ok_or(CommandError::Clock)?,
+    );
+    let today_has_clock_in = poison("存储", ctx.storage.lock())?
+        .events_between(today_start, today_start + 86_400)?
+        .iter()
+        .any(|(_, kind)| *kind == crate::workday::EventKind::ClockIn);
+    if settings.workday_auto_out_hours != current_hours {
+        if on_duty {
+            return Err(CommandError::AutoOutLockedOnDuty(current_hours));
+        }
+        if today_has_clock_in {
+            return Err(CommandError::AutoOutLockedToday(current_hours));
+        }
     }
     let mut merged = settings.clone();
     merged.window_pos = inherited_pos;
@@ -123,6 +140,35 @@ mod tests {
                 crate::settings::SettingsError::InvalidThreshold(0)
             ))
         ));
+    }
+
+    /// PATCH005.3 整日锁定：今天已开启上班（含今天下班后）→ 改小时数被拒；无今日打卡 → 放行。
+    #[test]
+    fn auto_out_hours_locked_for_whole_day() {
+        let mut ctx = ctx(FakeClock::new());
+        ctx.settings_path = crate::commands::test_support::temp_settings_path("auto-out-lock");
+        begin_duty(&ctx); // 今天打卡（clock_in 落在"今天"日历日内）
+        let s = ReminderSettings {
+            workday_auto_out_hours: 6,
+            ..get_settings_inner(&ctx).unwrap()
+        };
+        assert!(
+            matches!(
+                set_settings_inner(&ctx, &s),
+                Err(CommandError::AutoOutLockedOnDuty(_))
+            ),
+            "在岗中：拒改（既有口径优先命中）"
+        );
+        // 今天下班后：非在岗，但今天已有打卡 → 整日锁定同样拒改
+        crate::commands::workday::clock_out_inner(&ctx, 2_000, crate::workday::EventKind::ClockOut)
+            .unwrap();
+        assert!(
+            matches!(
+                set_settings_inner(&ctx, &s),
+                Err(CommandError::AutoOutLockedToday(_))
+            ),
+            "今天下班后仍整日锁定（非在岗但今日已有打卡）"
+        );
     }
 
     /// PATCH001.4：整结构覆盖不抹窗口位置（位置归 Rust 管辖，命令层从内存态继承）。

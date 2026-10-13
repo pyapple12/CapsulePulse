@@ -9,7 +9,6 @@ import type { DaySummary, WeekDay, WorkdayTotal } from "../types";
 import { useGlassBar } from "../src/use-glass-bar";
 const props = defineProps<{
   refreshKey: number;
-  autoOutHours: number | null;
   open: boolean;
   /** 有浮层盖住统计板（确认框遮罩等）：玻璃浮钮随之淡出（PL026.3） */
   veiled?: boolean;
@@ -168,11 +167,10 @@ function renderGraph(): void {
     return;
   }
   const clockIn = d.duty_started_at * 1000;
-  const autoOut = (props.autoOutHours ?? 8) * 3_600_000;
   const isToday = offset.value >= 0;
   const onDutyToday = isToday && d.duty_ended_at == null;
   const nowMs = Date.now();
-  // PATCH006.3：**单一坐标**（照抄 design/index.html）——画布本身就是时间轴：0 = 上班、W = 轴末；
+  // PATCH004.3：**单一坐标**（照抄 design/index.html）——画布本身就是时间轴：0 = 上班、W = 轴末；
   // 底槽（透明条）与两个裁剪层保持满画布 [0, W]（rx = 6），两端圆角由它们裁出。填色、在岗尾巴、
   // 节点、彗星走廊**全走同一条映射**，颜色分界与节点圆心因此严丝合缝；端头节点的圆心由下面的
   // "夹进 [6, W−6]"处理（否则时刻落在画布边缘的节点会被裁成半颗）。
@@ -206,16 +204,23 @@ function renderGraph(): void {
   // 超出轴末被裁断"（旧口径恒按今天第一班打卡算）；今日已下班 / 过去日 = 末块末尾（落定重画）
   const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
   const currentShiftStart = lastGap ? lastGap.t1 : blocks[0]!.t0;
-  const endTs = onDutyToday ? currentShiftStart + autoOut : segs[segs.length - 1]!.t1;
+  // PATCH005.3：在岗时轴末 = 本班打卡 + **今日剩余**（后端单一来源，前端零估算）；暂下班 = 末段末尾。
+  // 轴末保底到 now：预算已耗尽（到点兜底尚未执行）时不把真实块弧裁掉
+  const endTs = onDutyToday
+    ? Math.max(currentShiftStart + d.remaining_secs * 1000, nowMs)
+    : segs[segs.length - 1]!.t1;
   const nowTs = isToday ? nowMs : endTs;
   const W = svg.clientWidth;
   if (W > 0 && svg.viewBox.baseVal.width !== W) {
     svg.setAttribute("viewBox", `0 0 ${W} 12`);
   }
   // PATCH003.5：底槽与两个裁剪层保持模板的满画布（width="100%" + rx="6"）——首帧/空态不再跳宽。
-  // PATCH006.3：满画布口径（复原设计稿）——PATCH003 曾把填色/在岗尾巴/走廊/白纹行程连带收窄
+  // PATCH004.3：满画布口径（复原设计稿）——PATCH003 曾把填色/在岗尾巴/走廊/白纹行程连带收窄
   // 6px，端头因此留下一小段"素帽"；现全部回到 0…W，两端圆角由裁剪层 rx=6 裁出。
-  const frac = (ts: number): number => (ts - clockIn) / (endTs - clockIn);
+  // PATCH005.3：轴宽保底 1ms——"在岗但本班预算已耗尽"（到点兜底尚未执行）时轴末 = 本班打卡，
+  // 零宽会让 frac 除零产出 NaN（SVG translate(NaN) 刷错误）；保底不改变正常态取值。
+  const span = Math.max(1, endTs - clockIn);
+  const frac = (ts: number): number => (ts - clockIn) / span;
   /** 时间 → 画布 x（满画布 0…W；圆角由裁剪层 rx=6 负责，这里不内缩）。 */
   const xpx = (ts: number): number => frac(ts) * W;
 
@@ -276,7 +281,7 @@ function renderGraph(): void {
     nodes.forEach((n) => {
       // PATCH003.4 定案 a：节点圆心 = 它的真实时刻（= 颜色分界线），覆盖顺序因此 = 纯时间顺序
       // （DOM 追加序 = 时间序；SVG 同层后画在上）。
-      // PATCH006.3：圆心横向**夹进 [6, W−6]**（圆角帽心区间）——内部节点不受影响（圆心恰在时刻上）；
+      // PATCH004.3：圆心横向**夹进 [6, W−6]**（圆角帽心区间）——内部节点不受影响（圆心恰在时刻上）；
       // 轴两端（时刻落在画布边缘 0 / W）被夹进 6px，整颗圆（r 5.4 < 圆角 6）落在圆角帽内不被裁掉。
       const center = Math.min(Math.max(xpx(n.ts), 6), Math.max(6, W - 6));
       const g = document.createElementNS(SVG_NS, "g");
@@ -300,7 +305,7 @@ function renderGraph(): void {
     return;
   }
   const birthX = xpx(segs[segs.length - 1]!.t0);
-  // PATCH006.3：行程与走廊同源——走廊右端 = 画布右缘 W（设计稿原口径；斜纹由此被裁剪层
+  // PATCH004.3：行程与走廊同源——走廊右端 = 画布右缘 W（设计稿原口径；斜纹由此被裁剪层
   // rx=6 裁成半圆，端头圆角里也能看到斜纹），故 walk = 走廊宽 + 24（24 = 斜纹自身宽度：
   // 走完即完全退出走廊，回收时不留硬切）
   cometWalk = isToday ? W - birthX + 24 : 0;
@@ -341,7 +346,7 @@ function renderGraph(): void {
     const wasHidden = comet.style.display === "none";
     comet.style.display = "";
     comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
-    // 彗星走廊右端 = 画布右缘 W（与 cometWalk 同源；PATCH006.3 起不再止于帽心——设计稿
+    // 彗星走廊右端 = 画布右缘 W（与 cometWalk 同源；PATCH004.3 起不再止于帽心——设计稿
     // 原本就是 W，右端那半圆由裁剪层 rx=6 自己裁出来）
     clipRect.setAttribute("x", birthX.toFixed(2));
     clipRect.setAttribute("width", (W - birthX).toFixed(2));

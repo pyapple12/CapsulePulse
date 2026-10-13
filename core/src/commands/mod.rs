@@ -24,7 +24,8 @@ use crate::settings::ReminderSettings;
 use crate::storage::Storage;
 use crate::workday::WorkdayState;
 
-/// 自动下班基准与代次（PL025.8）：当前在岗班的到点时刻（`clock_in + N`；加班改为 `clock_in + 12h`）。
+/// 自动下班基准与代次（PL025.8；PATCH005.3 口径更新）：当前在岗班的到点时刻
+/// （= 本班打卡 + **今日剩余**；加班 = +4h 步进后按新剩余重排）。
 /// 代次每次写入 +1——兜底线程据它判断"基准是否已换代"（换代即让位退出，由新线程接手）；
 /// 待决提示标志使到点前 60s 只提示一次（基准变更时清零）。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -105,9 +106,18 @@ pub enum CommandError {
     /// 在岗期间禁止修改自动下班小时数（PL025.5：本班基准不可中途改，账目口径唯一）。
     #[error("在岗期间不可修改自动下班小时数（本班按 {0} 小时计）")]
     AutoOutLockedOnDuty(u32),
-    /// 已到加班上限（PL025.9：拉满 12h 后只能下班）。
+    /// 已到加班上限（PL025.9；PATCH005.3 步进版：+4h 撞 12h 硬顶后只能下班）。
     #[error("已到加班上限（{0} 小时），请下班")]
     AlreadyAtOvertimeCap(u32),
+    /// 今日已达 12 小时硬顶（PATCH005.3）：本数据日不再受理打卡（前端 pill 同步置灰）。
+    #[error("今日已达 {0} 小时上限，本数据日不再受理打卡")]
+    DayBudgetExhausted(u32),
+    /// 已跨日（零点后）：本数据日不再提供加班（PATCH005.3：跨日只给下班）。
+    #[error("已跨日，本数据日不再提供加班")]
+    OvertimeAcrossMidnight,
+    /// 今日已开启上班：自动下班小时**整日锁定**（PATCH005.3——含今天下班后；仅"第二天未上班"可改）。
+    #[error("今日已开启上班，自动下班小时整日不可改（当前 {0} 小时）")]
+    AutoOutLockedToday(u32),
     /// 锁中毒（此前持锁线程 panic）——携带锁名严格报错，不静默续行（y.problems#5②：文案如实反映是哪把锁）。
     #[error("{0}锁已中毒（此前持锁线程异常终止）")]
     Poisoned(&'static str),

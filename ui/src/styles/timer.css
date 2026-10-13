@@ -259,7 +259,28 @@
   font-size: 22px;
   font-weight: 700;
   line-height: 50px;
-  color: #333;
+  color: #fff; /* PATCH005.1：冒号与点号改纯白（原 #333 深灰，在深色玻璃底上几乎看不见） */
+}
+/* PATCH005.2 冒号/点号：**随秒位跳字同步灭一下**——由 TimerCard 的 blinkSeparators() 在翻页
+   同一帧挂上 .blink（一次性动画：当帧灭 → 淡回亮）；休息 / 未上班不触发，故静止常亮 */
+.flip-sep.blink {
+  animation: flip-sep-blink 0.45s ease-out 1;
+}
+@keyframes flip-sep-blink {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+/* reduced-motion：不做动画（常亮）——与翻页 / 沙漏 / 彗星的既有规矩一致 */
+@media (prefers-reduced-motion: reduce) {
+  .flip-sep.blink {
+    animation: none;
+    opacity: 1;
+  }
 }
 .flip {
   --flip-dur: 0.09s;

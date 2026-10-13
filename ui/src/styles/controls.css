@@ -97,6 +97,12 @@
   opacity: 0.45;
   pointer-events: none;
 }
+/* 打卡 pill 到顶置灰（PATCH005.3 有意偏离 design：今日累计满 12h → 上班钮不可用）：
+   照抄 .seg-control.off 的既有语汇（透明度 + 断指针事件） */
+.pill-cast.off {
+  opacity: 0.45;
+  pointer-events: none;
+}
 .seg-control input {
   display: none;
 }

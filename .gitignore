@@ -60,6 +60,7 @@ Thumbs.db
 .mimosa/
 .zcode/
 !.zcode/config.json
+.openchamber/
 
 ## Git worktrees
 .worktrees/

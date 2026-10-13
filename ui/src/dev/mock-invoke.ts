@@ -51,12 +51,16 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
       const nowSec = Math.floor(now / 1000);
       // PATCH003.2：让 DEV 基座能复现"已下班 → 再打卡"过渡（此前恒返回在岗态，验不了）
       if (mockOnDuty) {
+        const used = Math.floor(elapsedMs / 1000);
         return {
           duty_started_at: start,
           duty_ended_at: null,
-          duty_secs: Math.floor(elapsedMs / 1000),
-          work_secs: Math.floor(elapsedMs / 1000),
+          duty_secs: used,
+          work_secs: used,
           rest_secs: 0,
+          budget_hours: 8, // PATCH005.3：基座固定基准 8h
+          used_secs: used,
+          remaining_secs: Math.max(0, 8 * 3_600 - used),
           blocks: [{ start, end: nowSec, kind: "work" }],
         };
       }
@@ -68,6 +72,9 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         duty_secs: 3 * 3_600,
         work_secs: 2 * 3_600,
         rest_secs: 3_600,
+        budget_hours: 0, // PATCH005.3：暂下班 → 不画蓝条、轴末取末段末尾（预算字段 0）
+        used_secs: 3 * 3_600,
+        remaining_secs: 0,
         blocks: [
           { start, end: noon, kind: "work" },
           { start: noon, end: onePm, kind: "rest" },

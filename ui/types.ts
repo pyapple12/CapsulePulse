@@ -10,6 +10,10 @@ export interface SessionStatus {
   on_duty: boolean;
 }
 
+/** 加班硬顶小时数（镜像 core/src/workday.rs `OVERTIME_CAP_HOURS`，单一来源在后端）：
+ * 今日上限封顶于此值——到顶后加班钮隐藏、上班钮置灰（PATCH005.3）。 */
+export const OVERTIME_CAP_HOURS = 12;
+
 /** stats 命令返回体（镜像 core/src/commands/stats.rs SessionStats） */
 export interface SessionStats {
   today_secs: number;
@@ -41,6 +45,12 @@ export interface DaySummary {
   work_secs: number;
   rest_secs: number;
   blocks: DayBlock[];
+  /** 今日上限小时数（PATCH005.3：基准 + 4h×加班步数、封顶 12h；过去日 0） */
+  budget_hours: number;
+  /** 今日已累计在岗秒数（PATCH005.3；过去日 0） */
+  used_secs: number;
+  /** 本班剩余预算秒数（PATCH005.3：表盘底轨跨度与"轴末"同一口径；暂下班 / 过去日 0） */
+  remaining_secs: number;
 }
 
 /** week_detail 返回体中的单日行（镜像 core/src/commands/workday.rs WeekDay） */

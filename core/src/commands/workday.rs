@@ -13,9 +13,9 @@ use crate::period;
 use crate::session::Clock;
 use crate::storage::{MigrationReport, RuntimeMode, RuntimeState};
 use crate::workday::{
-    auto_out_at, auto_out_pending, auto_out_step, decide_recovery, duty_windows_for_day,
-    nested_clock_in_fixes, reduce_day, AutoOutStep, DaySummary, EventKind, RecoveryDecision,
-    RecoveryInput, WorkdayError, WorkdayState, OVERTIME_CAP_HOURS,
+    auto_out_pending, auto_out_step, decide_recovery, duty_windows_for_day, nested_clock_in_fixes,
+    reduce_day, AutoOutStep, DaySummary, EventKind, RecoveryDecision, RecoveryInput, WorkdayError,
+    WorkdayState, OVERTIME_CAP_HOURS,
 };
 
 /// 上班打卡：流水入馆（`clock_in` + `segment_start`，单事务），再转移状态；会话归零并**立即进入
@@ -34,6 +34,15 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(
     {
         return Err(CommandError::Workday(WorkdayError::AlreadyOnDuty));
     }
+    // 预算上下文在**插入打卡事件之前**取（PATCH005.3 到顶守卫）：此刻尚无开窗 ⇒
+    // `used_total_secs` 就是"本班之前已累计"，守卫与武装共用同一值（只取一次数）。
+    let bc = day_budget_context(ctx, at, at)?;
+    let used_before = bc.used_total_secs;
+    // 到顶守卫（PATCH005.3）：今日已累计到 12h 硬顶 → 本数据日不再受理打卡
+    // （用户定案：前端 pill 置灰点不开；后端再兜一层，防 devtools / DEV 基座绕过）。
+    if used_before >= i64::from(OVERTIME_CAP_HOURS) * 3_600 {
+        return Err(CommandError::DayBudgetExhausted(OVERTIME_CAP_HOURS));
+    }
     {
         // 打卡即工作（PATCH002）：归零 + 立即 Running，同一 guard 内完成不留中间态；
         // 锁序 workday → session → storage 单向（见 AppContext 注释）。
@@ -48,9 +57,18 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(
         (at, EventKind::SegmentStart),
     ])?;
     workday.clock_in(at)?;
-    // 武装自动下班基准（PL025.8）：到点时刻 = 上班 + N（设置口径）；兜底线程由命令层 spawn
-    let hours = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
-    set_auto_out_watch(ctx, at + i64::from(hours) * 3_600)?;
+    // 武装自动下班基准（PATCH005.3）：到点时刻 = 本班打卡 + **今日剩余**（今日上限 − 本班前已累计）；
+    // 若今日预算已用满 → 本次打卡即**隐式加班**：落 `overtime` 并按下一步步进武装（用户定案：
+    // 打卡框不加解释性文案，看蓝条即知）。兜底线程由命令层 spawn。
+    let mut steps = bc.overtime_steps;
+    let mut budget = crate::workday::day_budget_hours(bc.basis_hours, steps);
+    if crate::workday::shift_remaining_secs(budget, used_before) == 0 {
+        poison("存储", ctx.storage.lock())?.insert_event(at, EventKind::Overtime)?;
+        steps += 1;
+        budget = crate::workday::day_budget_hours(bc.basis_hours, steps);
+    }
+    let remaining = crate::workday::shift_remaining_secs(budget, used_before);
+    set_auto_out_watch(ctx, crate::workday::shift_deadline(at, remaining))?;
     // 打卡即刷心跳（PL027.3）：崩溃恢复据此知道"在岗段从哪起、最后活着是什么时候"
     beat_after_action(ctx);
     Ok(())
@@ -125,7 +143,22 @@ pub(super) fn day_summary_inner<C: Clock>(
     };
     let fetch_end = windows.last().map(|&(_, end)| end).unwrap_or(now_secs) + 1;
     let seg_events = poison("存储", ctx.storage.lock())?.events_between(fetch_start, fetch_end)?;
-    Ok(reduce_day(&windows, &seg_events, open_tail))
+    // PATCH005.3：今日预算字段（仅 offset 0 = 今天；过去日保持 0——前端只用今日）。
+    // used_secs 恒填；budget/remaining 仅在岗（末窗未关）时填——暂下班不画蓝条、轴末取末段末尾。
+    let mut summary = reduce_day(&windows, &seg_events, open_tail);
+    if offset == 0 {
+        summary.used_secs = crate::workday::day_used_secs(&windows);
+        if open_tail {
+            if let Some(&(shift_start, _)) = windows.last() {
+                let bc = day_budget_context(ctx, shift_start, now_secs)?;
+                let budget = crate::workday::day_budget_hours(bc.basis_hours, bc.overtime_steps);
+                summary.budget_hours = budget;
+                summary.remaining_secs =
+                    crate::workday::shift_remaining_secs(budget, bc.used_before_shift_secs);
+            }
+        }
+    }
+    Ok(summary)
 }
 
 /// 周视图行（serde 单一来源，TS 侧镜像 WeekDay）：日期标签 + 星期序 + workday 口径两值。
@@ -628,8 +661,9 @@ pub(crate) fn recover_on_startup<C: Clock>(
     }
 }
 
-/// 自动下班检查（挂 session_status 评估口）：**基准到点**（PL025.8：打卡武装 = 上班 + N，
-/// 加班后 = 上班 + 12h）→ 以基准时刻执行下班，返回该时刻供调用方发 workday-auto-out 事件；
+/// 自动下班检查（挂 session_status 评估口）：**基准到点**（PL025.8；PATCH005.3 口径 =
+/// 本班打卡 + **今日剩余**，加班后按 +4h 步进重排）→ 以基准时刻执行下班，返回该时刻供调用方发
+/// workday-auto-out 事件；
 /// 未武装（无在岗班）或未到点 → None。口径：执行时刻恒 = 基准本身（与发现时刻无关，
 /// "发现可迟到、账目准时"），**与段状态无关**（在休息态照点执行）。
 pub(super) fn try_auto_clock_out<C: Clock>(
@@ -644,6 +678,50 @@ pub(super) fn try_auto_clock_out<C: Clock>(
     }
     // 若恰被并发手动下班，此处严格报错、下一 tick 基准已撤自然消停
     clock_out_inner(ctx, due, EventKind::AutoClockOut).map(|_| Some(due))
+}
+
+/// 今日预算上下文（PATCH005.3 纯逻辑 + 存储读）：基准 / 加班步数 / 已累计两口径。
+/// 口径：数据日 = 打卡日（跨零点不切分）；按**在岗**累计（班内休息计入、班间空档不计）；
+/// 加班步数 = 该数据日 `overtime` 事件条数（只追加流水，账可重推）。
+/// 已累计两口径：`used_before_shift_secs` 把**末窗视为当前班**而排除（在岗时调用）；
+/// `used_total_secs` 为全部窗口之和——**打卡前**（尚无开窗）必须用后者，它才是"本班之前"。
+struct DayBudgetContext {
+    /// 今日基准小时（当天第一次打卡时的自动下班小时数；整日锁定 ⇒ 直取设置值，无需快照事件）。
+    basis_hours: u32,
+    /// 加班步数（本数据日 `overtime` 事件条数）。
+    overtime_steps: u32,
+    /// 本班（末窗）之前的今日已累计在岗秒。
+    used_before_shift_secs: i64,
+    /// 今日已累计在岗秒（全部窗口之和；打卡前 = 全部已关窗口）。
+    used_total_secs: i64,
+}
+
+/// 今日预算上下文取数（见 [`DayBudgetContext`]）。
+fn day_budget_context<C: Clock>(
+    ctx: &AppContext<C>,
+    clock_in_at: i64,
+    now: i64,
+) -> Result<DayBudgetContext, CommandError> {
+    let basis = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
+    let day_start = local_day_start(clock_in_at)?;
+    let day_end = day_start + 86_400;
+    let events = poison("存储", ctx.storage.lock())?.events_between(
+        day_start,
+        day_end + i64::from(OVERTIME_CAP_HOURS) * 3_600 + 1,
+    )?;
+    let steps = events
+        .iter()
+        .filter(|(_, kind)| *kind == EventKind::Overtime)
+        .count() as u32;
+    let (windows, _) = duty_windows_for_day(&events, day_start, day_end, now);
+    // 末窗 = 本班（在岗窗）；"本班之前的已累计"须把它排除
+    let used_before = crate::workday::day_used_secs(&windows[..windows.len().saturating_sub(1)]);
+    Ok(DayBudgetContext {
+        basis_hours: basis,
+        overtime_steps: steps,
+        used_before_shift_secs: used_before,
+        used_total_secs: crate::workday::day_used_secs(&windows),
+    })
 }
 
 /// 写入自动下班基准（PL025.8）：代次 +1 使旧兜底线程让位、待决提示复位；返回新代次供命令层 spawn。
@@ -696,8 +774,9 @@ pub(super) fn auto_out_pending_inner<C: Clock>(
     Ok(Some(due))
 }
 
-/// 加班（PL025.9）：本班下班基准拉满到 `clock_in + 12h` + 写 overtime 事件（留痕）；
-/// 已 ≥12h 严格报错（`AlreadyAtOvertimeCap`）。**不动段事件**——用户可能正在工作段或休息段，
+/// 加班（PATCH005.3 步进版）：本班上限 **+4h**（硬顶 12h）+ 写 `overtime` 事件（留痕）；
+/// **到顶**（上限已 12h）→ `AlreadyAtOvertimeCap`；**跨日**（now 的日历日 ≠ 打卡日）→
+/// `OvertimeAcrossMidnight`（跨日只给下班）。**不动段事件**——用户可能正在工作段或休息段，
 /// 计时与图谱不受影响；返回新代次供命令层重排兜底线程。
 pub(super) fn overtime_inner<C: Clock>(ctx: &AppContext<C>, now: i64) -> Result<u64, CommandError> {
     let clock_in_at = {
@@ -707,15 +786,29 @@ pub(super) fn overtime_inner<C: Clock>(ctx: &AppContext<C>, now: i64) -> Result<
             WorkdayState::Off => return Err(CommandError::Workday(WorkdayError::NotOnDuty)),
         }
     };
-    let cap_at = auto_out_at(clock_in_at, OVERTIME_CAP_HOURS);
-    if now >= cap_at {
-        return Err(CommandError::AlreadyAtOvertimeCap(OVERTIME_CAP_HOURS));
+    let bc = day_budget_context(ctx, clock_in_at, now)?;
+    let budget = crate::workday::day_budget_hours(bc.basis_hours, bc.overtime_steps);
+    let decision = crate::workday::overtime_decision(
+        local_day_start(now)?,
+        local_day_start(clock_in_at)?,
+        budget,
+    );
+    match decision {
+        crate::workday::OvertimeDecision::Allow => {}
+        crate::workday::OvertimeDecision::AtCap => {
+            return Err(CommandError::AlreadyAtOvertimeCap(OVERTIME_CAP_HOURS))
+        }
+        crate::workday::OvertimeDecision::AcrossMidnight => {
+            return Err(CommandError::OvertimeAcrossMidnight)
+        }
     }
     poison("存储", ctx.storage.lock())?.insert_event(now, EventKind::Overtime)?;
-    set_auto_out_watch(ctx, cap_at)
+    let next_budget = crate::workday::day_budget_hours(bc.basis_hours, bc.overtime_steps + 1);
+    let remaining = crate::workday::shift_remaining_secs(next_budget, bc.used_before_shift_secs);
+    set_auto_out_watch(ctx, crate::workday::shift_deadline(clock_in_at, remaining))
 }
 
-/// 启动武装（PL025.8）：在岗恢复时按"上班 + N"重建基准并返回代次（未在岗返回 None）。
+/// 启动武装（PATCH005.3）：在岗恢复时按"本班打卡 + **今日剩余**"重建基准并返回代次（未在岗 None）。
 /// 重启后基准随 AppContext 清零，不重建则兜底线程无基准可依——与打卡路径同源（arm → spawn）。
 pub(crate) fn arm_auto_out_on_start<C: Clock>(
     ctx: &AppContext<C>,
@@ -727,8 +820,11 @@ pub(crate) fn arm_auto_out_on_start<C: Clock>(
             WorkdayState::Off => return Ok(None),
         }
     };
-    let hours = poison("设置", ctx.settings.lock())?.workday_auto_out_hours;
-    set_auto_out_watch(ctx, auto_out_at(clock_in_at, hours)).map(Some)
+    let now = now_secs(ctx)?;
+    let bc = day_budget_context(ctx, clock_in_at, now)?;
+    let budget = crate::workday::day_budget_hours(bc.basis_hours, bc.overtime_steps);
+    let remaining = crate::workday::shift_remaining_secs(budget, bc.used_before_shift_secs);
+    set_auto_out_watch(ctx, crate::workday::shift_deadline(clock_in_at, remaining)).map(Some)
 }
 
 /// 兜底自动下班线程（PL025.8）：到点自动下班——前端被关/崩溃也必执行。
@@ -1504,7 +1600,7 @@ mod tests {
         assert_eq!(sum.duty_ended_at, None, "未下班 → 在岗中");
     }
 
-    /// PATCH006.1 表盘底轨锚点回归：当天已有一段班、又在**打卡当秒**开新班——新班必须立刻
+    /// PATCH004.1 表盘底轨锚点回归：当天已有一段班、又在**打卡当秒**开新班——新班必须立刻
     /// 在归约里产出区块。否则前端"当前班起点 = 末个班间空档之后的第一块（无空档则当天首块）"
     /// 会退回当天首块，底轨蓝条短暂锚到上一班起点，下一秒才自纠。
     #[test]
@@ -1538,6 +1634,100 @@ mod tests {
             sum.blocks.last().map(|b| b.start),
             Some(now),
             "新班块起点 = 打卡刻（前端底轨锚点）"
+        );
+    }
+
+    // —— PATCH005.3 集成：今日预算驱动自动下班武装 ——
+
+    /// 同日第二班：武装 = 本班打卡 + **今日剩余**（首班 4h 已用、基准 8h → 只剩 4h）。
+    #[test]
+    fn clock_in_arms_second_shift_with_day_remaining() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        clock_out_inner(&ctx, day_start + 13 * 3_600, EventKind::ClockOut).unwrap();
+        // 第二班 14:00 打卡：上限 8h − 已用 4h = 剩余 4h → 到点 18:00（旧口径会算成 22:00）
+        clock_in_inner(&ctx, day_start + 14 * 3_600).unwrap();
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(day_start + 18 * 3_600),
+            "第二班只剩余额 4h"
+        );
+    }
+
+    /// 预算用满后再打卡 = **隐式加班**：落一条 `overtime`、上限 8h → 12h、本班剩 4h。
+    #[test]
+    fn clock_in_after_budget_exhausted_is_implicit_overtime() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        clock_out_inner(&ctx, day_start + 17 * 3_600, EventKind::ClockOut).unwrap();
+        clock_in_inner(&ctx, day_start + 18 * 3_600).unwrap();
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(day_start + 22 * 3_600),
+            "隐式加班：上限 12h、本班剩 4h"
+        );
+        let events = ctx
+            .storage
+            .lock()
+            .unwrap()
+            .events_between(0, 10_000_000_000)
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(_, k)| *k == EventKind::Overtime)
+                .count(),
+            1,
+            "隐式加班落且仅落一条 overtime"
+        );
+    }
+
+    /// 点「加班」= +4h 步进（落 `overtime`、基准 +4h）；到顶后拒绝（PATCH005.3）。
+    #[test]
+    fn overtime_adds_four_hours_then_caps() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        let now = day_start + 10 * 3_600;
+        overtime_inner(&ctx, now).unwrap();
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(day_start + 21 * 3_600),
+            "基准 8h + 4h = 12h → 到点 = 09:00 + 12h"
+        );
+        assert!(
+            matches!(
+                overtime_inner(&ctx, now),
+                Err(CommandError::AlreadyAtOvertimeCap(12))
+            ),
+            "上限已 12h：再点加班拒绝"
+        );
+    }
+
+    /// PATCH005.3：DTO 预算字段——用户例（基准 6h、第一班 4h → 第二班 `remaining_secs` = 2h）。
+    #[test]
+    fn day_summary_exposes_shift_remaining() {
+        let ctx = ctx(FakeClock::new());
+        ctx.settings.lock().unwrap().workday_auto_out_hours = 6;
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        clock_out_inner(&ctx, day_start + 13 * 3_600, EventKind::ClockOut).unwrap();
+        let now = day_start + 14 * 3_600;
+        clock_in_inner(&ctx, now).unwrap();
+        let sum = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(sum.budget_hours, 6);
+        assert_eq!(
+            sum.remaining_secs,
+            2 * 3_600,
+            "第二班只剩 2h（上限 − 本班前已用）"
+        );
+        // used_secs 含本班开窗（PATCH004.1 保底 1 秒），故取容差
+        assert!(
+            sum.used_secs >= 4 * 3_600 && sum.used_secs <= 4 * 3_600 + 60,
+            "今日已累计 ≈ 第一班 4h（含本班开窗 1s），实得 {}",
+            sum.used_secs
         );
     }
 
@@ -1751,7 +1941,8 @@ mod tests {
         assert_eq!(ctx.auto_out.lock().unwrap().due_at, None, "下班撤基准");
     }
 
-    /// PL025.9：加班拉满 12h + 写 overtime 事件 + 换代；不动段事件；已满 12h / 未上班严格报错。
+    /// PL025.9 + PATCH005.3：加班 = **+4h 步进**（此例基准 8h → 上限 12h）+ 写 overtime 事件 + 换代；
+    /// 不动段事件；未上班 / 到顶严格报错。
     #[test]
     fn overtime_sets_cap_and_errors() {
         let off = ctx(FakeClock::new());
@@ -1773,7 +1964,7 @@ mod tests {
         assert_eq!(
             ctx.auto_out.lock().unwrap().due_at,
             Some(in_at + 12 * 3_600),
-            "基准拉满到上班 + 12h"
+            "基准 8h + 4h = 12h → 到点 = 上班 + 12h"
         );
         let kinds = event_kinds(&ctx);
         assert!(kinds.contains(&EventKind::Overtime), "加班事件入馆（留痕）");
@@ -1791,7 +1982,7 @@ mod tests {
         ));
     }
 
-    /// PL025.8：重启武装——在岗恢复时按"上班 + N"重建基准；未在岗返回 None。
+    /// PL025.8：重启武装——在岗恢复时按"本班打卡 + 今日剩余"重建基准；未在岗返回 None。
     #[test]
     fn arm_on_start_rebuilds_baseline() {
         let ctx = ctx(FakeClock::new());
@@ -1805,5 +1996,76 @@ mod tests {
         let generation = arm_auto_out_on_start(&ctx).unwrap().unwrap();
         assert_eq!(ctx.auto_out.lock().unwrap().due_at, Some(1_000 + 8 * 3_600));
         assert!(generation > 0, "重建即换代");
+    }
+
+    /// PATCH005.3：重启后**多班**仍按今日剩余重推（原用例只覆盖首班 1000 + 8h）。
+    #[test]
+    fn arm_on_start_rebuilds_shift_remaining_after_restart() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        clock_out_inner(&ctx, day_start + 13 * 3_600, EventKind::ClockOut).unwrap();
+        clock_in_inner(&ctx, day_start + 14 * 3_600).unwrap();
+        // 模拟重启：AppContext 的基准随进程清零
+        ctx.auto_out.lock().unwrap().due_at = None;
+        arm_auto_out_on_start(&ctx).unwrap().unwrap();
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(day_start + 18 * 3_600),
+            "重启后按今日剩余 4h 重推，而非本班打卡 + 8h"
+        );
+    }
+
+    /// PATCH005.3：重启后**加班步数**同样由流水重推（上限 12h）。
+    #[test]
+    fn arm_on_start_rebuilds_after_overtime_restart() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        overtime_inner(&ctx, day_start + 10 * 3_600).unwrap();
+        ctx.auto_out.lock().unwrap().due_at = None;
+        arm_auto_out_on_start(&ctx).unwrap().unwrap();
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(day_start + 21 * 3_600),
+            "重启后加班仍按 +4h 步进（09:00 + 12h）"
+        );
+    }
+
+    /// PATCH005.3：跨日拒加班（命令层分支）——同日内放行、过零点拒绝。
+    #[test]
+    fn overtime_rejected_across_midnight_but_allowed_same_day() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        let in_at = day_start - 86_400 + 22 * 3_600; // 昨日 22:00 打卡（夜班）
+        clock_in_inner(&ctx, in_at).unwrap();
+        // 昨日 23:00：同日 → 放行（基准 8h + 4h = 12h → 到点 = 打卡 + 12h）
+        overtime_inner(&ctx, day_start - 3_600).unwrap();
+        assert_eq!(
+            ctx.auto_out.lock().unwrap().due_at,
+            Some(in_at + 12 * 3_600),
+            "同日加班放行并按新上限重排"
+        );
+        // 今日 02:00：已跨日 → 拒绝（跨日只给下班）
+        assert!(matches!(
+            overtime_inner(&ctx, day_start + 2 * 3_600),
+            Err(CommandError::OvertimeAcrossMidnight)
+        ));
+    }
+
+    /// PATCH005.3 到顶守卫：今日累计 12h 后再打卡 → 拒绝且**不落任何事件**（前端 pill 同步置灰）。
+    #[test]
+    fn clock_in_after_cap_is_rejected() {
+        let ctx = ctx(FakeClock::new());
+        ctx.settings.lock().unwrap().workday_auto_out_hours = 12;
+        let day_start = period::day_start_secs(&Local::now());
+        clock_in_inner(&ctx, day_start + 9 * 3_600).unwrap();
+        clock_out_inner(&ctx, day_start + 21 * 3_600, EventKind::ClockOut).unwrap();
+        let before = event_kinds(&ctx).len();
+        assert!(matches!(
+            clock_in_inner(&ctx, day_start + 22 * 3_600),
+            Err(CommandError::DayBudgetExhausted(12))
+        ));
+        assert_eq!(event_kinds(&ctx).len(), before, "拒绝时不落任何事件");
     }
 }

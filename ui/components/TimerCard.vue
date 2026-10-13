@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 // IPC DTO 镜像类型统一在 types.ts（单一来源 = Rust serde 结构）
-import type { DaySummary, SessionStatus } from "../types";
+import { OVERTIME_CAP_HOURS, type DaySummary, type SessionStatus } from "../types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { pad } from "../format";
 
@@ -18,12 +18,10 @@ const emit = defineEmits<{
   clock: [direction: "in" | "out"];
 }>();
 
-// day = 当日明细（dial 弧段 + 电池上班时刻的数据源）；thresholdMin = 沙漏周期；
-// targetHours = 自动下班小时（电池分母 + dial 底轨跨度）
+// day = 当日明细（dial 弧段 + 电池的数据源）；thresholdMin = 沙漏周期
 const props = defineProps<{
   day: DaySummary | null;
   thresholdMin: number;
-  targetHours: number | null;
 }>();
 
 const state = ref<"idle" | "running" | "paused">("idle");
@@ -179,8 +177,42 @@ function arcPath(r: number, a0: number, a1: number): string {
   return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-const autoOutMs = computed(() => (props.targetHours ?? 8) * 3_600_000);
-const clockInMs = computed(() => (props.day?.duty_started_at ?? 0) * 1000);
+/** 段序列（真实块 + 班间空档；秒 → 毫秒）：dial 弧段与电池共用同一份（PATCH005.3 抽函数消重）。
+ * 块序列的空洞 = 班间空档（blocks 只覆盖在岗窗口）。 */
+function buildSegs(day: DaySummary): { t0: number; t1: number; kind: string }[] {
+  const segs: { t0: number; t1: number; kind: string }[] = [];
+  let lastEnd: number | null = null;
+  for (const b of day.blocks) {
+    const t0 = b.start * 1000;
+    const t1 = b.end * 1000;
+    if (lastEnd != null && t0 > lastEnd) {
+      segs.push({ t0: lastEnd, t1: t0, kind: "gap" });
+    }
+    segs.push({ t0, t1, kind: b.kind });
+    lastEnd = t1;
+  }
+  return segs;
+}
+
+/** 当前班起点（毫秒，PATCH005.3）：末个班间空档之后的第一块起点；无空档则当天首块起点。
+ * dial 底轨与电池同源，杜绝两套"当前班"推法漂移。 */
+const shiftStartMs = computed(() => {
+  const d = props.day;
+  if (!d?.duty_started_at) {
+    return 0;
+  }
+  const segs = buildSegs(d);
+  const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
+  return lastGap ? lastGap.t1 : (segs[0]?.t0 ?? 0);
+});
+
+/** 本班预算（毫秒，PATCH005.3）：后端 `remaining_secs` = 今日上限 − 本班前已累计，**班内恒定**
+ * （跨班累计扣减、加班步进即时生效）——表盘底轨跨度与电池分母同一口径。 */
+const shiftBudgetMs = computed(() => (props.day?.remaining_secs ?? 0) * 1000);
+
+/** 到顶置灰（PATCH005.3）：今日已累计到 12h 硬顶 → 上班钮点不开（后端同样拒打卡）。
+ * 仅未上班时才可能点"上班"，在岗时按钮是"下班"，故置灰条件含 `!onDuty`。 */
+const capReached = computed(() => (props.day?.used_secs ?? 0) >= OVERTIME_CAP_HOURS * 3_600);
 
 const hourStyle = computed(() => {
   const d = new Date(secTs.value);
@@ -203,18 +235,7 @@ const dialArcsSvg = computed(() => {
     return "";
   }
   const nowMs = Date.now();
-  // 段源：真实块（秒 → 毫秒）；块序列的空洞 = 班间空档（blocks 只覆盖在岗窗口）
-  const segs: { t0: number; t1: number; kind: string }[] = [];
-  let lastEnd: number | null = null;
-  for (const b of d.blocks) {
-    const t0 = b.start * 1000;
-    const t1 = b.end * 1000;
-    if (lastEnd != null && t0 > lastEnd) {
-      segs.push({ t0: lastEnd, t1: t0, kind: "gap" });
-    }
-    segs.push({ t0, t1, kind: b.kind });
-    lastEnd = t1;
-  }
+  const segs = buildSegs(d);
   if (segs.length === 0) {
     return "";
   }
@@ -224,10 +245,12 @@ const dialArcsSvg = computed(() => {
   // `day` 立即刷，实测 0–3ms）；`onDuty`（100ms 轮询）负责**纠偏**——万一某次 `day_detail`
   // 拉取失败，`onDuty` 一变即可在 ≤100ms 内把在岗态纠正回来。代价仅"下班后蓝条最多多留 100ms"。
   const onDutyNow = onDuty.value || d.duty_ended_at == null;
-  const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
-  const shiftStart = lastGap ? lastGap.t1 : (segs[0]?.t0 ?? 0);
-  const trackEnd = shiftStart + autoOutMs.value;
-  const clipEnd = onDutyNow ? trackEnd : Number.POSITIVE_INFINITY;
+  const shiftStart = shiftStartMs.value;
+  // PATCH005.3：底轨跨度 = **本班预算**（后端单一来源；本班打卡 + 今日剩余）——跨班累计扣减，
+  // 预算用满/到顶时剩余为 0（底轨退化为 0 长度 = 已无预算）；块弧裁剪保底到 now，
+  // 免"到点兜底执行前"那一瞬真实块弧整段消失
+  const trackEnd = shiftStart + shiftBudgetMs.value;
+  const clipEnd = onDutyNow ? Math.max(trackEnd, nowMs) : Number.POSITIVE_INFINITY;
   const parts: string[] = [];
 
   /** 逐片段按所属圈画弧（跨 12:00 / 跨零点自动切开；裁剪到 now 与当前班底轨末端） */
@@ -273,6 +296,7 @@ const dialArcsSvg = computed(() => {
    ============================================================ */
 const flipClockEl = ref<HTMLElement | null>(null);
 let flipEls: HTMLElement[] = [];
+let lastSecShown = ""; // 秒位现值（PATCH005.2：变化即触发冒号/点号灭一下）
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 function buildFlipClock(): void {
@@ -342,6 +366,20 @@ function setFlip(el: HTMLElement, v: string): void {
   el.append(f1, f2);
 }
 
+/** PATCH005.2：冒号/点号随"秒位跳字"**同步灭一下**——严格同步 = 在翻页更新同一帧触发，
+ * 不跑自由相位的周期动画。休息 / 未上班（非 Running）不触发；reduced-motion 下不动。 */
+function blinkSeparators(): void {
+  if (reducedMotion.matches) {
+    return;
+  }
+  const seps = flipClockEl.value?.querySelectorAll<HTMLElement>(".flip-sep");
+  seps?.forEach((el) => {
+    el.classList.remove("blink");
+    void el.offsetWidth; // 强制回流：同一帧内 remove+add 不会重放动画
+    el.classList.add("blink");
+  });
+}
+
 /** 十分秒位拆位（design 1:1）：小时不封顶 */
 watch(totalMs, (ms) => {
   if (flipEls.length === 0) {
@@ -362,6 +400,14 @@ watch(totalMs, (ms) => {
     String(d),
   ];
   digits.forEach((v, i) => setFlip(flipEls[i]!, v));
+  // PATCH005.2：秒位跳字即触发（严格同步）；休息 / 未上班不闪
+  const secs = `${digits[4]}${digits[5]}`;
+  if (secs !== lastSecShown) {
+    lastSecShown = secs;
+    if (isRunning.value) {
+      blinkSeparators();
+    }
+  }
 });
 
 /* ============================================================
@@ -473,7 +519,8 @@ watch(
 );
 
 /* ============================================================
-   ⑤ 电池（design 1:1）：工作日进度（墙钟），下班冻结，阈值色三档
+   ⑤ 电池：**本班预算**进度（墙钟），下班冻结，阈值色三档
+   （PATCH005.3 有意偏离 design：分母由"设置小时数"改为本班预算，与表盘底轨同源——销 y.problems#7）
    ============================================================ */
 const batPct = ref(100);
 const batMid = ref(false);
@@ -491,7 +538,13 @@ function batteryRatio(): number {
   if (!props.day?.duty_started_at) {
     return 1;
   }
-  return clamp01(1 - (Date.now() - clockInMs.value) / autoOutMs.value);
+  // PATCH005.3：分母 = **本班预算**（本班打卡 + 今日剩余），与表盘底轨同源——多班/加班后
+  // 不再按"当天首次打卡 + 设置小时数"倒计时；预算为 0（到顶/超额）视为耗尽
+  const budget = shiftBudgetMs.value;
+  if (budget <= 0) {
+    return 0;
+  }
+  return clamp01(1 - (Date.now() - shiftStartMs.value) / budget);
 }
 
 function tickBattery(): void {
@@ -791,8 +844,15 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- ④ 打卡 pill（上班/下班；确认框由父组件持有） -->
-  <button class="pill-cast" type="button" @click="emit('clock', onDuty ? 'out' : 'in')">
+  <!-- ④ 打卡 pill（上班/下班；确认框由父组件持有）。PATCH005.3 到顶置灰：今日累计满 12h 后
+       上班钮点不开（与后端 DayBudgetExhausted 同一判据） -->
+  <button
+    class="pill-cast"
+    type="button"
+    :class="{ off: !onDuty && capReached }"
+    :disabled="!onDuty && capReached"
+    @click="emit('clock', onDuty ? 'out' : 'in')"
+  >
     <svg
       width="14"
       height="14"

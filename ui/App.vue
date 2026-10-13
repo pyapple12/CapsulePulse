@@ -11,6 +11,7 @@ import TimerCard from "./components/TimerCard.vue";
 import type { RecoveryNotice } from "./types";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
 import type { DaySummary, ReminderSettings } from "./types";
+import { OVERTIME_CAP_HOURS } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
 // 标题粒子化视觉件（design initTitleParticles 1:1，reduced-motion 内部退避静态文字）
@@ -282,16 +283,23 @@ function closeAutoOutPending(): void {
   }
 }
 
-/** 加班钮可见性（PL025.9）：已满 12h 或 设置本就是 12h → 加班等于拉满到同值，无意义即隐藏。
- * 依赖 autoOutLeft（框开着时每秒刷新）保证到点判定随之更新。 */
+/** 加班钮可见性（PATCH005.3）：**到顶**（今日上限已 12h，+4 无意义）或**跨日**（零点后本数据日
+ * 不再给加班，只给下班）→ 隐藏。依赖 autoOutLeft（框开着时每秒刷新）保证到点与跨零点判定随之更新。 */
 const canOvertime = computed(() => {
   void autoOutLeft.value;
-  const hours = settings.value?.workday_auto_out_hours ?? null;
-  const startedAt = day.value?.duty_started_at ?? null;
-  if (hours == null || startedAt == null || hours >= 12) {
+  const d = day.value;
+  if (d == null || d.duty_started_at == null) {
     return false;
   }
-  return Date.now() / 1000 < startedAt + 12 * 3600;
+  if (d.budget_hours >= OVERTIME_CAP_HOURS) {
+    return false; // 到顶
+  }
+  // 跨日：now 的日历日 ≠ 今日首次打卡的日历日（数据日 = 打卡日 ⇒ 与"当前班打卡日"等价）
+  const startDay = new Date(d.duty_started_at * 1000);
+  startDay.setHours(0, 0, 0, 0);
+  const nowDay = new Date();
+  nowDay.setHours(0, 0, 0, 0);
+  return startDay.getTime() === nowDay.getTime();
 });
 
 /** 自动下班框「下班」：立即打卡下班（后端按基准时刻记账） */
@@ -454,7 +462,6 @@ onUnmounted(() => {
         <TimerCard
           :day="day"
           :threshold-min="settings?.threshold_min ?? 50"
-          :target-hours="settings?.workday_auto_out_hours ?? null"
           @changed="onTimerChanged"
           @error="actionError = $event"
           @clock="onPillClick"
@@ -467,7 +474,6 @@ onUnmounted(() => {
       ref="statsViewEl"
       :open="statsOpen"
       :refresh-key="statsRefreshKey"
-      :auto-out-hours="settings?.workday_auto_out_hours ?? null"
       :veiled="confirmMode != null || autoOutDue != null"
     />
 
@@ -518,7 +524,7 @@ onUnmounted(() => {
     <ConfirmModal
       :open="autoOutDue != null"
       title="即将自动下班"
-      :message="`上班满 ${settings?.workday_auto_out_hours ?? 8} 小时，到点将自动下班并记账。`"
+      :message="`今日在岗累计满 ${day?.budget_hours ?? settings?.workday_auto_out_hours ?? 8} 小时，到点将自动下班并记账。`"
       :note="autoOutLeft > 0 ? `剩余 ${autoOutLeft} 秒` : '正在自动下班…'"
       ok-text="下班"
       cancel-text="加班"
@@ -535,6 +541,7 @@ onUnmounted(() => {
       :settings="settings"
       :error="saveError"
       :on-duty="day != null && day.duty_started_at != null && day.duty_ended_at == null"
+      :auto-out-locked="day != null && day.duty_started_at != null"
       @save="onSaveSettings"
     />
   </main>

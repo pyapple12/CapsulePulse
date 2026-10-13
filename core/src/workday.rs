@@ -139,6 +139,62 @@ pub fn auto_out_at(clock_in_at: i64, hours: u32) -> i64 {
     clock_in_at + i64::from(hours) * 3_600
 }
 
+/// 每次加班的步进（小时，PATCH005.3）：基准之上每点一次「加班」+4h，硬顶 [`OVERTIME_CAP_HOURS`]。
+pub const OVERTIME_STEP_HOURS: u32 = 4;
+
+/// 今日上限（小时，PATCH005.3 纯函数）：`基准 + 4h × 加班步数`，封顶 12h。
+/// 基准 = 当天第一次打卡时的自动下班小时数——因"整日锁定"当天内不可能变，故直接取设置值
+/// （不需要快照事件）。
+pub fn day_budget_hours(basis_hours: u32, overtime_steps: u32) -> u32 {
+    (basis_hours + OVERTIME_STEP_HOURS * overtime_steps).min(OVERTIME_CAP_HOURS)
+}
+
+/// 今日已累计在岗（秒，PATCH005.3 纯函数）：Σ 当日在岗窗口——班间空档不在窗口内、天然不计；
+/// 班内休息在窗口内，按"在岗"计入（用户定案：预算按在岗算，不是工作时长）。
+pub fn day_used_secs(windows: &[(i64, i64)]) -> i64 {
+    windows
+        .iter()
+        .map(|(start, end)| (end - start).max(0))
+        .sum()
+}
+
+/// 本班剩余预算（秒，PATCH005.3 纯函数）：今日上限 − 本班打卡前的今日已累计，不为负。
+pub fn shift_remaining_secs(budget_hours: u32, used_before_shift_secs: i64) -> i64 {
+    (i64::from(budget_hours) * 3_600 - used_before_shift_secs).max(0)
+}
+
+/// 本班到点时刻（PATCH005.3 纯函数）：本班打卡 + 本班剩余——自动下班武装与前端"轴末"同一口径。
+pub fn shift_deadline(clock_in_at: i64, remaining_secs: i64) -> i64 {
+    clock_in_at + remaining_secs
+}
+
+/// 加班裁决（PATCH005.3 纯函数）：到顶（上限已 12h，+4 无意义）或跨日（now 的日历日 ≠ 打卡日）
+/// → 拒（确认框只给「下班」）；否则允许。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OvertimeDecision {
+    /// 允许加班（+4h，封顶 12h）。
+    Allow,
+    /// 已达 12h 顶：加班无意义。
+    AtCap,
+    /// 已跨日（零点后）：本数据日不再给加班。
+    AcrossMidnight,
+}
+
+/// 见 [`OvertimeDecision`]：入参为两个**日历日零点**（now 所属 / 本班打卡所属）与今日上限小时。
+pub fn overtime_decision(
+    now_day_start: i64,
+    shift_day_start: i64,
+    budget_hours: u32,
+) -> OvertimeDecision {
+    if now_day_start != shift_day_start {
+        OvertimeDecision::AcrossMidnight
+    } else if budget_hours >= OVERTIME_CAP_HOURS {
+        OvertimeDecision::AtCap
+    } else {
+        OvertimeDecision::Allow
+    }
+}
+
 /// 兜底线程的一步决策（PL025.8 纯逻辑；线程只按它行动，故可脱离线程直测）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoOutStep {
@@ -325,7 +381,7 @@ pub fn duty_windows_for_day(
         }
     }
     let mut open_tail = false;
-    // 在岗末窗闭于 `now`；**同秒也保底 1 秒**（PATCH006.1）：打卡当秒若按零长丢窗，当日摘要
+    // 在岗末窗闭于 `now`；**同秒也保底 1 秒**（PATCH004.1）：打卡当秒若按零长丢窗，当日摘要
     // 就只剩上一班，"当前班起点 = 末个班间空档之后第一块（无空档则当天首块）"的推法会退回
     // 当天首块 → 表盘底轨蓝条短暂锚到上一班起点（被上一班色块盖住后恰好从块末露出），
     // 下一秒窗口非零才自纠。保底 1 秒让新班当秒即产块，锚点从第一帧就是打卡刻。
@@ -376,6 +432,13 @@ pub struct DaySummary {
     pub rest_secs: i64,
     /// 时间图谱区块（按时间序，Work/Rest 交替）。
     pub blocks: Vec<DayBlock>,
+    /// 今日上限小时数（PATCH005.3：基准 + 4h×加班步数、封顶 12h）——**仅今日有意义**，过去日为 0。
+    pub budget_hours: u32,
+    /// 今日已累计在岗秒数（PATCH005.3）——前端据此算"今日剩余"；过去日为 0。
+    pub used_secs: i64,
+    /// 本班剩余预算秒数（PATCH005.3：上限 − 本班前已累计）——表盘底轨跨度与"轴末"同一口径；
+    /// 未在岗（暂下班）与过去日为 0（那时不画蓝条、轴末取末段末尾）。
+    pub remaining_secs: i64,
 }
 
 /// 事件归约纯函数（PL025.6 窗口口径）：单日数据日的在岗窗口 + 事件流 → 三值 + 图谱区块
@@ -435,6 +498,10 @@ pub fn reduce_day(
         work_secs: 0,
         rest_secs: 0,
         blocks: Vec::new(),
+        // PATCH005.3：预算三字段由命令层按"今日"填充（归约层不感知预算）
+        budget_hours: 0,
+        used_secs: 0,
+        remaining_secs: 0,
     };
     let mut merged: Vec<(i64, i64)> = Vec::new();
     for &(ds, de) in windows {
@@ -597,7 +664,7 @@ mod tests {
         assert!(open, "末班未关 = 在岗中");
     }
 
-    /// 在岗末窗保底 1 秒（PATCH006.1）：打卡当秒 `now == start` 不得丢窗——否则当日摘要里
+    /// 在岗末窗保底 1 秒（PATCH004.1）：打卡当秒 `now == start` 不得丢窗——否则当日摘要里
     /// 只剩上一班，"当前班起点 = 末个班间空档之后"的推法会退回到当天首块（表盘底轨锚错）。
     #[test]
     fn duty_windows_open_tail_keeps_min_one_second() {
@@ -605,6 +672,63 @@ mod tests {
         let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 9 * HOUR);
         assert_eq!(w, vec![(DAY + 9 * HOUR, DAY + 9 * HOUR + 1)]);
         assert!(open, "同秒也是在岗中");
+    }
+
+    // —— PATCH005.3：今日预算与加班步进（纯函数层）——
+
+    /// 今日预算：基准 + 每次加班 4h、硬顶 12h（用户例：6 → 10 → 12；第二次 +4 实得 +2）。
+    #[test]
+    fn day_budget_steps_by_four_and_caps_at_twelve() {
+        assert_eq!(day_budget_hours(6, 0), 6);
+        assert_eq!(day_budget_hours(6, 1), 10);
+        assert_eq!(day_budget_hours(6, 2), 12, "第二次加班撞顶：+4 实得 +2");
+        assert_eq!(day_budget_hours(8, 1), 12);
+        assert_eq!(day_budget_hours(12, 1), 12, "基准即 12 时不再增长");
+    }
+
+    /// 今日已累计在岗 = Σ 当日在岗窗口（班间空档不在窗口里，天然不计）。
+    #[test]
+    fn day_used_secs_sums_duty_windows() {
+        assert_eq!(day_used_secs(&[]), 0);
+        assert_eq!(day_used_secs(&[(DAY, DAY + 4 * HOUR)]), 4 * HOUR);
+        // 同日两班：09–12（3h）+ 13–14（1h）= 4h；中间 12–13 空档不算
+        assert_eq!(
+            day_used_secs(&[
+                (DAY + 9 * HOUR, DAY + 12 * HOUR),
+                (DAY + 13 * HOUR, DAY + 14 * HOUR)
+            ]),
+            4 * HOUR
+        );
+    }
+
+    /// 本班剩余 = 今日上限 − 本班打卡前的已累计（用户例：基准 6h、第一班做 4h → 第二班只剩 2h）。
+    #[test]
+    fn shift_remaining_is_budget_minus_used_before_shift() {
+        assert_eq!(shift_remaining_secs(6, 0), 6 * HOUR);
+        assert_eq!(shift_remaining_secs(6, 4 * HOUR), 2 * HOUR);
+        assert_eq!(shift_remaining_secs(6, 6 * HOUR), 0);
+        assert_eq!(shift_remaining_secs(6, 7 * HOUR), 0, "超额不取负");
+    }
+
+    /// 本班到点时刻 = 本班打卡 + 剩余（前端"轴末 / 下班 HH:MM"同一口径）；零头 10 分钟照武装。
+    #[test]
+    fn shift_deadline_is_clock_in_plus_remaining() {
+        let clock_in = DAY + 13 * HOUR;
+        assert_eq!(shift_deadline(clock_in, 2 * HOUR), DAY + 15 * HOUR);
+        assert_eq!(shift_deadline(clock_in, 600), clock_in + 600, "零头照武装");
+    }
+
+    /// 加班裁决：到顶（上限已 12h）或跨日（now 日历日 ≠ 打卡日）→ 拒（只给下班）；否则允许。
+    #[test]
+    fn overtime_decision_blocks_at_cap_and_across_midnight() {
+        assert_eq!(overtime_decision(DAY, DAY, 6), OvertimeDecision::Allow);
+        assert_eq!(overtime_decision(DAY, DAY, 10), OvertimeDecision::Allow);
+        assert_eq!(overtime_decision(DAY, DAY, 12), OvertimeDecision::AtCap);
+        assert_eq!(
+            overtime_decision(DAY + 86_400, DAY, 6),
+            OvertimeDecision::AcrossMidnight,
+            "22:00 开、次日到点：跨日不给加班"
+        );
     }
 
     /// 脏数据兜底：前班未关又出现新打卡 → 前班在该刻结束（窗口不重叠）。

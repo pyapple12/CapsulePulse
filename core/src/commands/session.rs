@@ -187,7 +187,7 @@ pub(crate) fn persist_before_quit<C: Clock>(ctx: &AppContext<C>) -> Result<(), C
 
 /// 重开（先落库再归零；PATCH002 语义更新）：班内运行段先经 `close_running_segment` 收段落库
 /// （复用 pause_session_at 的落库/留痕/回滚链，FIX002.14），再在流水里留一条 `session_reset`
-/// 标记（PL027 定案 B5 / PATCH006.2：归约忽略它，但它是"累计基准 = 最后一条 `session_reset`
+/// 标记（PL027 定案 B5 / PATCH004.2：归约忽略它，但它是"累计基准 = 最后一条 `session_reset`
 /// 或本次打卡"的锚点），最后把会话重置为**归零休息**（`reset_to_paused`）——大计时器清零且
 /// **不自动开跑**，等用户按「工作」再计。未上班严格拒绝（重开隐含"在岗"前提）。
 /// 沿革：原实现 reset+start（立即开跑）并额外写一条 SegmentStart；新语义下重置落在休息态、
@@ -472,7 +472,7 @@ mod tests {
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
     }
 
-    /// PATCH006.2：重置必须落一条 `session_reset` 标记（PL027 定案 B5）。归约忽略它，但它是
+    /// PATCH004.2：重置必须落一条 `session_reset` 标记（PL027 定案 B5）。归约忽略它，但它是
     /// "大计时器累计基准 = 最后一条 `session_reset` 或本次打卡"的流水锚点——此前实现只收段、
     /// 无标记，于是重置后的累计在流水里无法重推（只存在于 runtime 缓存）。
     #[test]
