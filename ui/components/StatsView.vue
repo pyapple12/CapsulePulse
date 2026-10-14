@@ -124,6 +124,8 @@ interface GraphSeg {
 /** graphSvg 内的子节点引用（bars 复用更新 / comet 白纹容器） */
 const barsEl = ref<SVGGElement | null>(null);
 const cometEl = ref<SVGGElement | null>(null);
+/** PATCH006.3：duty（蓝）填色层——排在彗星之下（白纹只落在蓝段上） */
+const dutyEl = ref<SVGGElement | null>(null);
 const cometClipRect = ref<SVGRectElement | null>(null);
 
 const COMET = { speed: 18, spacing: 14 }; // px/s、px（design 定稿）
@@ -265,20 +267,35 @@ function renderGraph(): void {
   }
   nodes.push({ ts: endTs, ch: "D", kind: "end" });
 
-  while (bars.children.length < list.length) {
-    bars.append(document.createElementNS(SVG_NS, "rect"));
-  }
-  while (bars.children.length > list.length) {
-    bars.lastElementChild?.remove();
-  }
-  [...bars.children].forEach((rect, i) => {
-    const b = list[i]!;
-    rect.setAttribute("class", `graph-seg ${b.st}${b.active ? " active" : ""}`);
-    rect.setAttribute("x", b.x.toFixed(2));
-    rect.setAttribute("width", Math.max(0, b.w).toFixed(2));
-    rect.setAttribute("y", "0");
-    rect.setAttribute("height", "12");
-  });
+  // PATCH006.3：按 kind 分两组渲染（层序见模板）——duty（蓝）在彗星之下、work/rest/gap 在彗星之上；
+  // 组内沿用 design 的"数量对齐 + 改属性"复用策略（抽 syncGroup 两次调用，DRY）
+  const syncGroup = (g: SVGGElement | null, items: Bar[]): void => {
+    if (!g) {
+      return;
+    }
+    while (g.children.length < items.length) {
+      g.append(document.createElementNS(SVG_NS, "rect"));
+    }
+    while (g.children.length > items.length) {
+      g.lastElementChild?.remove();
+    }
+    [...g.children].forEach((rect, i) => {
+      const b = items[i]!;
+      rect.setAttribute("class", `graph-seg ${b.st}${b.active ? " active" : ""}`);
+      rect.setAttribute("x", b.x.toFixed(2));
+      rect.setAttribute("width", Math.max(0, b.w).toFixed(2));
+      rect.setAttribute("y", "0");
+      rect.setAttribute("height", "12");
+    });
+  };
+  syncGroup(
+    dutyEl.value,
+    list.filter((b) => b.st === "duty"),
+  );
+  syncGroup(
+    bars,
+    list.filter((b) => b.st !== "duty"),
+  );
 
   // nodes：数量变化整层重建（design：避免复用跨色渐变伪影）
   const nodesG = svg.querySelector<SVGGElement>("#graphNodes");
@@ -314,7 +331,9 @@ function renderGraph(): void {
   // PATCH004.3：行程与走廊同源——走廊右端 = 画布右缘 W（设计稿原口径；斜纹由此被裁剪层
   // rx=6 裁成半圆，端头圆角里也能看到斜纹），故 walk = 走廊宽 + 24（24 = 斜纹自身宽度：
   // 走完即完全退出走廊，回收时不留硬切）
-  cometWalk = isCurrentDataDay ? W - birthX + 24 : 0;
+  // PATCH006.2：白纹（斜条）= "在岗中"指示 ⇒ 判据用 onDutyToday（原 isCurrentDataDay 在
+  // "已下班但仍停在当前数据日"时照旧发射，出现"暂下班后斜纹仍满条飞"）
+  cometWalk = onDutyToday ? W - birthX + 24 : 0;
   if (comet.dataset.awake !== "1") {
     comet.dataset.awake = "1";
     cometEpoch =
@@ -348,7 +367,7 @@ function renderGraph(): void {
       );
     })();
   }
-  if (isCurrentDataDay && cometWalk > 24) {
+  if (onDutyToday && cometWalk > 24) {
     const wasHidden = comet.style.display === "none";
     comet.style.display = "";
     comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
@@ -730,6 +749,44 @@ const secTimer = window.setInterval(() => {
   renderDetail();
 }, 1000);
 
+// PATCH006.1：在岗节拍——"板开 && 在岗中"时每 5 秒**只重取当日明细**（橙红块与三值随时间增长）；
+// 关板 / 未上班 / 已下班一律停表（两个门都在 ⇒ 不空转）；周卡与总日均仍只在动作路径 `refresh()` 取。
+// 背景：纯时间推移原本不触发重取，而"在岗尾巴"右端在后端取数时已被 `min(now)` 钉死 ⇒ 块不会长。
+let dutyTick: number | undefined;
+function stopDutyTick(): void {
+  if (dutyTick !== undefined) {
+    window.clearInterval(dutyTick);
+    dutyTick = undefined;
+  }
+}
+/** 轻量重取：只刷当日明细（不含周卡 / 总日均） */
+async function refreshDayOnly(): Promise<void> {
+  try {
+    day.value = await invoke<DaySummary>("day_detail", { offset: offset.value });
+    loadError.value = "";
+  } catch (err) {
+    loadError.value = String(err);
+    console.error("day_detail 调用失败", err);
+  }
+}
+/** 按"板开 && 在岗中"启停节拍 */
+function syncDutyTick(): void {
+  const d = day.value;
+  const onDuty =
+    d?.duty_started_at != null && d.duty_ended_at == null && offset.value === props.dataDayOffset;
+  if (props.open && onDuty) {
+    if (dutyTick === undefined) {
+      dutyTick = window.setInterval(() => void refreshDayOnly(), 5_000);
+    }
+  } else {
+    stopDutyTick();
+  }
+}
+watch([() => props.open, day, offset, () => props.dataDayOffset], () => {
+  syncDutyTick();
+});
+onUnmounted(stopDutyTick);
+
 onUnmounted(() => {
   destroyed = true;
   glassBar?.destroy();
@@ -835,11 +892,14 @@ onUnmounted(() => {
                   </linearGradient>
                 </defs>
                 <rect class="ghost" width="100%" height="12" rx="6" />
-                <g id="graphBars" ref="barsEl" clip-path="url(#graphClip)"></g>
+                <!-- PATCH006.3：填色分两层——duty（蓝：预计/在岗带）排在彗星**之下**（白纹只落在蓝段上），
+                     work/rest/gap 排在彗星**之上**（随时间右长即自然盖掉白纹） -->
+                <g id="graphDuty" ref="dutyEl" clip-path="url(#graphClip)"></g>
                 <!-- 裁剪挂不动的外壳（clipPath 随引用元素坐标系走，挂平移组会被走廊带走） -->
                 <g clip-path="url(#graphClipComet)">
                   <g ref="cometEl"></g>
                 </g>
+                <g id="graphBars" ref="barsEl" clip-path="url(#graphClip)"></g>
                 <g id="graphNodes"></g>
               </svg>
             </div>

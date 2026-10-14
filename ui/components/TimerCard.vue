@@ -3,7 +3,14 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 // IPC DTO 镜像类型统一在 types.ts（单一来源 = Rust serde 结构）
-import { OVERTIME_CAP_HOURS, type DaySummary, type SessionStatus } from "../types";
+import {
+  BATTERY_RED_RATIO,
+  BATTERY_TOTAL_HOURS,
+  BATTERY_YELLOW_FLOOR,
+  OVERTIME_CAP_HOURS,
+  type DaySummary,
+  type SessionStatus,
+} from "../types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { pad } from "../format";
 
@@ -18,10 +25,12 @@ const emit = defineEmits<{
   clock: [direction: "in" | "out"];
 }>();
 
-// day = 当日明细（dial 弧段 + 电池的数据源）；thresholdMin = 沙漏周期
+// day = 当日明细（dial 弧段 + 电池的数据源）；thresholdMin = 沙漏周期；
+// autoOutHours = 今日基准（PATCH006.4：电池黄阈值 `max(30%, 1 − 基准/12)` 需要它）
 const props = defineProps<{
   day: DaySummary | null;
   thresholdMin: number;
+  autoOutHours: number;
 }>();
 
 const state = ref<"idle" | "running" | "paused">("idle");
@@ -519,8 +528,9 @@ watch(
 );
 
 /* ============================================================
-   ⑤ 电池：**本班预算**进度（墙钟），下班冻结，阈值色三档
-   （PATCH005.3 有意偏离 design：分母由"设置小时数"改为本班预算，与表盘底轨同源——销 y.problems#7）
+   ⑤ 电池（PATCH006.4 定案）：**今日 12h 总量**进度——电量 = 1 − 今日在岗累计 ÷ 12h；
+   黄 = max(30%, 1 − 基准/12)（"进入加班区就亮"，但不早于 30%）、红 = 25%（固定第 9h）；
+   下班冻结。取代 PATCH005.3 的"分母 = 本班预算"（点加班不再回血、开新班不再回满）
    ============================================================ */
 const batPct = ref(100);
 const batMid = ref(false);
@@ -531,6 +541,20 @@ function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
+/** PATCH006.4：取数时刻戳——电量分子 = 后端快照 `used_secs` + 自取数以来的墙钟增量（保住"每秒在走"） */
+let dayStampMs = Date.now();
+watch(
+  () => props.day,
+  () => {
+    dayStampMs = Date.now();
+  },
+);
+
+/** 今日在岗累计（毫秒；含班内休息、班间空档不计——与后端口径一致） */
+function dayUsedMs(): number {
+  return (props.day?.used_secs ?? 0) * 1000 + Math.max(0, Date.now() - dayStampMs);
+}
+
 function batteryRatio(): number {
   if (!onDuty.value && batFrozen != null) {
     return batFrozen;
@@ -538,20 +562,19 @@ function batteryRatio(): number {
   if (!props.day?.duty_started_at) {
     return 1;
   }
-  // PATCH005.3：分母 = **本班预算**（本班打卡 + 今日剩余），与表盘底轨同源——多班/加班后
-  // 不再按"当天首次打卡 + 设置小时数"倒计时；预算为 0（到顶/超额）视为耗尽
-  const budget = shiftBudgetMs.value;
-  if (budget <= 0) {
-    return 0;
-  }
-  return clamp01(1 - (Date.now() - shiftStartMs.value) / budget);
+  return clamp01(1 - dayUsedMs() / (BATTERY_TOTAL_HOURS * 3_600_000));
+}
+
+/** 黄阈值：进入加班区（今日累计 > 基准）即亮，但**不早于 30%**（基准 ≥9h 时固定 30%） */
+function yellowThreshold(): number {
+  return Math.max(BATTERY_YELLOW_FLOOR, 1 - props.autoOutHours / BATTERY_TOTAL_HOURS);
 }
 
 function tickBattery(): void {
   const ratio = batteryRatio();
   batPct.value = Math.round(ratio * 100);
-  batMid.value = ratio >= 0.2 && ratio < 0.45;
-  batLow.value = ratio < 0.2;
+  batLow.value = ratio <= BATTERY_RED_RATIO;
+  batMid.value = !batLow.value && ratio <= yellowThreshold();
 }
 
 // 下班瞬间冻结电量（design：confirmOk 同口径）；上班/新班解冻

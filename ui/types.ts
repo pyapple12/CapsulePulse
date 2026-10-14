@@ -16,6 +16,12 @@ export interface SessionStatus {
 /** 加班硬顶小时数（镜像 core/src/workday.rs `OVERTIME_CAP_HOURS`，单一来源在后端）：
  * 今日上限封顶于此值——到顶后加班钮隐藏、上班钮置灰（PATCH005.3）。 */
 export const OVERTIME_CAP_HOURS = 12;
+/** PATCH006.4 电池分母：固定 12h = 100%（人一天能干的总量，与硬顶同源） */
+export const BATTERY_TOTAL_HOURS = OVERTIME_CAP_HOURS;
+/** PATCH006.4 电池红阈值：≤25%（= 相对 12h 只剩 3h，固定第 9h 起红） */
+export const BATTERY_RED_RATIO = 0.25;
+/** PATCH006.4 电池黄阈值下限：黄 = max(30%, 1 − 基准/12) ⇒ 基准 ≥9h 时固定 30% */
+export const BATTERY_YELLOW_FLOOR = 0.3;
 
 /** stats 命令返回体（镜像 core/src/commands/stats.rs SessionStats） */
 export interface SessionStats {

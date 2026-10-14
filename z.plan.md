@@ -2593,3 +2593,70 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 **做法**：`core/src/storage.rs::Storage::init` 里 `conn.busy_timeout(Duration::from_millis(0))` ⇒ 写冲突**立即** `SQLITE_BUSY`；正常路径 app 是唯一写者（命令经 Mutex 串行、心跳同锁），归零不误伤。**探针已在复测通过后移除**（前后端各一处）。
 
 **附带修正（PATCH005.12 补）**：错误条模板**漏了 `<span class="dot">`**（其余三条都有）⇒ 红点 CSS 打在空处；已补回圆点，复测红点出现 ✓。
+
+---
+
+## 附录 PATCH006：统计板"在岗中"节拍刷新（2026-10-15 立项）
+
+### 一、PATCH006.1 统计板在岗节拍自取数（2026-10-15 立项；来源 = 用户目测"开着统计板静置，橙红块不长"）
+
+**问题（已核实，只读）**：`ui/components/StatsView.vue` 只在 **开板（`watch(() => props.open)`）/ `refreshKey` 变化（= 动作路径）/ 翻页（`watch(offset)`）/ 锚点变化（`watch(() => props.dataDayOffset)`）** 四处重取 `day_detail`；**纯时间推移不触发** ✗。且"在岗尾巴"右端在**后端取数那一刻**已被 `min(now)` 钉死（前端 1 秒 `secTimer` 只重渲染、取 `Math.min(b.end, now)`，`b.end` 为旧值 ⇒ 恒等）⇒ **不重取数，橙红块永不生长**。对照：计时页表盘走 App 的 30s `statsTimer` 会新（`App.vue:387` 的轮询只刷 App 自己的 `day`、**不** bump `statsRefreshKey`）⇒ 两块看板新鲜度不一致。
+
+**用户定案 = 乙 + 丙**：
+
+- **乙（自持节拍）**：由 **StatsView 自己**按固定节拍重取当日明细（体感最顺、不靠父组件代劳）；
+- **丙（开关，不空转）**：**仅当"板开着 **且** 在岗中"**才起表，其余一律停表：
+  - 关板 ⇒ 清表（`onUnmounted` 亦清）；板开但**未上班 / 已下班** ⇒ 不起表；
+  - 在岗中 ⇒ 每 **5 秒**重取一次；为省开销，节拍**只重取 `day_detail`**（当日明细 / 在岗尾巴 / 三值），周卡与总日均仍只在既有"动作"路径的 `refresh()` 里取（变化慢）。
+
+**验证**：`npx prettier --write ui/components/StatsView.vue` + `npx vue-tsc --noEmit` + `npm run build` + `cargo build`；live 三条——① 在岗中开板静置 ≥1 分钟 ⇒ **橙红块与三值跟随增长**；② 关板后**无**取数（无空转）；③ 未上班开板静置 ⇒ **不取数**。
+
+### 二、PATCH006.2 彗星白纹（斜条）改用"真在岗"判据（2026-10-15 立项；来源 = 用户目测"暂下班后斜纹仍在"）
+
+**问题（已核实，只读）**：`ui/components/StatsView.vue` 同一渲染函数里两套判据不一致——
+
+- **彗星白纹**（`#graphSvg .comet-stripe`，`fill: url(#gStripe)`，135° 斜带）用 `isCurrentDataDay`（:176 = `offset === dataDayOffset`）：`:317` 算 `cometWalk`、`:351` 决定显示 ⇒ **暂下班后数据日未变 ⇒ 照旧发射** ✗；
+- **在岗尾巴 / 轴末**用 `onDutyToday`（:177 = `isCurrentDataDay && d.duty_ended_at == null`）：`:201` / `:215` ✓。
+
+⇒ 暂下班（`duty_ended_at != null`）时尾巴与轴末正确停下、**斜纹却仍满条飞** ✗，十行之内自相矛盾；语义上白纹 = "在岗中"指示，应只在**真的在岗**时出现（用户 2026-10-15 定案）。
+
+**做法（`ui/components/StatsView.vue`，2 处）**：把彗星的两处门由 `isCurrentDataDay` 改 **`onDutyToday`**——
+
+- `:317` `cometWalk = onDutyToday ? W - birthX + 24 : 0;`
+- `:351` `if (onDutyToday && cometWalk > 24) { …显示… } else { …:363 隐藏并清已发射子节点… }`
+
+（`:363` 的隐藏分支本就会清空子节点 ⇒ **下班即净** ✓；与 006.1 的节拍互不耦合。）
+
+**验证**：`npx prettier --write ui/components/StatsView.vue` + `npx vue-tsc --noEmit` + `npm run build` + `cargo build`；live 两条——① **暂下班**（有班已结、但仍停在当前数据日）开统计板 ⇒ **无斜纹**、尾巴/轴末停在末段末尾；② **在岗中** ⇒ 斜纹照常飞（回归不破）。
+
+### 三、PATCH006.3 彗星白纹改画在「工作/休息块之下」（2026-10-15 立项；来源 = 用户目测"橙红与蓝条都被斜纹盖住"）
+
+**问题（用户目测 + 已核对层序）**：彗星白纹目前**压在最上层** ⇒ 斜条同时盖住**蓝（`duty` = 在岗 / 预计工作时长）**与**橙红（`work`）/ 绿（`rest`）**；语义上只有"预计未走到"的蓝段该有斜纹，走到的部分应被块盖住。
+
+**目标层序（自下而上）**：① `duty` 蓝 → ② 彗星白纹 → ③ `work` 橙红 / `rest` 绿 / 在岗尾巴 → ④ 节点。效果 = 斜纹**只在"现在 → 轴末"的蓝段**显形，橙红/绿随时间右长**自然盖掉** ✓；**下班后**轴末收到末段末尾 ⇒ 蓝段被完全盖住 ⇒ 斜纹自然消失 ✓。
+
+**做法（`ui/components/StatsView.vue`，仅调**构建顺序**，零逻辑改动）**：把"填色"拆两段渲染——先 `duty`（蓝）段 → 再 `#graphSvg` 的彗星 `<g ref="cometEl">` → 最后 `work`/`rest` 段 + 在岗尾巴；节点层维持最上。彗星自身 `transform` / `--walk` / `animation` / 两个 clip **一律不动**（发射点仍锚"D 前那个固定节点" ⇒ 不会出现"锚点随时间漂移"）。
+
+**验证**：`npx prettier --write ui/components/StatsView.vue` + `npx vue-tsc --noEmit` + `npm run build` + `cargo build`；live 三条——① 在岗中：**斜纹只在"现在 → 轴末"的蓝段**，橙红/绿上无斜纹；② 随工作推进：橙红右长**逐步盖掉**斜纹；③ 下班后：无斜纹。
+
+**与 006.2 的关系**：006.3 治**可见性**、006.2 治**空转**（动画门改 `onDutyToday`）⇒ 互补，建议一并落地。
+
+### 四、PATCH006.4 电池口径重定：12h 总量 + 30%/25% 色阶（2026-10-15 立项；来源 = 用户对"整日最满流程"的口径推演）
+
+**目标口径（用户定案）**：
+
+- **分母固定 12h = 100%**：`电量 = 1 − 今日在岗累计 ÷ 12h`（分子 = **今日在岗累计**，含本班到现在、含班内休息、**班间空档不计**；跨零点沿同一数据日连续）；
+- **黄阈值 = `max(30%, 1 − 基准 ÷ 12)`**：语义 = "进入加班区就亮黄"，但**最早不早于 30%**（⇒ 基准 ≥9h 时固定 30%）；
+- **红阈值 = 25% 固定**（= 相对 12h 只剩 3h ⇒ 固定在第 9h）；
+- 色带：绿 > 黄阈值；黄 = 红阈值 < 电量 ≤ 黄阈值；红 ≤ 25%。**不再需要"红优先"特例**（30% 下限已把黄抬到红之上）。
+
+**与现状的差异（行为反转，已逐条与用户确认）**：① 点「加班」**不再回血**（分母是死的，加班只延后到点时刻）；② **开新班不再回满**（当天连续，上一班用掉的照算）；③ 分母不再 = 本班预算（PATCH005.3 的"分母改本班预算"**被本条取代**）。
+
+**做法（`ui/components/TimerCard.vue` + `ui/types.ts`）**：
+
+- `shiftBudgetMs`（:209-211，现 = `day.remaining_secs * 1000`）**退役**；改由 **12h 常量 + 今日在岗累计**驱动；
+- `batteryRatio()`（:534，现 = `1 − (Date.now() − shiftStartMs) / shiftBudgetMs`）改 = `1 − dayUsedMs / 12h`；`dayUsedMs` 取 `day.used_secs`（后端已给"今日已用/在岗累计"；与 :215 `capReached` 同源）**再加"本班自上次取数以来的墙钟增量"**（保住每秒在走的实时感，避免只在取数时刻跳变）；
+- 三档色：现 `batMid`（0.2–0.45）/`batLow`（<0.2）改为 **黄 = `≤ 黄阈值 && > 25%`、红 = `≤ 25%`**；阈值 = `max(0.30, 1 − 基准小时/12)`（基准取自 `settings.workday_auto_out_hours`，经 props 已可达）；
+- 12h / 25% / 30% 落 `ui/types.ts` 常量（与 `OVERTIME_CAP_HOURS` 并列，保持单一来源）。
+
+**验证**：`npx prettier --write ui/components/TimerCard.vue ui/types.ts` + `npx vue-tsc --noEmit` + `npm run build` + `cargo build`；live 三条——① 基准 6h：上班 100%、6h 处 **50% 转黄**、9h 处 **25% 转红**、12h 处 0% 并随自动下班冻结；② 基准 ≥9h（如 10h）：黄**固定 30%**、红 25%（不被红吃掉）；③ 点「加班」电量**不跳回**、开新班**不回满**（当天连续）。

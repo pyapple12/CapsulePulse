@@ -510,6 +510,7 @@ onUnmounted(() => {
         <TimerCard
           :day="day"
           :threshold-min="settings?.threshold_min ?? 50"
+          :auto-out-hours="settings?.workday_auto_out_hours ?? 8"
           @changed="onTimerChanged"
           @error="actionError = $event"
           @clock="onPillClick"
