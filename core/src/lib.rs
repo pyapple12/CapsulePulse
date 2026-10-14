@@ -9,10 +9,13 @@
 //! macOS/Linux 延后（y.problems.md #1）。
 
 pub mod commands;
+pub mod hotkey;
+pub mod hover;
 pub mod period;
 pub mod reminder;
 pub mod session;
 pub mod settings;
+pub mod snap;
 pub mod storage;
 pub mod workday;
 
@@ -20,27 +23,288 @@ mod diag;
 mod glass_backdrop;
 mod paths;
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WindowEvent,
-};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-
+use crate::commands::reminder::{HotkeyAction, PrefKind};
 use crate::commands::{AppContext, AutoOutWatch};
 use crate::reminder::ReminderFire;
 use crate::session::WorkSession;
 use crate::settings::{ReminderSettings, WindowPos};
 use crate::storage::Storage;
 use crate::workday::WorkdayState;
+use tauri::{
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent,
+};
 
 /// 运行期警告双写：eprintln（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
 /// 文件日志是唯一落点——FIX003.8）。仅用于失败不中断主流程的容错路径。
 pub(crate) fn warn_diag(msg: &str) {
     eprintln!("{msg}");
     diag::log(msg);
+}
+
+// —— 贴边吸附状态机（PL028.3，抄 CT PL017.4「A 案松手吸附」）——
+// 松手判定（CT 三轮实测修正）：**左键状态为准，Moved 静默为辅**——鼠标悬停 / 慢速拖动
+// 都会造成 Moved 静默超过阈值，仅凭静默会在拖动中误吸（"还没松手就吸走又回到手里"）；
+// 左键按住 = 必在拖动，绝不吸附。启动恢复的单次程序性 Moved 左键未按 ⇒ 不置位 ⇒ 不吸。
+/// 拖动静默阈值（ms）：置位判定与松手判定共用（两处必须同值，否则吸附手感错乱）。
+const DRAG_QUIET_MS: u64 = 150;
+static LAST_MOVED_MS: AtomicU64 = AtomicU64::new(0);
+static DRAG_ACTIVE: AtomicBool = AtomicBool::new(false);
+static DRAG_SNAP_PENDING: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+mod win_input {
+    /// 鼠标左键是否按下（GetAsyncKeyState 高位 = 物理 / 合成按下中）
+    pub fn left_down() -> bool {
+        const VK_LBUTTON: i32 = 0x01;
+        const PRESSED: u16 = 0x8000;
+        unsafe { (GetAsyncKeyState(VK_LBUTTON) as u16) & PRESSED != 0 }
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetAsyncKeyState(v_key: i32) -> i16;
+    }
+}
+
+/// 非 Windows 空桩（调用点零 cfg）：无 Win32 键态查询，恒"未按下"——吸附状态机退化为
+/// 仅靠 Moved 静默判定（macOS/Linux 行为面随 [problems#1] 一并实机验证）。
+#[cfg(not(target_os = "windows"))]
+mod win_input {
+    /// 鼠标左键是否按下（非 Windows 空桩：恒 false）
+    pub fn left_down() -> bool {
+        false
+    }
+}
+
+/// 当前时刻（Unix 毫秒）：吸附状态机的时间源（只用于算间隔，不要求单调性）。
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 贴边吸附判定与落位（PL028.3）：读开关（锁中毒跳过——吸附是体验增强层，容错白名单
+/// 登记项）→ 取所在显示器 → [`snap::snap_position`] 算修正位 → **与当前位不同才**
+/// `set_position`（幂等防环：吸附位仍在阈值内，不判等会 Moved→snap→Moved 死循环）。
+/// 坐标基准 = **视觉（client）矩形**：无边框窗可能带不可见 resize 边，outer 矩形直接
+/// 判定会视觉偏移；用 inner_position/inner_size 取视觉矩形参与判定，落位换算回 outer
+/// 坐标（偏移 = inner − outer 自动吸收缩放与隐形边——CT 截图像素实测结论）。
+fn snap_if_needed(window: &tauri::Window) {
+    let snap_on = window
+        .app_handle()
+        .state::<AppContext>()
+        .settings
+        .lock()
+        .map(|s| s.snap_to_edge)
+        .unwrap_or_else(|err| {
+            warn_diag(&format!("贴边吸附：设置锁读取失败，跳过吸附：{err:?}"));
+            false
+        });
+    if !snap_on {
+        return;
+    }
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let Ok(outer) = window.outer_position() else {
+        return;
+    };
+    let Ok(inner) = window.inner_position() else {
+        return;
+    };
+    let Ok(vsize) = window.inner_size() else {
+        return;
+    };
+    let mp = monitor.position();
+    let ms = monitor.size();
+    let (sx, sy) = snap::snap_position(
+        snap::RectI32 {
+            x: inner.x,
+            y: inner.y,
+            w: vsize.width as i32,
+            h: vsize.height as i32,
+        },
+        snap::RectI32 {
+            x: mp.x,
+            y: mp.y,
+            w: ms.width as i32,
+            h: ms.height as i32,
+        },
+    );
+    // 视觉目标 → outer 目标（隐形边偏移 = inner − outer）
+    let (tx, ty) = (sx - (inner.x - outer.x), sy - (inner.y - outer.y));
+    if (tx, ty) != (outer.x, outer.y) {
+        if let Err(err) = window.set_position(PhysicalPosition::new(tx, ty)) {
+            warn_diag(&format!("贴边吸附落位失败：{err}"));
+        }
+    }
+}
+
+// —— 托盘 hover 今日概览窗（PL028.1）——
+// 几何与节奏（抄 CT PL018 预览窗形态，收敛为一进一出两拍）：
+// Enter → 记录图标矩形 + 停留阈值后仍悬停才显示（防"划过托盘"误触）；Leave → 延迟收起
+// （给"从图标移向悬浮窗"留缓冲，防闪烁）。光标判据仅 Windows 有（非 Windows 退化为纯事件驱动）。
+/// 悬浮窗宽度（逻辑 px；高度按内容行数在显示前由后端设定——两端同源）
+const HOVER_WIDTH: f64 = 200.0;
+/// 一行态（未在岗）高度
+const HOVER_ONE_LINE_HEIGHT: f64 = 46.0;
+/// 三行态（在岗 / 暂下班）高度
+const HOVER_THREE_LINE_HEIGHT: f64 = 112.0;
+/// 悬浮窗与托盘图标的间距（物理 px）
+const HOVER_ANCHOR_MARGIN: i32 = 8;
+/// 悬停停留阈值（ms）：防划过误触
+const HOVER_DWELL_MS: u64 = 400;
+/// 离开后延迟收起（ms）：防图标↔悬浮窗之间的闪烁
+const HOVER_HIDE_DELAY_MS: u64 = 250;
+
+/// 托盘图标矩形（物理坐标 x/y/w/h；Enter 事件记录，供锚定与光标判据）——未 hover 过为 None
+static HOVER_ANCHOR: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
+
+#[cfg(target_os = "windows")]
+mod win_cursor {
+    /// Win32 POINT（物理像素）
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    /// 当前光标位置（物理像素；取失败回 None）
+    pub fn cursor_pos() -> Option<(i32, i32)> {
+        let mut pt = Point { x: 0, y: 0 };
+        let ok = unsafe { GetCursorPos(&mut pt) };
+        (ok != 0).then_some((pt.x, pt.y))
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetCursorPos(point: *mut Point) -> i32;
+    }
+}
+
+/// 非 Windows 空桩（调用点零 cfg）：无光标查询 ⇒ 判据退化为"纯事件驱动"
+/// （Enter 延迟后显示、Leave 延迟后收起），随 [problems#1] 跨平台实机一并验证。
+#[cfg(not(target_os = "windows"))]
+mod win_cursor {
+    /// 当前光标位置（非 Windows 空桩：恒 None = 无查询能力）
+    pub fn cursor_pos() -> Option<(i32, i32)> {
+        None
+    }
+}
+
+/// 光标是否仍在托盘图标矩形内：`Some(true/false)` 为判定结果，`None` = 本平台无查询能力
+/// （Enter 路径视为"仍在"继续、Leave 路径视为"已离开"收起——纯事件驱动语义）。
+fn cursor_in_tray() -> Option<bool> {
+    let anchor = match HOVER_ANCHOR.lock() {
+        Ok(slot) => *slot,
+        Err(_) => None,
+    };
+    let Some((x, y, w, h)) = anchor else {
+        return Some(false);
+    };
+    win_cursor::cursor_pos().map(|(cx, cy)| cx >= x && cx < x + w && cy >= y && cy < y + h)
+}
+
+/// 悬浮窗锚定（PL028.1，抄 CT 预览窗几何）：右缘对齐托盘图标右缘；默认图标上方，屏上缘
+/// 放不下则翻到下方（任务栏在顶部场景）。锚点未记录则跳过（启动后未 hover 过，窗也从未显示）。
+fn anchor_tray_hover(window: &tauri::WebviewWindow) {
+    let anchor = match HOVER_ANCHOR.lock() {
+        Ok(slot) => *slot,
+        Err(_) => None,
+    };
+    let Some((x, y, w, h)) = anchor else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let px = x + w - size.width as i32; // 右对齐托盘图标
+    let mut py = y - size.height as i32 - HOVER_ANCHOR_MARGIN; // 默认图标上方
+    if py < 0 {
+        py = y + h + HOVER_ANCHOR_MARGIN; // 翻到下方
+    }
+    if let Err(err) = window.set_position(PhysicalPosition::new(px, py)) {
+        warn_diag(&format!("hover 窗定位失败：{err}"));
+    }
+}
+
+/// 显示悬浮窗（PL028.1）：聚合概览 → 按行数定尺寸 → 推送 `hover-update`（前端据此渲染）
+/// → 锚定 → show。任一步失败落日志（装饰层不阻断主流程——容错白名单登记项）。
+fn show_tray_hover(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("tray-hover") else {
+        return;
+    };
+    let ctx = app.state::<AppContext>();
+    let summary = match commands::hover::hover_summary_inner(&ctx) {
+        Ok(summary) => summary,
+        Err(err) => {
+            warn_diag(&format!("hover 概览聚合失败（不显示）：{err}"));
+            return;
+        }
+    };
+    let height = if summary.single_line {
+        HOVER_ONE_LINE_HEIGHT
+    } else {
+        HOVER_THREE_LINE_HEIGHT
+    };
+    if let Err(err) = window.set_size(tauri::LogicalSize::new(HOVER_WIDTH, height)) {
+        warn_diag(&format!("hover 窗尺寸设置失败：{err}"));
+    }
+    if let Err(err) = window.emit_to("tray-hover", "hover-update", &summary) {
+        warn_diag(&format!("hover 概览推送失败：{err}"));
+    }
+    anchor_tray_hover(&window);
+    if let Err(err) = window.show() {
+        warn_diag(&format!("hover 窗显示失败：{err}"));
+    }
+}
+
+/// 收起悬浮窗（PL028.1；失败仅日志）。
+fn hide_tray_hover(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("tray-hover") else {
+        return;
+    };
+    if let Err(err) = window.hide() {
+        warn_diag(&format!("hover 窗收起失败：{err}"));
+    }
+}
+
+/// 托盘图标悬停进入（PL028.1）：记录图标矩形 → 停留阈值后仍悬停才显示（防划过误触）。
+fn on_tray_hover_enter(app: &AppHandle, rect: tauri::Rect) {
+    let (tauri::Position::Physical(pos), tauri::Size::Physical(size)) = (rect.position, rect.size)
+    else {
+        return;
+    };
+    if let Ok(mut slot) = HOVER_ANCHOR.lock() {
+        *slot = Some((pos.x, pos.y, size.width as i32, size.height as i32));
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(HOVER_DWELL_MS));
+        if cursor_in_tray() == Some(false) {
+            return; // 已划过 / 已移开：不显示
+        }
+        show_tray_hover(&handle);
+    });
+}
+
+/// 托盘图标悬停离开（PL028.1）：延迟收起（缓冲"从图标移向悬浮窗"，防闪烁）。
+fn on_tray_hover_leave(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(HOVER_HIDE_DELAY_MS));
+        if cursor_in_tray() == Some(true) {
+            return; // 又回到图标上：保持显示
+        }
+        hide_tray_hover(&handle);
+    });
 }
 
 /// 显示主窗口并聚焦（还原最小化；失败逐项记日志，不中断流程）。
@@ -155,7 +419,7 @@ fn save_window_position(app: &AppHandle) {
 }
 
 /// 主窗口显隐切换（托盘单击、托盘菜单、Alt+Shift+S 共用）。
-fn toggle_main_window(app: &AppHandle) {
+pub(crate) fn toggle_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -170,6 +434,101 @@ fn toggle_main_window(app: &AppHandle) {
     }
 }
 
+/// 窗口偏好全量同步（PL028.3 单一同步出口）：广播 `prefs-changed`（设置面板回显）+
+/// 刷新托盘勾选态——设置面板与托盘菜单双入口的改动都经此收口。
+pub(crate) fn sync_prefs_ui(app: &AppHandle) {
+    let ctx = app.state::<AppContext>();
+    commands::reminder::emit_prefs_changed(app, &ctx);
+    refresh_tray_menu(app);
+}
+
+/// 托盘窗口偏好切换（PL028.3）：读当前值取反 → 落库 + 置顶即时生效 → 双入口同步。
+/// 任一步失败落日志（勾选态由下次事实源读取纠正——ctx 未变即事实未变）。
+fn toggle_window_pref(app: &AppHandle, kind: PrefKind) {
+    let ctx = app.state::<AppContext>();
+    let current = match commands::reminder::window_pref(&ctx, kind) {
+        Ok(value) => value,
+        Err(err) => {
+            warn_diag(&format!("托盘偏好读取失败（未切换）：{err}"));
+            return;
+        }
+    };
+    if let Err(err) = commands::reminder::set_window_pref(app, &ctx, kind, !current) {
+        warn_diag(&format!("托盘偏好切换失败（未生效）：{err}"));
+        return;
+    }
+    sync_prefs_ui(app);
+}
+
+/// 构建托盘菜单（PL028.3）：显示/隐藏 + 开始/暂停 + 分隔线 + **窗口置顶 / 贴边吸附**
+/// （`CheckMenuItem`，勾选态 = 设置事实源）+ 退出。重建即勾选态刷新（[`refresh_tray_menu`]）。
+fn build_tray_menu(
+    manager: &impl Manager<tauri::Wry>,
+    always_on_top: bool,
+    snap_to_edge: bool,
+) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let toggle_visible =
+        MenuItem::with_id(manager, "toggle_visible", "显示/隐藏", true, None::<&str>)?;
+    let toggle_timer = MenuItem::with_id(manager, "toggle_timer", "开始/暂停", true, None::<&str>)?;
+    let on_top = CheckMenuItem::with_id(
+        manager,
+        "toggle_always_on_top",
+        "窗口置顶",
+        true,
+        always_on_top,
+        None::<&str>,
+    )?;
+    let snap = CheckMenuItem::with_id(
+        manager,
+        "toggle_snap_to_edge",
+        "贴边吸附",
+        true,
+        snap_to_edge,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(manager, "quit", "退出", true, None::<&str>)?;
+    let sep_a = PredefinedMenuItem::separator(manager)?;
+    let sep_b = PredefinedMenuItem::separator(manager)?;
+    Ok(Menu::with_items(
+        manager,
+        &[
+            &toggle_visible,
+            &toggle_timer,
+            &sep_a,
+            &on_top,
+            &snap,
+            &sep_b,
+            &quit,
+        ],
+    )?)
+}
+
+/// 托盘菜单勾选态刷新（PL028.3）：`TrayIcon` 只有 `set_menu`、无菜单读取口 ⇒ 按设置
+/// 事实源**重建菜单并回灌**。失败落日志（托盘为体验层，下次刷新自愈）。
+fn refresh_tray_menu(app: &AppHandle) {
+    let ctx = app.state::<AppContext>();
+    let (on_top, snap) = match ctx.settings.lock() {
+        Ok(settings) => (settings.always_on_top, settings.snap_to_edge),
+        Err(err) => {
+            warn_diag(&format!("设置锁中毒，托盘勾选态未刷新：{err:?}"));
+            return;
+        }
+    };
+    let menu = match build_tray_menu(app, on_top, snap) {
+        Ok(menu) => menu,
+        Err(err) => {
+            warn_diag(&format!("托盘菜单重建失败（勾选态未刷新）：{err}"));
+            return;
+        }
+    };
+    let Some(tray) = app.tray_by_id("main-tray") else {
+        return;
+    };
+    if let Err(err) = tray.set_menu(Some(menu)) {
+        warn_diag(&format!("托盘菜单刷新失败：{err}"));
+    }
+}
+
 /// 托盘菜单动作分发（按菜单项 id；计时切换与退出落库复用命令层自由函数）。
 fn handle_action(app: &AppHandle, id: &str) {
     match id {
@@ -180,6 +539,9 @@ fn handle_action(app: &AppHandle, id: &str) {
                 warn_diag(&format!("计时切换失败：{err}"));
             }
         }
+        // PL028.3：两项窗口偏好（勾选态即当前值，点击 = 取反）
+        "toggle_always_on_top" => toggle_window_pref(app, PrefKind::AlwaysOnTop),
+        "toggle_snap_to_edge" => toggle_window_pref(app, PrefKind::SnapToEdge),
         "quit" => {
             let ctx = app.state::<AppContext>();
             // 位置记忆（PATCH001.4）：托盘退出走 app.exit(0)、不经 CloseRequested，此处补一次
@@ -194,12 +556,18 @@ fn handle_action(app: &AppHandle, id: &str) {
     }
 }
 
-/// 构建托盘：应用图标 + 菜单（显示/隐藏、开始/暂停、退出）；左键单击 = 显隐切换。
+/// 构建托盘：应用图标 + 菜单（显示/隐藏、开始/暂停、窗口置顶、贴边吸附、退出）；
+/// 左键单击 = 显隐切换。菜单项勾选态按 config 初始化（PL028.3）。
 fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let toggle_visible = MenuItem::with_id(app, "toggle_visible", "显示/隐藏", true, None::<&str>)?;
-    let toggle_timer = MenuItem::with_id(app, "toggle_timer", "开始/暂停", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&toggle_visible, &toggle_timer, &quit])?;
+    let (on_top, snap) = {
+        let ctx = app.state::<AppContext>();
+        let settings = ctx
+            .settings
+            .lock()
+            .map_err(|err| format!("设置锁中毒，托盘无法构建：{err:?}"))?;
+        (settings.always_on_top, settings.snap_to_edge)
+    };
+    let menu = build_tray_menu(app, on_top, snap)?;
     let icon = app
         .default_window_icon()
         .ok_or("缺少应用图标（tauri.conf.json bundle.icon），托盘无法构建")?;
@@ -209,38 +577,51 @@ fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| handle_action(app, event.id.as_ref()))
-        .on_tray_icon_event(|tray, event| {
+        .on_tray_icon_event(|tray, event| match event {
             // 左键单击 = 显隐切换；右键弹菜单（show_menu_on_left_click 已关）
-            if let TrayIconEvent::Click {
+            TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } = event
-            {
-                toggle_main_window(tray.app_handle());
-            }
+            } => toggle_main_window(tray.app_handle()),
+            // 右键（原生菜单将弹出）：先收掉 hover 概览窗——它恒置顶，会浮在菜单之上
+            TrayIconEvent::Click {
+                button: MouseButton::Right,
+                ..
+            } => hide_tray_hover(tray.app_handle()),
+            // PL028.1：悬停托盘图标 → 今日概览悬浮窗（停留阈值 + 光标判据防误触）
+            TrayIconEvent::Enter { rect, .. } => on_tray_hover_enter(tray.app_handle(), rect),
+            TrayIconEvent::Leave { .. } => on_tray_hover_leave(tray.app_handle()),
+            _ => {}
         })
         .build(app)?;
     Ok(())
 }
 
-/// 注册全局热键：Alt+Shift+P 计时切换、Alt+Shift+S 窗口显隐（Rust 侧注册，不经前端 IPC）。
+/// 注册全局热键（PL028.2：组合由设置驱动，Rust 侧注册不经前端 IPC）——窗口显隐切换
+/// （缺省 `Alt+Shift+S`）+ 工作/休息切换（缺省 `Alt+Shift+P`）。单条注册失败**仅落日志
+/// 不阻断启动**（热键是便利层；面板里录新组合即可即时恢复——容错白名单登记项）。
 fn register_global_shortcuts(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    app.global_shortcut()
-        .on_shortcut("Alt+Shift+P", |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                let ctx = app.state::<AppContext>();
-                if let Err(err) = commands::session::toggle_session(&ctx) {
-                    warn_diag(&format!("计时切换失败：{err}"));
-                }
-            }
-        })?;
-    app.global_shortcut()
-        .on_shortcut("Alt+Shift+S", |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                toggle_main_window(app);
-            }
-        })?;
+    let (visible, timer) = {
+        let ctx = app.state::<AppContext>();
+        let settings = ctx
+            .settings
+            .lock()
+            .map_err(|err| format!("设置锁中毒，热键未注册：{err:?}"))?;
+        (
+            settings.hotkey_toggle_visible.clone(),
+            settings.hotkey_toggle_timer.clone(),
+        )
+    };
+    let handle = app.handle().clone();
+    for (action, combo) in [
+        (HotkeyAction::ToggleVisible, visible),
+        (HotkeyAction::ToggleTimer, timer),
+    ] {
+        if let Err(err) = commands::reminder::register_action(&handle, action, &combo) {
+            warn_diag(&format!("全局热键注册失败（{combo}）：{err}"));
+        }
+    }
     Ok(())
 }
 
@@ -321,6 +702,8 @@ pub fn run() {
             commands::stats::session_stats,
             commands::reminder::get_settings,
             commands::reminder::set_settings,
+            commands::reminder::set_hotkey,
+            commands::hover::tray_hover,
             commands::workday::clock_in,
             commands::workday::clock_out,
             commands::workday::overtime,
@@ -335,6 +718,41 @@ pub fn run() {
                 api.prevent_close();
                 if let Err(err) = hide_main_window(window.app_handle()) {
                     warn_diag(&err);
+                }
+            }
+            if let WindowEvent::Moved(_) = event {
+                // PL028.3：吸附状态机只服务主窗——其它窗（无边框浮层等）的 Moved 不入
+                // （时间戳污染 / 误吸附；CT P2-3 坑）
+                if window.label() != "main" {
+                    return;
+                }
+                // 贴边吸附状态机（PL028.3）：Moved 更新时间戳；左键按住（真拖动，含悬停 /
+                // 慢速——静默判定会误吸）或间隔不超 DRAG_QUIET_MS 置 DRAG_ACTIVE；
+                // pending 单线程守到"左键已松 + 静默满 DRAG_QUIET_MS"→ 吸附一次
+                let now = now_ms();
+                let last = LAST_MOVED_MS.swap(now, Ordering::Relaxed);
+                let dragging = now.saturating_sub(last) <= DRAG_QUIET_MS || win_input::left_down();
+                if dragging {
+                    DRAG_ACTIVE.store(true, Ordering::Relaxed);
+                }
+                if !DRAG_SNAP_PENDING.swap(true, Ordering::Relaxed) {
+                    let win = window.clone();
+                    std::thread::spawn(move || loop {
+                        std::thread::sleep(Duration::from_millis(100));
+                        if win_input::left_down() {
+                            continue; // 左键仍按住 = 还在拖（悬停 / 慢速不误吸）
+                        }
+                        if now_ms().saturating_sub(LAST_MOVED_MS.load(Ordering::Relaxed))
+                            < DRAG_QUIET_MS
+                        {
+                            continue; // 刚松手还在惯性 / 最后移动
+                        }
+                        DRAG_SNAP_PENDING.store(false, Ordering::Relaxed);
+                        if DRAG_ACTIVE.swap(false, Ordering::Relaxed) {
+                            snap_if_needed(&win);
+                        }
+                        break;
+                    });
                 }
             }
             // 焦点联动分态纱（PL021.4 CT 定案）：失焦 30% 纱、聚焦 0% 纱（桌面直透）——
@@ -368,8 +786,42 @@ pub fn run() {
                 if let Err(err) = restore_window_position(app, &window) {
                     warn_diag(&err);
                 }
+                // 置顶按 config 应用（PL028.3）：失败仅日志——设置已落库，下次启动重试即自愈
+                let on_top = app
+                    .state::<AppContext>()
+                    .settings
+                    .lock()
+                    .map(|s| s.always_on_top)
+                    .unwrap_or(false);
+                if let Err(err) = window.set_always_on_top(on_top) {
+                    warn_diag(&format!("启动置顶应用失败：{err}"));
+                }
                 glass_backdrop::hide_active_border(&window);
                 glass_backdrop::apply_round_corners(&window);
+            }
+            // 托盘 hover 概览窗（PL028.1）：屏外创建 + visible(true) 让 webview 首绘即完成，
+            // build 后立即 hide（CT 预览窗同款——隐藏创建会首 hover 空窗；屏外 show 会被
+            // Windows clamp 回可见区留残影）。focusable(false)：点击不抢系统焦点。
+            let hover = tauri::WebviewWindowBuilder::new(
+                app,
+                "tray-hover",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("CapsulePulse 概览")
+            .position(-2000.0, -2000.0)
+            .inner_size(HOVER_WIDTH, HOVER_ONE_LINE_HEIGHT)
+            .transparent(true)
+            .decorations(false)
+            .skip_taskbar(true)
+            .resizable(false)
+            .visible(true)
+            .focused(false)
+            .focusable(false)
+            .always_on_top(true)
+            .shadow(false)
+            .build()?;
+            if let Err(err) = hover.hide() {
+                warn_diag(&format!("hover 窗首绘后隐藏失败：{err}"));
             }
             build_tray(app)?;
             register_global_shortcuts(app)?;

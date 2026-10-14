@@ -45,8 +45,8 @@ impl ReminderFire {
         due
     }
 
-    /// 段内上次触发点（只读视图，仅测试断言用——生产链不读此状态）。
-    #[cfg(test)]
+    /// 段内上次触发点（PL028.1 起生产链也读：托盘 hover 概览据此算"距下次提醒"倒计时；
+    /// 只读视图，不改状态）。
     pub fn last_fired(&self) -> Option<Duration> {
         self.last_fired
     }

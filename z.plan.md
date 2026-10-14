@@ -2611,6 +2611,71 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 
 **验证**：`npx prettier --write ui/components/StatsView.vue` + `npx vue-tsc --noEmit` + `npm run build` + `cargo build`；live 三条——① 在岗中开板静置 ≥1 分钟 ⇒ **橙红块与三值跟随增长**；② 关板后**无**取数（无空转）；③ 未上班开板静置 ⇒ **不取数**。
 
+---
+
+## 附录 PL028：托盘悬浮概览 + 快捷键自定义 + 贴边/置顶 + 确认框取消（2026-10-15 立项）
+
+> 来源：用户盘点"设置项缺失"后定案的本版范围（**设置面板本版不加其它项**：A 全不加 / B 不加 / C 只加快捷键 / D·E 全缓）。
+> 用户定案要点：① hover 内容 = **今日概览**（四种状态、行①标签互斥三态、未上班时**窗口只有一行高**）；② 快捷键**全盘抄 CT**（动作仅两条）；③ 贴边**默认开** / 置顶**默认不开**；④ 打卡确认框补「取消」。
+
+### 一、PL028.1 托盘图标 hover 悬浮概览（抄 CT PL018 形态）
+
+**目标**：悬停托盘图标 ⇒ 弹**自绘悬浮窗**（不抢焦点、点外收起、屏右缘钳制），内容 = 今日概览：
+
+| 状态                   | 窗口高度   | 行①                   | 行②                | 行③                 |
+| ---------------------- | ---------- | --------------------- | ------------------ | ------------------- |
+| 未上班（今天无打卡）   | **一行高** | 「未在岗」            | —                  | —                   |
+| 在岗 · 正班            | 三行       | 「正班 剩余 h m」     | 工作 h m　休息 h m | 离休息提醒 x.x 分钟 |
+| 在岗 · 加班 1 次后     | 三行       | 「1st 加班 剩余 h m」 | 同上               | 同上                |
+| 在岗 · 加班 2 次后     | 三行       | 「2nd 加班 剩余 h m」 | 同上               | 同上                |
+| 暂下班（当天无活动班） | 三行       | 「暂下班」            | 有数据照显示       | = 阈值、**冻结**    |
+
+- 行① `剩余 = 本班到点 − now`（加班推后到点 ⇒ 跟着跳）；标签**互斥**（`正班` / `1st 加班` / `2nd 加班`），**无嵌套无中间值**；加班只可能 0/1/2 次（12h 硬顶 ⇒ 基准 12h=0、8h=1、4h=2）；
+- 行② = 今日三值的**工作/休息**累计；
+- 行③ = **按 5 分钟节拍倒数**（首次 = 阈值 − 本段连续工作；提醒后 = 从 5:00 倒数），**1 位小数**；未在岗 = 阈值冻结；
+- 「暂下班」覆盖一切"当天无活动班"（含跨零点、跨日班结束后的全新一天）。
+
+**做法（落地版）**：
+
+- 新 `core/src/hover.rs` **纯函数** `hover_summary(day, base_hours, now_secs, segment, config, last_fired)`（6 用例：未上班一行 / 在岗正班 / 加班标签互斥 / 剩余不取负 / 暂下班冻结 / 已触发按 5 分钟重发倒数）+ `HoverSummary` DTO（`state` / `label` / `remaining_secs` / `work_secs` / `rest_secs` / `until_reminder_min` / `single_line`）；
+- 新 `core/src/commands/hover.rs`：`tray_hover` 命令（async 读命令）单点取数——今日明细走 `day_summary_inner`（数据日 = 打卡日单一口径）、本段连续工作取 `segment_secs()`（Paused/Idle 为零）、提醒触发点取 `ReminderFire::last_fired()`（该访问器自 PL028.1 起转生产用）；
+- `lib.rs` 悬浮窗生命周期（**收敛为"一进一出两拍"**，非 CT 的三相守候状态机）：`Enter` → 记录图标矩形 + 400ms 停留阈值后光标仍在图标上才显示（防划过误触）；`Leave` → 250ms 延迟收起（缓冲"从图标移向悬浮窗"，防闪烁）；右键（原生菜单将弹出）先收悬浮窗（它恒置顶会浮在菜单上）。光标判据 = Win32 `GetCursorPos`（非 Windows 空桩 ⇒ 退化为纯事件驱动）；**几何归 Rust**：按 DTO 行数设 200×46 / 200×112，锚定 = 右缘对齐图标右缘、默认图标上方、屏上缘放不下翻下方（抄 CT 预览窗几何）；
+- 前端新 `ui/src/components/TrayHover.vue`（按 DTO 渲染 1 行或 3 行）+ `main.ts` 按窗口 label 分流（`tray-hover` 挂概览组件）+ DEV 基座 `?window=tray-hover` 目验钩子（生产静态消除）+ mock 样例。
+- **登记差异**：CT 的"点外收起守候"未做——悬浮窗 `focusable(false)` 从不获焦，`Leave` 延迟收起已覆盖"移开即收"语义（点外点击时鼠标必已离开图标）；如后续需要"光标移入悬浮窗仍保持"，再补窗口内光标判据。
+
+**验证**：`cargo test`（聚合纯函数：四状态 DTO + 剩余/倒计时算术，注入时间源）+ 门禁 + live（悬停出现/移开消失/四状态逐看/一行·三行高度正确/点击不夺焦）。
+
+### 二、PL028.2 全局快捷键自定义（录键交互抄 CT；注册走既有插件）
+
+**动作两条**（现状 ✓）：`窗口显隐切换`（现 `Alt+Shift+S`；"显"= show + focus = 聚焦主窗）+ `工作/休息切换`（现 `Alt+Shift+P`）。
+
+**做法（落地版）**：
+
+- `settings.rs` 增 `hotkey_toggle_visible` / `hotkey_toggle_timer`（serde 缺省 = 现值 ⇒ 旧 config 零迁移）；`set_settings_inner` 从内存态**继承**热键字段（防设置板陈旧副本抹掉刚录的新键，与 `window_pos` 同款纪律）；
+- 新 `core/src/hotkey.rs` **纯函数** `parse`（修饰键必需 + 单主键 + 固定序归一 + Win 别名归一到 `Super`；11 用例）——**不抄 CT 的 Win32 `RegisterHotKey` 运行时**（那是 CT 为自家气泡热键自建的线程 + 消息循环），CP 已有 `tauri-plugin-global-shortcut`，注册走它；本模块只做"什么算合法 + 统一成什么串"的第二道钳制；
+- `commands/reminder.rs`：`HotkeyAction`（`toggle_visible` / `toggle_timer`）+ `set_hotkey` 命令（解析规范化 → 撤旧 → 注册新 → **失败回滚旧注册并上抛**（内存态与磁盘不动）→ 落库；处理函数只认 `Pressed` 防按/放双触发）+ `register_action`；
+- `lib.rs`：启动注册改由 config 驱动（`register_global_shortcuts` 读设置逐条注册；**单条失败仅落日志不阻断启动** = 容错白名单登记项）；
+- 前端：设置面板两行录键（交互抄 CT：全局 capture 拦截 / Esc 取消 / 3 秒无操作自停 / **收板必须退出录制态**（否则 capture 残留吞掉整个应用按键）/ 无修饰键的主键忽略）+ `Super`→`Win` 显示映射（插件认 SUPER 不认 WIN）+ 行内红字错误（带动作归属）；
+- 板面：九行要装进 300×400 ⇒ 设置板行距 6px→4px + 描述行收紧（**有意补口**，设计稿无此密度）。
+
+**验证**：`cargo test`（hotkey 11 用例 + 热键落库/继承/载荷契约）+ 门禁 + live（录新键即时生效、旧键失效、重启持久、冲突被拒、Esc 取消、收板不吞键）。
+
+### 三、PL028.3 贴边吸附 + 窗口置顶（抄 CT PL017）
+
+**默认**：贴边**开** / 置顶**不开**；**入口**：设置面板 + 托盘右键菜单**双入口** + `prefs-changed` 广播同步勾选态（CT 的 P2-3 坑：吸附状态机**必须过滤 `label=="main"`**）。
+
+**做法**：`settings.rs` 增 `always_on_top` / `snap_to_edge`；新 `core/src/snap.rs` **纯函数** `snap_position(win, mon)`（阈值 50px、间隙 5px、角落组合、幂等；TDD 七用例）；`lib.rs` 的 `Moved` 状态机（**抄 CT 实测终版**：左键键态为准 + 150ms 静默为辅 + 100ms 轮询单次确认线程 + **幂等防死循环** + `label=="main"` 过滤）；托盘 `CheckMenuItem` ×2（**`TrayIcon` 无菜单读取口 ⇒ 勾选态刷新 = 按事实源重建菜单 `set_menu`**）；设置面板补「窗口置顶 / 贴边吸附」两行（设计稿无此两行，有意补口）；`prefs-changed` 结构化载荷（`PrefsSnapshot`）广播 + 前端监听回显。（CP 无"全屏让位"线程 ⇒ CT 该项不适用。）
+
+**验证**：`cargo test`（snap 七用例）+ 门禁 + live（四边吸附/角落/关闭后不吸/置顶即时生效/双入口同步）。
+
+### 四、PL028.4 打卡确认框「取消」（缺陷；根因已由探针坐实）
+
+**根因**：`ui/components/ConfirmModal.vue` 的 `cancelVisible?: boolean` **无缺省值** ⇒ **Vue 对 Boolean 型 prop 的缺省铸造 = `false`** ⇒ 未传即 `false` ⇒ `v-if="cancelVisible !== false"` 恒假 ⇒ 取消按钮**永不渲染**（与注释"缺省可见"意图相反 ✗）。探针（显式 `:cancel-visible="true"`）一传即两钮齐现 ✓。
+
+**做法**：`ConfirmModal.vue` 改 `withDefaults(defineProps<…>(), { cancelVisible: true })`（恢复注释声明的意图 ✓）；`App.vue` 撤掉探针（标题〔探针〕标记 + 显式 prop）；**按钮顺序按用户定案 = 「确认 左 / 取消 右」**（有意偏离 design 的"取消/确认"）。
+
+**验证**：`npx vue-tsc --noEmit` + `npm run build` + live（打卡框两钮齐现、取消只关框不打卡、顺序正确；自动下班框"到顶/跨日隐藏加班"回归不破）。
+
 ### 二、PATCH006.2 彗星白纹（斜条）改用"真在岗"判据（2026-10-15 立项；来源 = 用户目测"暂下班后斜纹仍在"）
 
 **问题（已核实，只读）**：`ui/components/StatsView.vue` 同一渲染函数里两套判据不一致——

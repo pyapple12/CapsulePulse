@@ -125,6 +125,24 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         sound_enabled: true,
         notify_enabled: true,
         workday_auto_out_hours: 8,
+        always_on_top: false,
+        snap_to_edge: true,
+        hotkey_toggle_visible: "Alt+Shift+S",
+        hotkey_toggle_timer: "Alt+Shift+P",
+      };
+    /* PL028.2 录键：基座无注册能力，回显规范化串（真注册与冲突拒绝在 Rust 侧） */
+    case "set_hotkey":
+      return String(args?.combo ?? "");
+    /* PL028.1 悬浮概览：基座给"在岗三行"样例（真值由 Rust 侧聚合，四状态见 hover.rs 用例） */
+    case "tray_hover":
+      return {
+        state: "on_duty",
+        label: "正班",
+        remaining_secs: 8_100,
+        work_secs: 19_800,
+        rest_secs: 1_800,
+        until_reminder_min: 12.3,
+        single_line: false,
       };
     case "set_settings":
     case "main_hide_to_tray":

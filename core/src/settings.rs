@@ -35,10 +35,28 @@ pub struct ReminderSettings {
     /// PL025.5 收窄到 4–12，与设置板 stepper 口径统一）。
     #[serde(default = "default_auto_out_hours")]
     pub workday_auto_out_hours: u32,
+    /// 窗口置顶（PL028.3，用户定案**缺省关**）：窗口恒在最前；关闭后允许被其他窗口遮挡。
+    #[serde(default)]
+    pub always_on_top: bool,
+    /// 贴边吸附（PL028.3，用户定案**缺省开**）：拖动松手时窗口边缘距屏幕边缘 ≤
+    /// [`SNAP_THRESHOLD_PX`] 即自动贴边停驻（落位距边 [`SNAP_GAP_PX`]）。
+    #[serde(default = "default_true")]
+    pub snap_to_edge: bool,
+    /// 窗口显隐切换全局热键（PL028.2；缺省 `Alt+Shift+S` = 原硬编码值）。
+    #[serde(default = "default_hotkey_visible")]
+    pub hotkey_toggle_visible: String,
+    /// 工作/休息切换全局热键（PL028.2；缺省 `Alt+Shift+P` = 原硬编码值）。
+    #[serde(default = "default_hotkey_timer")]
+    pub hotkey_toggle_timer: String,
     /// 窗口位置记忆（`None` = 从未保存 → 启动走默认右上落位，PATCH001.4）。
     #[serde(default)]
     pub window_pos: Option<WindowPos>,
 }
+
+/// 贴边吸附阈值（px）：窗口边缘距屏幕边缘 ≤ 此值即吸附（单一来源；PL028.3 抄 CT PL017）。
+pub const SNAP_THRESHOLD_PX: i32 = 50;
+/// 贴边落位间距（px）：吸附后窗口边缘距屏幕边缘留出的缝隙。
+pub const SNAP_GAP_PX: i32 = 5;
 
 fn default_threshold() -> u32 {
     50
@@ -52,6 +70,14 @@ fn default_auto_out_hours() -> u32 {
     8
 }
 
+fn default_hotkey_visible() -> String {
+    "Alt+Shift+S".to_string()
+}
+
+fn default_hotkey_timer() -> String {
+    "Alt+Shift+P".to_string()
+}
+
 impl Default for ReminderSettings {
     fn default() -> Self {
         Self {
@@ -59,6 +85,10 @@ impl Default for ReminderSettings {
             sound_enabled: default_true(),
             notify_enabled: default_true(),
             workday_auto_out_hours: default_auto_out_hours(),
+            always_on_top: false,
+            snap_to_edge: default_true(),
+            hotkey_toggle_visible: default_hotkey_visible(),
+            hotkey_toggle_timer: default_hotkey_timer(),
             window_pos: None,
         }
     }
@@ -176,6 +206,10 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 0,
+            always_on_top: false,
+            snap_to_edge: true,
+            hotkey_toggle_visible: "Alt+Shift+S".to_string(),
+            hotkey_toggle_timer: "Alt+Shift+P".to_string(),
             window_pos: None,
         };
         assert!(matches!(
@@ -187,6 +221,10 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 73,
+            always_on_top: false,
+            snap_to_edge: true,
+            hotkey_toggle_visible: "Alt+Shift+S".to_string(),
+            hotkey_toggle_timer: "Alt+Shift+P".to_string(),
             window_pos: None,
         };
         assert!(matches!(
@@ -211,6 +249,10 @@ mod tests {
             sound_enabled: false,
             notify_enabled: true,
             workday_auto_out_hours: 9,
+            always_on_top: false,
+            snap_to_edge: true,
+            hotkey_toggle_visible: "Alt+Shift+S".to_string(),
+            hotkey_toggle_timer: "Alt+Shift+P".to_string(),
             window_pos: None,
         };
         s.save(&p).unwrap();
@@ -221,6 +263,10 @@ mod tests {
             sound_enabled: true,
             notify_enabled: true,
             workday_auto_out_hours: 8,
+            always_on_top: false,
+            snap_to_edge: true,
+            hotkey_toggle_visible: "Alt+Shift+S".to_string(),
+            hotkey_toggle_timer: "Alt+Shift+P".to_string(),
             window_pos: None,
         };
         assert!(matches!(
@@ -240,6 +286,10 @@ mod tests {
             sound_enabled: true,
             notify_enabled: false,
             workday_auto_out_hours: 6,
+            always_on_top: false,
+            snap_to_edge: true,
+            hotkey_toggle_visible: "Alt+Shift+S".to_string(),
+            hotkey_toggle_timer: "Alt+Shift+P".to_string(),
             window_pos: None,
         };
         s.save(&p).unwrap();

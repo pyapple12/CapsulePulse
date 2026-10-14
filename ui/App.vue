@@ -10,7 +10,13 @@ import StatsView from "./components/StatsView.vue";
 import TimerCard from "./components/TimerCard.vue";
 import type { RecoveryNotice } from "./types";
 // IPC DTO 镜像类型统一收敛在 types.ts（单一来源 = Rust serde 结构，防多处声明漂移）
-import type { DaySummary, ReminderSettings, SessionStatus } from "./types";
+import type {
+  DaySummary,
+  HotkeyAction,
+  PrefsSnapshot,
+  ReminderSettings,
+  SessionStatus,
+} from "./types";
 import { OVERTIME_CAP_HOURS } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
@@ -37,6 +43,8 @@ const reminderVisible = ref(false);
 const reminderThreshold = ref(0);
 // 设置保存失败的可见反馈（面板内展示，成功或重开面板时清除）
 const saveError = ref("");
+/** 录键失败反馈（PL028.2；带动作归属 ⇒ 显示在对应行下——后端已回滚旧键，界面仍显旧值） */
+const hotkeyError = ref<{ action: HotkeyAction; message: string } | null>(null);
 // 动作/打卡失败的可见反馈（FIX002.3：命令失败不再只进 console）；动作成功即清除
 const actionError = ref("");
 const chimeRef = ref<HTMLAudioElement | null>(null);
@@ -80,6 +88,8 @@ let destroyThresholdDrag: (() => void) | undefined;
 // focused class；初值经 isFocused 查询兜底，错过启动期事件也不滞留错误纱态
 const windowFocused = ref(false);
 let unlistenFocus: (() => void) | undefined;
+// 窗口偏好同步解绑句柄（PL028.3：托盘右键菜单改偏好 → 设置面板开关回显）
+let unlistenPrefs: (() => void) | undefined;
 
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
@@ -196,6 +206,24 @@ async function onSaveSettings(s: ReminderSettings): Promise<void> {
     // CommandError 经 IPC 序列化为文案字符串；面板内展示 + console 留痕
     saveError.value = `设置保存失败：${String(err)}`;
     console.error("set_settings 调用失败", err);
+  }
+}
+
+/** 录键完成（PL028.2）：交后端校验 + 重注册（冲突/非法后端已回滚旧键并上抛 ⇒ 行内红字；
+ * 成功则回填规范化串，界面与落库同源） */
+async function onSetHotkey(action: HotkeyAction, combo: string): Promise<void> {
+  try {
+    const normalized = await invoke<string>("set_hotkey", { action, combo });
+    if (settings.value != null) {
+      settings.value =
+        action === "toggle_visible"
+          ? { ...settings.value, hotkey_toggle_visible: normalized }
+          : { ...settings.value, hotkey_toggle_timer: normalized };
+    }
+    hotkeyError.value = null;
+  } catch (err) {
+    hotkeyError.value = { action, message: `快捷键保存失败：${String(err)}` };
+    console.error("set_hotkey 调用失败", err);
   }
 }
 
@@ -415,6 +443,17 @@ onMounted(() => {
       unlistenFocus = un;
     })
     .catch((err) => console.error("window-focus 监听注册失败", err));
+  // prefs-changed（PL028.3）：托盘右键菜单改了窗口偏好 → 设置面板开关回显同步。
+  // 面板自改那一路已即时写入本地态（onSaveSettings），此处只补"另一入口"的回显
+  listen<PrefsSnapshot>("prefs-changed", (event) => {
+    if (settings.value != null) {
+      settings.value = { ...settings.value, ...event.payload };
+    }
+  })
+    .then((un) => {
+      unlistenPrefs = un;
+    })
+    .catch((err) => console.error("prefs-changed 监听注册失败", err));
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
   listen<number>("reminder-due", (event) => {
     reminderThreshold.value = event.payload;
@@ -491,6 +530,7 @@ onUnmounted(() => {
   unlistenAutoOut?.();
   unlistenAutoOutPending?.();
   unlistenFocus?.();
+  unlistenPrefs?.();
   destroyTitleParticles?.();
   destroyThresholdDrag?.();
 });
@@ -618,7 +658,9 @@ onUnmounted(() => {
       :error="saveError"
       :on-duty="day != null && day.duty_started_at != null && day.duty_ended_at == null"
       :auto-out-locked="day != null && day.duty_started_at != null"
+      :hotkey-error="hotkeyError"
       @save="onSaveSettings"
+      @hotkey="onSetHotkey"
     />
   </main>
   <audio ref="chimeRef" :src="chimeUrl" preload="auto"></audio>

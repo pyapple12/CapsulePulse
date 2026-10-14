@@ -5,6 +5,7 @@
 //! 落库时间戳 started_at = wall_now − 段秒，SystemTime 只在本层出现，session.rs 纯度不破。
 //! 注意：自定义命令不经 ACL 白名单（系列实证），但通知/事件等能力仍需 capabilities 授权。
 
+pub mod hover;
 pub mod reminder;
 pub mod session;
 pub mod stats;
@@ -105,6 +106,12 @@ pub enum CommandError {
     /// 设置层错误（载入/保存/校验失败）。
     #[error(transparent)]
     Settings(#[from] crate::settings::SettingsError),
+    /// 全局热键组合非法（PL028.2：解析/规范化拒绝，文案沿用 hotkey.rs）。
+    #[error(transparent)]
+    Hotkey(#[from] crate::hotkey::HotkeyError),
+    /// 全局热键注册失败（PL028.2：被其它程序占用等；命令层已回滚旧键）。
+    #[error("{0}")]
+    HotkeyRegister(String),
     /// 在岗期间禁止修改自动下班小时数（PL025.5：本班基准不可中途改，账目口径唯一）。
     #[error("在岗期间不可修改自动下班小时数（本班按 {0} 小时计）")]
     AutoOutLockedOnDuty(u32),

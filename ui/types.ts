@@ -37,6 +37,25 @@ export interface ReminderSettings {
   notify_enabled: boolean;
   /** 自动下班时长（小时），与 Rust 侧 1–72 校验一致 */
   workday_auto_out_hours: number;
+  /** 窗口置顶（PL028.3；缺省关）：窗口恒在最前 */
+  always_on_top: boolean;
+  /** 贴边吸附（PL028.3；缺省开）：拖动松手贴边停驻 */
+  snap_to_edge: boolean;
+  /** 窗口显隐切换全局热键（PL028.2；缺省 Alt+Shift+S）——`Super` 表 Win 键 */
+  hotkey_toggle_visible: string;
+  /** 工作/休息切换全局热键（PL028.2；缺省 Alt+Shift+P） */
+  hotkey_toggle_timer: string;
+}
+
+/** 全局热键动作标识（镜像 core/src/commands/reminder.rs HotkeyAction，PL028.2）：
+ * 两条动作共用一条写命令 `set_hotkey`。 */
+export type HotkeyAction = "toggle_visible" | "toggle_timer";
+
+/** prefs-changed 事件载荷（镜像 core/src/commands/reminder.rs PrefsSnapshot，PL028.3）：
+ * 设置面板与托盘右键菜单双入口的开关态同步——任一路径改动即广播，两端回显同一事实源。 */
+export interface PrefsSnapshot {
+  always_on_top: boolean;
+  snap_to_edge: boolean;
 }
 
 /** day_detail 返回体中的图谱区块（镜像 core/src/workday.rs DayBlock） */
@@ -86,6 +105,18 @@ export interface WorkdayTotal {
   days: number;
   /** 最早记录所在本地日相对今天的偏移（负值或 0；空库 null）——统计往前翻的下界（PL025.1） */
   first_offset: number | null;
+}
+
+/** 托盘 hover 概览（镜像 core/src/hover.rs HoverSummary，PL028.1）：`single_line` = 未在岗
+ * （悬浮窗只一行高）；否则三行——行①标签（互斥）+ 剩余、行②工作/休息、行③离提醒分钟数。 */
+export interface HoverSummary {
+  state: "off" | "on_duty" | "paused";
+  label: string;
+  remaining_secs: number | null;
+  work_secs: number;
+  rest_secs: number;
+  until_reminder_min: number;
+  single_line: boolean;
 }
 
 /** 崩溃恢复提示返回体（镜像 core/src/commands/workday.rs RecoveryOutcome，PL027.8）：
