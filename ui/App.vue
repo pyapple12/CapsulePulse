@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -56,8 +56,20 @@ let unlistenAutoOutPending: (() => void) | undefined;
 // 统计视图刷新信号：计时/打卡动作后自增，StatsView watch 重拉（保持 Rust 不推送定案）
 const statsRefreshKey = ref(0);
 let statsTimer: number | undefined;
-// 自动下班条自隐句柄（FIX005.1：横幅不再滞留至重启；新触发先清旧防叠加）
-let autoOutHideTimer: number | undefined;
+// —— 文案条浮层（PATCH005.11）——
+// 四条条带（提醒 / 自动下班 / 恢复 / 错误）不参与文档流：以「日期卡 + 表盘」行（TimerCard
+// .timer-top）为中心双向居中覆盖，被盖行自雾化；自隐 = 错误条 10s、其余 5s，任意点击亦立即隐藏
+const BANNER_HIDE_MS = 5_000;
+const BANNER_ERROR_HIDE_MS = 10_000;
+let bannerHideTimer: number | undefined;
+/** 是否有任一条文案条可见（浮层 open 类 = 自雾化开关） */
+const anyBannerVisible = computed(
+  () =>
+    reminderVisible.value ||
+    autoOutVisible.value ||
+    recoveryNotice.value != null ||
+    actionError.value !== "",
+);
 let unlistenReminder: (() => void) | undefined;
 let unlistenAutoOut: (() => void) | undefined;
 // 标题粒子视觉件清理句柄（组件卸载时解绑 window 监听并停帧）
@@ -115,6 +127,8 @@ function onWindowDown(e: MouseEvent): void {
   if (e.button !== 0) {
     return;
   }
+  // 文案条浮层（PATCH005.11）：任意位置按下即隐（先于白名单 / 收板分支，保证"任意位置"语义）
+  hideAllBanners();
   const target = e.target as HTMLElement | null;
   if (target?.closest(DRAG_INTERACTIVE)) {
     return;
@@ -228,14 +242,42 @@ function onConfirmCancel(): void {
   confirmMode.value = null;
 }
 
-/** 收起自动下班条并清自隐句柄（FIX005.1：展示层生命周期与打卡流对称） */
+/** 收起自动下班条（FIX005.1：展示层生命周期与打卡流对称；自隐与点击统一走 hideAllBanners） */
 function clearAutoOutBanner(): void {
-  if (autoOutHideTimer !== undefined) {
-    window.clearTimeout(autoOutHideTimer);
-    autoOutHideTimer = undefined;
-  }
   autoOutVisible.value = false;
 }
+
+/** 隐藏全部文案条（PATCH005.11 唯一出口：到点自隐与"任意位置点击"共用） */
+function hideAllBanners(): void {
+  reminderVisible.value = false;
+  autoOutVisible.value = false;
+  recoveryNotice.value = null;
+  actionError.value = "";
+  if (bannerHideTimer !== undefined) {
+    window.clearTimeout(bannerHideTimer);
+    bannerHideTimer = undefined;
+  }
+}
+
+/** 起/续文案条自隐计时（PATCH005.11）：有错误条取 10s、否则 5s；无可隐内容时清表 */
+function armBannerAutoHide(): void {
+  if (bannerHideTimer !== undefined) {
+    window.clearTimeout(bannerHideTimer);
+    bannerHideTimer = undefined;
+  }
+  if (!anyBannerVisible.value) {
+    return;
+  }
+  bannerHideTimer = window.setTimeout(
+    hideAllBanners,
+    actionError.value !== "" ? BANNER_ERROR_HIDE_MS : BANNER_HIDE_MS,
+  );
+}
+
+// 文案条可见性变化（出现 / 切换 / 消失）→ 起自隐计时（定位由插槽天然居中，无需测量）
+watch([reminderVisible, autoOutVisible, recoveryNotice, actionError], () => {
+  armBannerAutoHide();
+});
 
 /** 确认框确认：执行打卡 → 刷新在岗态与统计；失败经错误条可见（FIX002.3） */
 async function onConfirmOk(): Promise<void> {
@@ -333,6 +375,10 @@ async function onAutoOutOvertime(): Promise<void> {
     console.error("overtime 调用失败", err);
   }
   closeAutoOutPending();
+  // PATCH005.8：加班改了预算 / 轴末 / 电池分母 ⇒ 立即取数（与 onAutoOutClockOut 同族收尾；
+  // 后端 `overtime` 只落流水 + 重排兜底线程，不发事件，不刷就得等 30s 轮询）
+  void refreshStats();
+  statsRefreshKey.value++;
 }
 
 onMounted(() => {
@@ -358,6 +404,12 @@ onMounted(() => {
   // window-focus：Rust 焦点态转发（payload = 聚焦与否），驱动分态纱 focused class
   listen<boolean>("window-focus", (event) => {
     windowFocused.value = event.payload;
+    // PATCH005.9：重新获焦时顺带取一次数——窗口若被托盘/热键隐藏较久，WebView 定时器可能被
+    // 节流，唤起瞬间视图可能陈旧；这里补一次即刷（零新监听、零后端改动）
+    if (event.payload) {
+      void refreshStats();
+      statsRefreshKey.value++;
+    }
   })
     .then((un) => {
       unlistenFocus = un;
@@ -386,20 +438,23 @@ onMounted(() => {
       }
     })
     .catch((err) => console.error("take_recovery_notice 调用失败", err));
+  // PATCH005.13 启动期"自动下班"补拉：后端在 webview 装载完成前 emit 的事件会被丢
+  // （如"停机期间到期"的重开）⇒ 挂载时补拉一次（同 PL027.8 的"存槽 + 挂载拉取"范式）
+  invoke<number | null>("take_auto_out_notice")
+    .then((at) => {
+      if (at != null) {
+        autoOutAt.value = at;
+        autoOutVisible.value = true;
+      }
+    })
+    .catch((err) => console.error("take_auto_out_notice 调用失败", err));
   // workday-auto-out：payload = 回填下班时刻（上班 + N），文案条告知 + 界面即刷；
-  // 30s 后自隐（FIX005.1：此前无任何清理点会滞留至重启），新触发重置计时
+  // 自隐改由文案条浮层统一管理（PATCH005.11：5s + 任意点击，见 watch / hideAllBanners）
   listen<number>("workday-auto-out", (event) => {
     autoOutAt.value = event.payload;
     autoOutVisible.value = true;
     // 后端已执行（tick 或兜底线程）→ 待决确认框随之关闭（PL025.8）
     closeAutoOutPending();
-    if (autoOutHideTimer !== undefined) {
-      window.clearTimeout(autoOutHideTimer);
-    }
-    autoOutHideTimer = window.setTimeout(() => {
-      autoOutVisible.value = false;
-      autoOutHideTimer = undefined;
-    }, 30_000);
     void refreshStats();
     statsRefreshKey.value++;
   })
@@ -425,8 +480,8 @@ onUnmounted(() => {
   if (statsTimer !== undefined) {
     window.clearInterval(statsTimer);
   }
-  if (autoOutHideTimer !== undefined) {
-    window.clearTimeout(autoOutHideTimer);
+  if (bannerHideTimer !== undefined) {
+    window.clearTimeout(bannerHideTimer);
   }
   if (autoOutCountdown !== undefined) {
     window.clearInterval(autoOutCountdown);
@@ -450,22 +505,6 @@ onUnmounted(() => {
         </h1>
       </header>
 
-      <!-- 文案条（提醒 / 自动下班 / 动作错误）：配方 = controls.css .banner 1:1，error 红字为 ui 功能胶水 -->
-      <div v-if="reminderVisible" class="banner remind">
-        <span class="dot"></span><span>已连续工作 {{ reminderThreshold }} 分钟，休息一下吧</span>
-      </div>
-      <div v-if="autoOutVisible" class="banner auto">
-        <span class="dot"></span><span>已于 {{ hhmm(autoOutAt) }} 自动下班</span>
-      </div>
-      <div v-if="recoveryNotice != null" class="banner auto">
-        <span class="dot"></span
-        ><span
-          >上次未打卡下班就离开了，已按
-          {{ hhmm(recoveryNotice) }} 结束工作记账；要继续请重新打卡</span
-        >
-      </div>
-      <div v-if="actionError" class="banner error" role="alert">{{ actionError }}</div>
-
       <!-- 计时页（设计单页常驻；统计/设置 = 侧角钮飞出板，浮层件均在 .window 直下与 .content 平级） -->
       <section class="stage" id="page-timer">
         <TimerCard
@@ -474,7 +513,33 @@ onUnmounted(() => {
           @changed="onTimerChanged"
           @error="actionError = $event"
           @clock="onPillClick"
-        />
+        >
+          <!-- 文案条浮层（PATCH005.11）：插进 TimerCard 的「日期卡 + 表盘」行，以该行为定位锚
+               ⇒ 双向居中覆盖、零测量零魔术数；绝对定位 ⇒ 不参与文档流（出现时下方内容零位移）；
+               被盖行自雾化、浮层自身清晰；显隐走 v-if + 设计稿 .show（PATCH005.10）；
+               自隐 5s / 错误条 10s，窗口内任意位置点击亦立即隐藏 -->
+          <template #row-overlay>
+            <div class="banner-layer" :class="{ open: anyBannerVisible }">
+              <div v-if="reminderVisible" class="banner remind show">
+                <span class="dot"></span
+                ><span>已连续工作 {{ reminderThreshold }} 分钟，休息一下吧</span>
+              </div>
+              <div v-if="autoOutVisible" class="banner auto show">
+                <span class="dot"></span><span>已于 {{ hhmm(autoOutAt) }} 自动下班</span>
+              </div>
+              <div v-if="recoveryNotice != null" class="banner auto show">
+                <span class="dot"></span
+                ><span
+                  >上次未打卡下班就离开了，已按
+                  {{ hhmm(recoveryNotice) }} 结束工作记账；要继续请重新打卡</span
+                >
+              </div>
+              <div v-if="actionError" class="banner error show" role="alert">
+                <span class="dot"></span><span>{{ actionError }}</span>
+              </div>
+            </div>
+          </template>
+        </TimerCard>
       </section>
     </div>
 
@@ -571,10 +636,51 @@ onUnmounted(() => {
 @import "./src/styles/boards.css";
 @import "./src/styles/glass-bar.css";
 
-/* —— 最小功能胶水（非设计定稿样式）：错误条红字 + 动效退避，仅此两件 —— */
-/* 文案条错误条红字（remind/auto 配方在 controls.css） */
-.banner.error {
-  color: #b42318;
+/* —— 最小功能胶水（非设计定稿样式）：文案条浮层 + 动效退避 —— */
+/* 错误条：正文**不改色**（承白 ink，与其余三条一致——PATCH005.12 用户定案，原红字为历史胶水） */
+.banner-layer .banner.error .dot {
+  background: #ff6b6b; /* 错误条圆点红（PATCH005.12 用户定案） */
+}
+/* 文案条浮层（PATCH005.11）：插在「日期卡 + 表盘」行（TimerCard .timer-top）内，以该行为定位锚
+   ⇒ 天然双向居中（横向 align-items:center + 纵向 top:50% 配 translateY(-50%)），零测量零魔术数；
+   绝对定位 ⇒ 不参与文档流（出现时下方内容零位移）；pointer-events:none 让点击穿透
+   （"任意位置点击即隐"与全局拖拽不受影响） */
+.window .timer-top {
+  position: relative; /* 浮层定位锚（PATCH005.11） */
+}
+.banner-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.banner-layer .banner {
+  width: 100%;
+  margin: 0; /* 定位交给浮层，去掉设计稿的流内纵向落位 */
+  /* 被盖行是亮色件（日期卡 / 表盘）时白字发虚（用户定案 2026-10-15 逐步加码：
+     先 1px/3px 试读 → 2px/4px 更浓更大 → **白纱改黑纱**）：
+     底由设计稿的 var(--panel-bg)（白纱）改为 **CT 黑纱系**（浮板同源），文字影保留 */
+  background: rgba(0, 0, 0, 0.5);
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.75);
+}
+/* 前面的圆点套同款影（点是背景色块，用 box-shadow 对齐文字影口径） */
+.banner-layer .banner .dot {
+  box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.75);
+}
+/* 被盖行自雾化（与浮板同款配方：glass.css 的 filter blur）——只糊该行的内容件
+   （日期卡 / 表盘），浮层自身保持清晰 */
+.window .timer-top > :not(.banner-layer) {
+  transition: filter 0.35s ease;
+}
+.window:has(.banner-layer.open) .timer-top > :not(.banner-layer) {
+  filter: blur(4px);
 }
 /* 动效退避（可达性基建，非设计范围；design 侧退避随 devkit 不迁，
    分类样式内声明式退避随各 PL 落位） */

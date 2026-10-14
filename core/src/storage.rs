@@ -151,6 +151,9 @@ impl Storage {
     /// 与 `idx_events_at`（按时间取流水的索引）。**旧两表 `workdays`/`sessions` 不再创建**
     /// （唯一事实源即流水；老库由 [`Self::migrate_events_only`] 一次性迁移处置）。
     fn init(conn: Connection) -> Result<Self, StorageError> {
+        // PATCH005.14：写库**快速失败**——默认 busy 等待约 5s（探针实测 5522ms）会把"打卡失败"
+        // 的反馈拖成数秒；正常路径 app 是唯一写者（各命令经 Mutex 串行、心跳同锁），归零不误伤。
+        conn.busy_timeout(std::time::Duration::from_millis(0))?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

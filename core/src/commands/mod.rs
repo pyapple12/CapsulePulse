@@ -86,6 +86,8 @@ pub struct AppContext<C: Clock = RealClock> {
     pub wall: Box<dyn WallClock>,
     /// 一次性启动恢复提示（PL027.8）：仅"判下班"分支有值；前端取一次即清空。
     pub recovery: Mutex<Option<workday::RecoveryOutcome>>,
+    /// PATCH005.13：启动期「自动下班」通知槽（后端在 webview 装载前 emit 的事件会被丢）
+    pub auto_out_notice: Mutex<Option<i64>>,
 }
 
 /// 命令层错误：跨 IPC 序列化为字符串（前端在 promise reject 的 message 中读到文案）。
@@ -234,6 +236,7 @@ pub(crate) mod test_support {
                 millis: clock.shared_millis(),
             }),
             recovery: Mutex::new(None),
+            auto_out_notice: Mutex::new(None),
         }
     }
 

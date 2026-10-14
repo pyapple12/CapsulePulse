@@ -298,8 +298,7 @@ pub async fn session_status(
     // 自动下班检查挂现有 tick 评估口（与提醒同构）：到点以基准时刻下班并发事件；
     // 本帧 status 可能仍是关闭前的快照，前端下一 tick（100ms）自然对齐
     if let Some(out_at) = super::workday::try_auto_clock_out(&handle)? {
-        app.emit("workday-auto-out", out_at)
-            .map_err(|e| CommandError::Event(e.to_string()))?;
+        super::workday::deliver_auto_out(&app, &handle, out_at)?;
     }
     Ok(status)
 }

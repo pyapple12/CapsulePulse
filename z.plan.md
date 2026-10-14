@@ -2457,5 +2457,139 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 ### 八、PATCH005.5 / PATCH005.6（2026-10-13 追加；来源 = 3 崩溃矩阵验收中的口径复核）
 
 - **PATCH005.5「启动对账」口径修正（已落）**：`core/src/workday.rs::decide_recovery` 的判据只有 `now − last_beat_at`，**崩溃与正常退出皆走**；原表述"启动崩溃恢复"易被读成"仅崩溃才跑"。已统一改为 **「启动对账（崩溃 / 正常退出皆走：判据只看停机时长）」**（`CapsulePulse_plan.md` §2.2 / `AGENTS.md` 当前状态与架构要点 / `recover_on_startup` 文档头 / `ui/App.vue` 两处注释）。
-- **PATCH005.6 恢复提示条文案中性化（2026-10-13 已实现）**：`CloseAt` 分支（停机 >10 分钟）文案「上次**异常退出**，已按 HH:MM 结束工作记账；要继续请重新打卡」在**正常退出 + >10 分钟重开**时失真（同一分支覆盖两种来源）；拟改「上次**未打卡下班就离开了**…」，结班时刻仍如实告知（不可一弹不弹）。用户 2026-10-13 定"先不做、只登记"，触发条件 = 用户发话。
-- **PATCH005.7 `CloseAt` 分支启动日志措辞 / 时机校正（2026-10-13 已实现）**：`core/src/lib.rs:281` 的 `已恢复在岗状态（上次下班打卡缺失）` 跑在**启动对账之前** ⇒ >10 分钟"补下班"那一支会先留一句**过时结论**（状态与账目本身正确，纯日志误导）；拟改为**只在无缝续分支打印**，或措辞中性化（"启动：缓存中存在未闭合班（待对账）"）。用户 2026-10-13 定"登记、暂不做"。
+- **PATCH005.6 恢复提示条文案中性化（2026-10-13 已实现）**：`CloseAt` 分支（停机 >10 分钟）文案「上次**异常退出**，已按 HH:MM 结束工作记账；要继续请重新打卡」在**正常退出 + >10 分钟重开**时失真（同一分支覆盖两种来源）；拟改「上次**未打卡下班就离开了**…」，结班时刻仍如实告知（不可一弹不弹）。用户 2026-10-13 定"先不做、只登记"；**2026-10-13 用户发话推进、已实现**（`ui/App.vue` 文案改「上次未打卡下班就离开了…」，结班时刻照实告知 ✓；验证 = `vue-tsc --noEmit` + `npm run build` + 源码核对）。
+- **PATCH005.7 `CloseAt` 分支启动日志措辞 / 时机校正（2026-10-13 已实现）**：`core/src/lib.rs:281` 的 `已恢复在岗状态（上次下班打卡缺失）` 跑在**启动对账之前** ⇒ >10 分钟"补下班"那一支会先留一句**过时结论**（状态与账目本身正确，纯日志误导）；拟改为**只在无缝续分支打印**，或措辞中性化（"启动：缓存中存在未闭合班（待对账）"）。用户 2026-10-13 定"登记、暂不做"；**2026-10-13 已实现**（`core/src/lib.rs` 的 `warn_diag` 改中性「启动：缓存中存在未闭合班（待对账）」+ 注释写明"初判 / 对账分工"；验证 = `cargo check/clippy/test` + 源码核对）。
+
+### 九、PATCH005.8 加班动作即时刷新（2026-10-14 追加；来源 = A2 目测中用户报"点加班后蓝条约 1 秒才更新"）
+
+**问题（根因已核实）**：`ui/App.vue::onAutoOutOvertime`（自动下班框「加班」）执行 `invoke("overtime")` 后只 `closeAutoOutPending()`，**不刷当日明细**；后端 `core/src/commands/workday.rs::overtime` 也只做两件事——落一条 `overtime` 流水 + `spawn_auto_out_watcher` 重排兜底线程，**不向前端发任何事件** ⇒ 表盘轴末 / 蓝条 / 电池分母要等**下一次 30s 轮询**（`App.vue::STATS_TICK_MS = 30_000`）才更新（用户观感"约 1 秒"系恰好撞上该轮；最坏 30 秒）。同族动作**全部**为"动作后即刷"，**加班是唯一漏项**。
+
+**方案（纯前端，`ui/App.vue` 一处两行）**：在 `onAutoOutOvertime` 末尾照抄 `onAutoOutClockOut` 的收尾——
+
+- `void refreshStats();`（重取 `session_status` + `day_detail` ⇒ 轴末 / 蓝条 / 电池分母即刻生效）
+- `statsRefreshKey.value++;`（统计板随之取新）
+
+**不新增事件通路**（KISS：已有"前端命令 + await 后即刷"范式可循）；**零 Rust 改动**。
+
+**前端"变更命令 → 即时刷新"面全量核查（2026-10-14）**：
+
+| 变更入口                                         | 调用点                                              | 现有收尾                                                             | 结论               |
+| ------------------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------- | ------------------ |
+| `clock_in` / `clock_out`                         | App.vue `onConfirmOk`                               | refreshStats + key++                                                 | ✓                  |
+| `clock_out`（自动下班框「下班」）                | App.vue `onAutoOutClockOut`                         | refreshStats + key++                                                 | ✓                  |
+| `overtime`（自动下班框「加班」）                 | App.vue `onAutoOutOvertime`                         | 仅 `closeAutoOutPending`                                             | ✗ **本条修复对象** |
+| `session_set_run_mode` / `session_restart`       | TimerCard.vue `act()`                               | `await refresh()` + `emit("changed")` → App `onTimerChanged` 即刷    | ✓                  |
+| `set_settings`                                   | App.vue `onSaveSettings`                            | 本地 `settings.value = s`（日明细不依赖设置；轴/预算仅在岗取后端值） | ✓                  |
+| `main_hide_to_tray`                              | App.vue                                             | —（窗口动作，无日数据）                                              | ✓                  |
+| 事件 `workday-auto-out`                          | App.vue 监听                                        | refreshStats + key++                                                 | ✓                  |
+| 事件 `workday-auto-out-pending` / `reminder-due` | App.vue 监听                                        | 纯展示（该刻日数据未变）                                             | ✓                  |
+| StatsView 数据面                                 | `watch(refreshKey / dataDayOffset / offset / open)` | 组件自行取数                                                         | ✓                  |
+
+**次要候选（健壮性，待用户定是否纳入本条）**：`window-focus` 监听（App.vue:359）只驱动分态纱 `focused` class、**不顺带刷数**；窗口被托盘隐藏较久时 WebView 定时器可能被节流 ⇒ 重新显示瞬间视图可能陈旧（≤30 秒自愈）。可选在该监听 `focused === true` 分支补一次 `refreshStats()`。
+
+**验证（待实施后执行）**：`npx prettier --write ui/App.vue` + `npx vue-tsc --noEmit` + `npm run build`；live 实机在到点前 60s 点「加班」→ 轴末 / 蓝条**当帧**延伸、电池分母同步跳变（对照现状：需等 ≤30s）。
+
+### 十、PATCH005.9 `window-focus` 顺带刷数（2026-10-14 追加；用户拍板纳入）
+
+**问题（健壮性，非功能缺陷）**：`ui/App.vue` 的 `window-focus` 监听（`listen<boolean>("window-focus", …)`）只把焦点态写入 `windowFocused`（驱动分态纱 `focused` class），**不顺带刷数**。窗口被托盘 / 全局热键隐藏较久时，WebView 定时器可能被节流（`STATS_TICK_MS = 30_000` 的 `refreshStats` 轮询与 TimerCard 的 `TICK_MS` 自刷均可能被拉长）⇒ **重新显示瞬间视图可能陈旧**，直到下一轮轮询（≤30 秒自愈）。
+
+**方案（纯前端，`ui/App.vue` 一处）**：在该监听回调里，`event.payload === true`（获焦）时补一次取数——
+
+- `void refreshStats();`
+- `statsRefreshKey.value++;`
+
+复用既有 `window-focus` 监听、不新增后端事件；零 Rust 改动。与 PATCH005.8 同属"补齐前端即时刷新面"。
+
+> 备注（待实机确认）：若个别唤起路径（如热键 Show 但焦点未变）不触发 `window-focus`，本补丁覆盖不到——按 live 结果再论是否需要补 `tauri://focus` / 显示事件。
+
+**验证（待实施后执行）**：`npx prettier --write ui/App.vue` + `npx vue-tsc --noEmit` + `npm run build`；live：在岗中把窗口隐藏到托盘 → 停 ≥1 分钟 → 唤起窗口，视图应**当帧即新**（不待轮询）。
+
+### 十一、PATCH005.10 文案条不可见修复（2026-10-15 立项 + 当日落地并验证；来源 = A3.4 验收中"恢复提示条未出现"）
+
+**现象**：A3.4（崩溃 >10 分钟重开）后端确证走了"补下班"分支并写了提示槽（日志 `补下班 …（崩溃补记）`），但前端**文案条不出现**；用"最后心跳 20 分钟前的、仍开着的班"造景可**稳定复现**（两次复现均不出现）。
+
+**根因（PL016/PL017 换装遗漏，潜伏自 2026-10-08）**：`ui/src/styles/controls.css` 的 `.banner { display: none }` + `.banner.show { display: flex }` 是设计稿 **1:1 副本**（`design/assets/css/controls.css:157/173`）；设计稿靠 **JS 加 `.show`** 才显示（`design/index.html:1737/1740` 的 `classList.toggle("show", …)`），而 `ui/App.vue` 移植时改用 **`v-if` 控制存在性**、**类名没补 `show`** ⇒ 元素存在也被 CSS 判 `display: none` ⇒ **四条文案条全部不可见**：提醒条（PL003）/ 自动下班条（PL025.8）/ 恢复提示条（PL027.8）/ **错误条**（`ui/App.vue:576` 只设红字、无 display ⇒ **FIX002.3「前端失败可见反馈」一直被静默吃掉**）。旁证：清单 3② 的"弹条"取证本来就只有日志/库，从未真正目视。
+
+**方案（纯前端 4 处 + 1 注释，零 CSS 分叉）**：`ui/App.vue` 四条条带各补设计稿自己的显隐钩子 `show`——`class="banner remind show"`（:454）/ `"banner auto show"`（:457、:460）/ `"banner error show"`（:467），并改写条带注释写明"`v-if` 只管存在性、`.show` 不能省"。**不改 `controls.css`**（设计稿副本，改动须登记差异，用设计稿自己的钩子最忠实）。
+
+**验证（2026-10-15 已过）**：`npx prettier --write ui/App.vue`（unchanged）+ `npx vue-tsc --noEmit`（0）+ `npm run build` + `cargo build`（重嵌 dist，exe 重建）⇒ 造景重启后**文案条出现** ✓（「上次未打卡下班就离开了，已按 00:15:45 结束工作记账；要继续请重新打卡」）。
+
+**遗留（用户 2026-10-15 目视提出，另立条目待审）**：条带**参与文档流** ⇒ 出现时把下方内容整体**下顶**，在固定窗（300×400）里造成挤压/裁切。要求改为**浮层式**（不顶内容 + 被盖内容自雾化 + 双向居中于"日期卡 + 表盘"那一行）——建议顺延 **PATCH005.11**，方案待用户同步后再落。
+
+### 十二、PATCH005.11 文案条浮层化（2026-10-15 立项 + 当日落地；来源 = PATCH005.10 修复后用户目视"文案条把下方内容往下顶"）
+
+**问题**：四条文案条此前是**流内块**（`ui/App.vue` 的 `.content` 内、topbar 与 stage 之间）⇒ 出现时把日期卡 / 表盘 / 翻页钟 / 状态行 / 上班钮**整体下顶**；固定窗（`core/tauri.conf.json` = 300×400、`resizable: false`）里被顶到挤压 / 裁切。
+
+**用户定案（2026-10-15）**：
+
+1. **不参与文档流**（出现时下方内容一律原地不动，布局零位移）；
+2. **以「日期卡 + 表盘」那一行（`TimerCard` 的 `.timer-top`）为中心、双向居中覆盖**（两钟被盖住）；
+3. **被盖住的内容自雾化**（沿用既有配方 `filter: blur(4px)`，同 `glass.css:151-158` 浮板；不是文案条自身模糊）；
+4. **自隐**：错误条 **10s**、其余三条 **5s**；**窗口内任意位置点击**亦立即隐藏；
+5. 触发条件与文案内容不变。
+
+**做法（`ui/App.vue`，纯前端，零 Rust / 零 `controls.css` 分叉）**：
+
+- **结构**：四条条带从 `.content` 内移出，包进新容器 `.banner-layer`，作为 **`.window` 直下、与 `.content` 平级**的浮层（项目既有约定"浮层件均在 `.window` 直下"），DOM 序排在侧钮 / 浮板**之前**（层级低于确认框遮罩）。
+- **定位**：`syncBannerAnchor()` 取 `winEl.querySelector(".timer-top")` 的 `getBoundingClientRect()`，换算为相对 `.window` 的**行中心**写入 `bannerTop`；容器 `position: absolute; left/right: 0; top: <锚点>; transform: translateY(-50%)` + `display: flex; flex-direction: column; align-items: center` ⇒ **双向居中**；`pointer-events: none`（点击穿透，保证"任意点击即隐"与全局拖拽不受影响）。固定窗无缩放 ⇒ 每次显示量一次即准，不挂 resize。
+- **自雾化**：`App.vue` 胶水块新增 `.window .timer-top { transition: filter 0.35s ease }` + `.window:has(.banner-layer.open) .timer-top { filter: blur(4px) }` ⇒ 只糊**被盖的那一行**，翻页钟 / 状态行 / 按钮不动。
+- **自隐**：`watch([reminderVisible, autoOutVisible, recoveryNotice, actionError])` —— 可见性变化时 `syncBannerAnchor()` + `armBannerAutoHide()`（时长 = 有错误条 10s、否则 5s）；`hideAllBanners()` 为**唯一出口**（到点自隐与点击共用）；`onWindowDown()` 顶部（白名单 / 收板分支**之前**）先调 `hideAllBanners()` 实现"任意位置点击即隐"。
+- **退役**：`autoOutHideTimer`（原 30s 独立自隐）删除，统一交给上述机制；`clearAutoOutBanner()` 收窄为只置 `autoOutVisible = false`。
+
+**验证**：`npx prettier --write ui/App.vue` + `npx vue-tsc --noEmit` + `npm run build` + `cargo build`；live 逐条目测四条——**不顶内容 / 居中盖两钟 / 两钟糊 / 自隐时长（5·5·5·10s）/ 任意点击即隐**。
+
+**可读性定案（2026-10-15，用户逐步加码后拍板"可以了"）**：浮层盖的是**亮色件**（日期卡 / 表盘）⇒ 白字发虚。三步加码：
+
+1. 文字影 `1px 1px 3px rgba(0,0,0,0.55)` → 有改善但不够；
+2. 加浓加大到 `2px 2px 4px rgba(0,0,0,0.75)`，**圆点同款**（点为背景色块，用 `box-shadow` 对齐文字影口径）；
+3. 底由设计稿的 `var(--panel-bg)`（**白纱**）改为 **CT 黑纱 `rgba(0,0,0,0.5)`**（浮板同源）⇒ 用户确认通过。
+
+**最终配方**（`ui/App.vue` 胶水块）：`.banner-layer .banner` = `background: rgba(0,0,0,0.5)` + `text-shadow: 2px 2px 4px rgba(0,0,0,0.75)`；`.banner-layer .banner .dot` = `box-shadow: 2px 2px 4px rgba(0,0,0,0.75)`。
+
+> 复现与验证工具（临时，落 `.temp/`）：`craft.py`（造景：`recovery` / `onshift`）、`lockdb.py`（占写锁 ⇒ 打卡失败 ⇒ 错误条）。MCP sqlite 有 10 连接上限且无"列连接"工具，造景改走 Python `sqlite3`。
+
+### 十三、PATCH005.12 错误条配色 + 打卡失败原子性（2026-10-15 立项 + 当日落地；来源 = 第 4 条目测中用户观察）
+
+**问题 1（配色，用户定案）**：错误条沿用设计旁的历史"功能胶水"红字（`ui/App.vue` 胶水块 `.banner.error { color: #b42318 }`），与其余三条白字不一致。定案 = **正文改白字**（去掉红字覆盖）+ **圆点改红**（现为 accent）。
+
+**问题 2（原子性缺口，真 bug）**：`core/src/commands/workday.rs::clock_in_inner` **先改内存态**（`:46–52` 的 `session.reset(); session.start()`）**再写库**（`:53` 的 `insert_events`）；写库失败（如 `SQLITE_BUSY`）时 `?` 直接抛出 ⇒ `:59` 的 `workday.clock_in(at)` **从未执行** ⇒ **撕裂态**：会话 Running + 工作日在岗态**未置位**。目测实证：大计时器开始走字（`00:00:11.9`）而上班钮仍是「上班」、底部三段控件置灰；且"**失败后**计时器才动"= 该缺口的表现。
+
+**做法**：
+
+- `clock_in_inner`：把 `insert_events` **提到内存态变更之前**（锁序仍合法：持 workday 取 storage、再取 session，无反向嵌套）⇒ 失败即"什么都没发生"；会话内存态与工作日态都只在写库成功后推进。
+- `ui/App.vue` 胶水块：`.banner.error` 去红字（继承白 ink）；新增 `.banner-layer .banner.error .dot { background: <红> }`。
+
+**验证**：`cargo test`（打卡相关用例全绿）+ 门禁 + live 复现（`lockdb.py` 占写锁 → 点打卡 → 断言：错误条**白字红点**、**大计时器不动**、上班钮仍「上班」）。
+
+### 十四、PATCH005.13 自动下班文案条·启动竞态（2026-10-15 立项 + 当日落地；来源 = 第 3 条目测）
+
+**现象**：跨零点班在**停机期间到期** ⇒ 重开后 `arm_auto_out_on_start` 武装的兜底线程**在 webview 装载完成前**就 `emit("workday-auto-out")` ⇒ 前端监听尚未注册 ⇒ **事件被丢**、文案条不出现（后端行为与库记帐均正确：`auto_clock_out` 已落）。对照：PL027.8 的恢复提示条走「**后端存槽 + 前端挂载拉取**」所以不受竞态影响。
+
+**做法（照抄 PL027.8 范式）**：
+
+- `core/src/commands/mod.rs` 的 `AppContext` 增 `auto_out_notice: Mutex<Option<i64>>`（**进程内**单次，随进程退出清空 ⇒ 不会跨启动残留）。
+- 自动下班**触发处**（`workday-auto-out` 的 emit 点）同一时刻存槽。
+- 新增命令 `take_auto_out_notice`（**取即清空**，返回 `Option<i64>`）；`lib.rs` 注册。
+- `ui/App.vue` 挂载时（`take_recovery_notice` 旁）拉一次 ⇒ `Some(at)` 即置 `autoOutAt` / `autoOutVisible` ⇒ 文案条照常弹（含 5s 自隐、点击即隐）。
+
+**验证**：`cargo test`（新增"存槽 / 取即空"用例）+ 门禁 + live：用 `autolat` 造景（跨零点 + 到点已过）重开 ⇒ **文案条出现**（修复前必失败）。
+
+### 十五、计时探针（临时，PATCH005.12 附带；查"打卡失败反馈 1–2 秒"）
+
+**目的**：第 4 条目测中"按下确认后 1–2 秒才弹出错误条"，静态走查**查不出来源**——`storage.rs` 全篇无 `PRAGMA` / `busy_timeout`（`Storage::init` `:153` 只建表、`insert_events` `:200` 用 `unchecked_transaction`）⇒ 别连接占写锁时 INSERT 应**立即** `SQLITE_BUSY`，不该等 1–2 秒。
+
+**做法（临时，测完移除）**：
+
+- 后端：`clock_in` 命令入口 / 出口各记 `std::time::Instant`，耗时落 `diag`；
+- 前端：`onConfirmOk` 里 `invoke` 前后 `performance.now()` 差值，临时拼进错误条文案（便于目视读数）；
+- 两数一比 ⇒ 定位"后端慢"还是"IPC / 渲染慢"，再对症下药（若为渲染卡顿，再评估是否与新增 `filter: blur` / `backdrop-filter` 合成有关）。
+
+**实测结论（2026-10-15）**：占写锁时后端 `clock_in` 自耗 **5522ms** 才报 `SQLITE_BUSY`（前端往返同量级）⇒ 真身 = **SQLite 忙等约 5 秒**（`core/src` 内无显式 `busy_timeout` / `PRAGMA` ⇒ 来自依赖 / SQLite 默认）⇒ 立 **PATCH005.14**。
+
+### 十六、PATCH005.14 写库快速失败（2026-10-15 立项 + 当日落地并实测；来源 = 上节探针实测）
+
+**实测（修复前 / 后）**：占写锁 → 点打卡 ⇒ 后端 `clock_in` **5522ms** 才报 `SQLITE_BUSY`（前端往返同量级）；落地 `busy_timeout(0)` 后 **18ms** ⇒ 反馈即时 ✓（`JSON` 级：`（往返 18ms）`）。
+
+**做法**：`core/src/storage.rs::Storage::init` 里 `conn.busy_timeout(Duration::from_millis(0))` ⇒ 写冲突**立即** `SQLITE_BUSY`；正常路径 app 是唯一写者（命令经 Mutex 串行、心跳同锁），归零不误伤。**探针已在复测通过后移除**（前后端各一处）。
+
+**附带修正（PATCH005.12 补）**：错误条模板**漏了 `<span class="dot">`**（其余三条都有）⇒ 红点 CSS 打在空处；已补回圆点，复测红点出现 ✓。

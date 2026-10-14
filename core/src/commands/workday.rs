@@ -43,19 +43,21 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(
     if used_before >= i64::from(OVERTIME_CAP_HOURS) * 3_600 {
         return Err(CommandError::DayBudgetExhausted(OVERTIME_CAP_HOURS));
     }
-    {
-        // 打卡即工作（PATCH002）：归零 + 立即 Running，同一 guard 内完成不留中间态；
-        // 锁序 workday → session → storage 单向（见 AppContext 注释）。
-        let mut session = lock(ctx)?;
-        session.reset();
-        session.start()?;
-    }
+    // 先落库、成功后才推进内存态（PATCH005.12 原子性）：写库失败（如 SQLITE_BUSY）时必须
+    // "什么都没发生"——否则会留下"会话 Running + 工作日在岗态未置位"的撕裂态（实测：大计时器
+    // 开始走字、上班钮仍「上班」）。锁序仍合法：持 workday 取 storage、再取 session，无反向嵌套。
     poison("存储", ctx.storage.lock())?.insert_events(&[
         // 打卡即工作（PATCH002）：同一事务同时记 clock_in 与段起点——图谱/明细从打卡那一刻
         // 就有工作段（否则该窗口会整段算休息）
         (at, EventKind::ClockIn),
         (at, EventKind::SegmentStart),
     ])?;
+    {
+        // 打卡即工作（PATCH002）：归零 + 立即 Running，同一 guard 内完成不留中间态
+        let mut session = lock(ctx)?;
+        session.reset();
+        session.start()?;
+    }
     workday.clock_in(at)?;
     // 武装自动下班基准（PATCH005.3）：到点时刻 = 本班打卡 + **今日剩余**（今日上限 − 本班前已累计）；
     // 若今日预算已用满 → 本次打卡即**隐式加班**：落 `overtime` 并按下一步步进武装（用户定案：
@@ -871,7 +873,7 @@ pub(crate) fn spawn_auto_out_watcher(app: &AppHandle, generation: u64) {
                 let ctx = app.state::<AppContext>();
                 match clock_out_inner(&ctx, at, EventKind::AutoClockOut) {
                     Ok(()) => {
-                        if let Err(err) = app.emit("workday-auto-out", at) {
+                        if let Err(err) = deliver_auto_out(&app, &ctx, at) {
                             crate::warn_diag(&format!("兜底自动下班事件发送失败：{err}"));
                         }
                     }
@@ -883,6 +885,34 @@ pub(crate) fn spawn_auto_out_watcher(app: &AppHandle, generation: u64) {
         }
     });
 }
+/// 发「自动下班」通知（PATCH005.13）：**先存槽、再 emit**——emit 可能在 webview 装载完成前
+/// 发出（如"停机期间到期"的重开）而被丢掉；前端挂载时用 `take_auto_out_notice` 补拉
+/// （照抄 PL027.8 恢复提示条范式）。
+pub(super) fn deliver_auto_out<C: Clock>(
+    app: &AppHandle,
+    ctx: &AppContext<C>,
+    at: i64,
+) -> Result<(), CommandError> {
+    if let Ok(mut slot) = ctx.auto_out_notice.lock() {
+        *slot = Some(at);
+    }
+    app.emit("workday-auto-out", at)
+        .map_err(|e| CommandError::Event(e.to_string()))
+}
+
+/// 取启动期自动下班通知（**取即清空**；仅"本进程内发生过自动下班"时有值）。
+pub(super) fn take_auto_out_notice_inner<C: Clock>(
+    ctx: &AppContext<C>,
+) -> Result<Option<i64>, CommandError> {
+    Ok(poison("自动下班通知", ctx.auto_out_notice.lock())?.take())
+}
+
+/// 读取启动期自动下班通知（前端挂载时拉一次；PATCH005.13）。
+#[tauri::command]
+pub fn take_auto_out_notice(handle: State<'_, AppContext>) -> Result<Option<i64>, CommandError> {
+    take_auto_out_notice_inner(&handle)
+}
+
 /// 计时门禁：未上班严格拒绝（前后端双保险的后端面；托盘/热键/UI 共用）。
 pub(super) fn require_on_duty<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
     let workday = poison("工作日", ctx.workday.lock())?;
@@ -1447,6 +1477,16 @@ mod tests {
             })
         );
         assert_eq!(take_recovery_notice_inner(&ctx).unwrap(), None, "取过即空");
+    }
+
+    /// PATCH005.13：启动期「自动下班」通知存槽 / 取即空（前端挂载补拉的依据）。
+    #[test]
+    fn auto_out_notice_stash_and_take_once() {
+        let ctx = ctx(FakeClock::new());
+        assert_eq!(take_auto_out_notice_inner(&ctx).unwrap(), None);
+        *ctx.auto_out_notice.lock().unwrap() = Some(12_345);
+        assert_eq!(take_auto_out_notice_inner(&ctx).unwrap(), Some(12_345));
+        assert_eq!(take_auto_out_notice_inner(&ctx).unwrap(), None, "取过即空");
     }
 
     /// FIX002.4：自动下班路径段末事件随下班记回填时刻（与纯归约契约测试口径一致）。

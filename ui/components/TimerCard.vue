@@ -650,6 +650,9 @@ onUnmounted(() => {
         <div class="second" :style="secondStyle"></div>
       </div>
     </div>
+    <!-- 文案条浮层插槽（PATCH005.11）：以本行（日期卡 + 表盘）为定位锚，双向居中覆盖——
+         插槽内容由 App 提供；本行定位锚（position: relative）样式见 App.vue 胶水块 -->
+    <slot name="row-overlay" />
   </div>
 
   <!-- ② 翻转计时（时 : 分 : 秒 . 十分位，JS 生成 7 格） -->

@@ -307,9 +307,11 @@ pub fn run() {
             settings_path,
             wall: Box::new(commands::SystemWallClock),
             recovery: Mutex::new(None),
+            auto_out_notice: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::workday::take_recovery_notice,
+            commands::workday::take_auto_out_notice,
             commands::session::session_start,
             commands::session::session_pause,
             commands::session::session_resume,
