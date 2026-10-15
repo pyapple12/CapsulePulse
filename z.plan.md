@@ -2995,3 +2995,66 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 **做法（`core/src/lib.rs` 的 `spawn_hover_watcher`）**：`WatchAction::Show` 分支改为 —— 竞态复核（CT FIX007.17 ✓）后**先 `anchor_tray_hover` + `window.show()`**（失败仅落日志 ✓），**再**尽力推送 `push_hover_summary`（其内部失败已自行落日志 ✓）。卡片最坏短暂显示上一次内容，也优于整窗不出现 ✓。
 
 **验证**：`cargo test` + 门禁 + live（从别的托盘图标快速往返 CP 图标 **多次**：均应出窗 ✓；推送失败路径不再阻断显示 ✓）。
+
+## 附录 PATCH008：托盘右键菜单窗化（自绘 HTML 菜单，外观同 hover 卡）（2026-10-16 立项）
+
+**目标**：托盘右键菜单从**原生 Win32 菜单**改为**自绘 HTML 菜单窗**（照 CT PL021 逻辑），外观 = CP hover 卡同款配方；功能项保持 CP 现有五项。
+
+**定案（2026-10-16 用户拍板）**：① **几何同 CP hover 纪律**——量内容 + 从 CSS 读 chrome + `snap4` 向上取 4 的倍数（双整数）+ 卡片 ≡ 窗（无 margin / 铺满），零手抄常量、零手算；② **菜单项五项**（**聚焦主窗** · **切换状态** · 窗口置顶 ☑ · 贴边吸附 ☑ · 退出；含两处分隔）——2026-10-16 用户订正：「显示/隐藏」改「**聚焦主窗**」且**照 CT 只显示 + 还原 + 聚焦、不再负责隐藏**（隐藏仍走标题栏关闭 / 显隐热键）；「开始/暂停」改「**切换状态**」（功能不变）；③ **样式按 CP 现状**（hover 卡配方 + CP 字号体系；**不抄 CT 的 34px 行**，行高/字号/勾选标记实机目测定稿）；④ **一并补 CT 的 `Suppressed` 态**（菜单开着锁死 hover 卡）。
+
+### 一、PATCH008.1 菜单窗基座（建窗 + 整定 + 锚定 + 点外守候）
+
+**做法**：
+
+- 新 `core/src/menu.rs`：常量 `WINDOW_WIDTH`（创建期初始宽）/ `HEIGHT_MIN`（创建期初始高，仿 `hover.rs`）；纯函数 `anchor_menu(icon: (i32,i32,i32,i32), size: (u32,u32), screen: Option<(i32,i32,i32,i32)>) -> (i32,i32)`——**左缘 = 图标水平中轴**（向右展开）、默认**图标上方**（间距 8）、**屏上缘放不下翻下方**、**屏右缘放不下整体左移贴边**（照 CT `on_tray_right_button` 三段规则）；`spawn_menu_watch(app)`——100ms 步进：**先等弹出用的右键松开**（照 CT，防"弹出即收"），此后**左/右键按下且光标不在菜单窗矩形内 ⇒ 收窗退出**、菜单窗已不可见 ⇒ 自灭退出；**窗口查询（`is_visible`/`outer_*`）一律锁外**（死锁铁律）。
+- `core/src/lib.rs` 的 `win_input` 模块：**补 `right_down()`**（`VK_RBUTTON = 0x02`，与既有 `left_down()` 同构；非 Windows 空实现恒 `false`）。
+- `core/src/lib.rs` 建窗（与 `tray-hover` 同段）：`WebviewWindowBuilder::new(app, "tray-menu", App("index.html"))` + `.title("CapsulePulse 菜单")` + `.position(-2000.0, -2000.0)` + `.inner_size(menu::WINDOW_WIDTH, menu::HEIGHT_MIN)` + `.transparent(true).decorations(false).skip_taskbar(true).resizable(false).visible(true).focused(false).focusable(false).always_on_top(true).shadow(false)` → `hide()` → **`glass_backdrop::apply_round_corners` + `glass_backdrop::hide_active_border`**（PATCH007.15 教训：CP 托盘窗实测需要后者）。
+- `core/capabilities/default.json`：`windows` 数组加 **`"tray-menu"`**（ACL：菜单窗要 `listen("prefs-changed")`；PATCH007.1 同款防线）。
+
+**验证**：`cargo test`（`anchor_menu` 用例：上方 / 翻下 / 屏右缘钳制 / 角落）+ 门禁 + live（右键出窗、位置正确、屏缘不越界）。
+
+### 二、PATCH008.2 菜单窗前端组件与分流
+
+**做法**：新 `ui/src/components/TrayMenu.vue`——根卡片用 **hover 卡同款配方**（`box-sizing: border-box` / `height: 100%` / `margin: 0` / padding 同 hover / `border-radius: 8px` / `background: rgba(18,20,26,0.86)` / `border: 1px solid rgba(255,255,255,0.18)` / `user-select: none`）；五项行（勾选列 + 文本 + hover 高亮）+ 两处分隔（行骨架照 CT `.tm-item`、**数值按 CP 体系**）；`onMounted` 做高度链修正（照 `TrayHover.vue` 三处 `height:100%` + `background:transparent` + `overflow:hidden`）；点项 `invoke("tray_menu_action", { action })`。`ui/src/main.ts` 的 label 分流加 `tray-menu` 分支 + DEV 基座 `?window=tray-menu`；`ui/src/dev/mock-invoke.ts` 补 `tray_menu_action` / `tray_menu_resize` / `get_settings` 的 mock。
+
+**验证**：`vue-tsc` + build + DEV 基座目验（外观与 hover 一致）+ live（右键出卡形态正确）。
+
+### 三、PATCH008.3 菜单窗尺寸管线（双整数）
+
+**做法**：新命令 `core/src/commands/tray_menu.rs::tray_menu_resize(app, width: Option<f64>, height: f64)`（照 `commands/hover.rs::tray_hover_resize`：`set_size(LogicalSize)` + **重锚菜单窗**；失败仅落日志——装饰层纪律）。`TrayMenu.vue` 挂载后量内容层 + 从 `getComputedStyle(卡片)` 读 padding/border/margin 作 chrome ⇒ 窗 = 内容 + chrome，经 **`snap4`**（向上取 4 的倍数，同 hover）；宽高都走此管线（菜单窗无固定宽）。
+
+**验证**：`cargo test` + live（无亮/暗缝、无裁、文本不换行）。
+
+### 四、PATCH008.4 右键触发与显隐闭环
+
+**做法**：`core/src/lib.rs` 的 `TrayIconEvent::Click{ button: Right }` 分支改为 `on_tray_right_button(app, rect)`（照 CT）——记锚点（`MENU_ANCHOR` 静态）+ **先 `dismiss_tray_hover`**（hover 恒置顶、会浮在菜单上）+ `anchor_menu` 定位 + `show` + `spawn_menu_watch`；**菜单窗可见时再右键 = 收窗**（照 CT）。`CloseRequested` 已由 PATCH007.4 覆盖非主窗（无需改动）。
+
+**验证**：live（右键出 / 再右键收 / 点桌面别处收 / 点窗内不收；菜单开着时 hover 不浮出）。
+
+> **补记（同日，实测踩坑订正）**：右键臂初版未过滤 `button_state` ⇒ `Click` 对按下/抬起**各发一次**，第一次（按下）弹窗、第二次（抬起）命中"菜单开着 = 收"分支 ⇒ **一闪即没**；已加 `MouseButtonState::Down` 过滤（照 CT `on_tray_right_button` 的"右键**按下**"语义；左键臂同款过滤在先）✓。
+
+### 五、PATCH008.5 菜单动作命令与勾选态同步
+
+**做法**：新 `core/src/commands/tray_menu.rs::tray_menu_action(action: String, app)`——**先收菜单窗**再按 action 分发（照 CT）：`focus_main` / `toggle_timer` / `toggle_always_on_top` / `toggle_snap_to_edge` / `quit`；把 `lib.rs::handle_action` 提 `pub(crate)`（或迁入该模块）复用语义，**零逻辑重复**。`core/src/lib.rs::sync_prefs_ui` 去掉 `refresh_tray_menu`（原生菜单退役后只剩广播）。`TrayMenu.vue` 用 `get_settings` 读两开关初值 + `listen("prefs-changed")` 回显（载荷类型 `PrefsSnapshot`，同 `App.vue`）。
+
+**验证**：`cargo test` + live（五项动作各自生效；勾选态与设置面板/托盘双向同步）。
+
+### 六、PATCH008.6 hover 守候接入菜单事实源（补 CT 的 `Suppressed`）
+
+**做法**：`core/src/hover.rs` 的 `Phase` 增 `Suppressed`；`step_watch(phase, now_ms, in_tray, in_window, menu_open, window_visible)` 增 `menu_open` 参数（照 CT 五入参形态）——`Armed` 期菜单开 ⇒ 转 `Suppressed`（不出窗）；`Shown` 期菜单开 ⇒ 收窗 + 转 `Suppressed`；`Suppressed` 期菜单收 ⇒ 回 `Idle`（**需新 Enter 重新武装**，不自动弹出）；`Suppressed` 期窗可见一律收走（FIX008.3 同款兜底）。`core/src/lib.rs` 守候线程加 `menu_is_open(&handle)`（`tray-menu` 的 `is_visible`，**锁外**调用）传入；`hover.rs` 单测补 4 条。
+
+**验证**：`cargo test`（新 4 用例）+ 门禁 + live（菜单开着悬停图标不出 hover 卡；收菜单后需重新移入才出）。
+
+> **补记（同日，实测踩坑订正）**：初版把 `menu_is_open(&handle)` 写在 `HOVER_WATCH` 锁块内 ⇒ 悬停 / 右键（主线程取同一把锁）与守候线程（持锁等主线程应答）**互等死锁**（实测进程 `Responding=False`、卡面与菜单双双无响应）；已把该查询移到锁外（与 `cursor_in_window` / `is_visible` 同规）并在代码留注释约束 ✓。
+
+### 七、PATCH008.7 原生菜单退役（清场）
+
+**做法**：删 `lib.rs::build_tray_menu` / `refresh_tray_menu` / `TrayIconBuilder::menu(...)` / `.on_menu_event(...)` / `use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem}`；`handle_action` 若迁入 `commands/tray_menu.rs` 则此处删净。
+
+**验证**：`clippy -D warnings` 零告警（= 无死代码残留）+ live 回归（左键显隐、托盘图标、退出链、单实例）。
+
+### 八、PATCH008.8 复验与收口
+
+**做法**：`.temp/pl027-visual-standards.md` 追加**附录 C：PATCH008 目测组**（照 B 组同规）；`AGENTS.md` 状态行补 PATCH008 段；`x.progress` 本组条目勾选；README 徽章推进。
+
+**验证**：门禁全量 + live 全项 + 提交前 `git status` / `git diff --stat` 核对。

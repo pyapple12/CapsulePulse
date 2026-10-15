@@ -9,6 +9,7 @@ pub mod hover;
 pub mod reminder;
 pub mod session;
 pub mod stats;
+pub mod tray_menu;
 pub mod window;
 pub mod workday;
 
@@ -139,6 +140,9 @@ pub enum CommandError {
     /// 事件发送失败（提醒通道不可用）。
     #[error("事件发送失败：{0}")]
     Event(String),
+    /// 菜单动作非法（PATCH008.5：自绘菜单窗只发已知动作，未知即前端契约违规——严格报错不静默）。
+    #[error("未知菜单动作：{0}")]
+    UnknownMenuAction(String),
 }
 
 impl Serialize for CommandError {

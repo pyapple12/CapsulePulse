@@ -11,6 +11,7 @@
 pub mod commands;
 pub mod hotkey;
 pub mod hover;
+pub mod menu;
 pub mod period;
 pub mod reminder;
 pub mod session;
@@ -36,7 +37,6 @@ use crate::settings::{ReminderSettings, WindowPos};
 use crate::storage::Storage;
 use crate::workday::WorkdayState;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent,
 };
@@ -60,11 +60,21 @@ static DRAG_SNAP_PENDING: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
 mod win_input {
-    /// 鼠标左键是否按下（GetAsyncKeyState 高位 = 物理 / 合成按下中）
+    /// 左键虚拟键码
+    const VK_LBUTTON: i32 = 0x01;
+    /// 右键虚拟键码（PATCH008：菜单窗点外收起判据与弹出宽限共用）
+    const VK_RBUTTON: i32 = 0x02;
+    /// `GetAsyncKeyState` 高位 = 物理 / 合成按下中
+    const PRESSED: u16 = 0x8000;
+
+    /// 鼠标左键是否按下
     pub fn left_down() -> bool {
-        const VK_LBUTTON: i32 = 0x01;
-        const PRESSED: u16 = 0x8000;
         unsafe { (GetAsyncKeyState(VK_LBUTTON) as u16) & PRESSED != 0 }
+    }
+
+    /// 鼠标右键是否按下
+    pub fn right_down() -> bool {
+        unsafe { (GetAsyncKeyState(VK_RBUTTON) as u16) & PRESSED != 0 }
     }
 
     #[link(name = "user32")]
@@ -79,6 +89,11 @@ mod win_input {
 mod win_input {
     /// 鼠标左键是否按下（非 Windows 空桩：恒 false）
     pub fn left_down() -> bool {
+        false
+    }
+
+    /// 鼠标右键是否按下（非 Windows 空桩：恒 false）
+    pub fn right_down() -> bool {
         false
     }
 }
@@ -154,8 +169,8 @@ fn snap_if_needed(window: &tauri::Window) {
 // 杜绝多线程换代的孤儿窗）；停留阈值防划过误触、离开两区域连续 4 拍（400ms）才收起——CT
 // PL019.1 实证「`Leave` 事件慢速移出会丢失」，故**不依赖 `Leave`**。显示中按 1 秒节拍重推
 // 概览（PATCH007.6：悬停期实时刷新）。光标判据仅 Windows 有（非 Windows 退化为事件驱动）。
-/// 悬浮窗与托盘图标的间距（物理 px）
-const HOVER_ANCHOR_MARGIN: i32 = 8;
+/// 托盘窗（hover / 菜单）与托盘图标的锚定间距（物理 px；PATCH008 起两窗共用单一来源）
+pub(crate) const TRAY_ANCHOR_MARGIN: i32 = 8;
 /// 守候线程退出口：悬浮窗连续缺席拍数上限（满即自灭，防退出收尾空转）
 const HOVER_ABSENT_LIMIT: u32 = 50;
 
@@ -220,7 +235,7 @@ fn cursor_in_tray(anchor: Option<(i32, i32, i32, i32)>) -> Option<bool> {
 /// 光标是否在悬浮窗矩形内（PATCH007.2，抄 CT `cursor_in_window`）：**物理位置兜底**——窗
 /// hide/show 切换期 webview 的 `mouseenter` 可能丢失，物理位置不依赖事件。非 Windows 恒
 /// `false`（无查询能力 ⇒ 卡片不因"光标在卡上"而保持，随 [problems#1] 一并验证）。
-fn cursor_in_window(window: &tauri::WebviewWindow) -> bool {
+pub(crate) fn cursor_in_window(window: &tauri::WebviewWindow) -> bool {
     let (Some((cx, cy)), Ok(pos), Ok(size)) = (
         win_cursor::cursor_pos(),
         window.outer_position(),
@@ -229,6 +244,14 @@ fn cursor_in_window(window: &tauri::WebviewWindow) -> bool {
         return false;
     };
     cx >= pos.x && cx < pos.x + size.width as i32 && cy >= pos.y && cy < pos.y + size.height as i32
+}
+
+/// 菜单窗此刻是否开着（PATCH008.6）：hover 守候的 `Suppressed` 锁死事实源。
+/// **只允许锁外调用**：`is_visible` 走事件循环同步等待主线程应答，锁内调用 = 互挂死锁。
+fn menu_is_open(app: &AppHandle) -> bool {
+    app.get_webview_window("tray-menu")
+        .map(|window| window.is_visible().unwrap_or(false))
+        .unwrap_or(false)
 }
 
 /// 悬浮窗锚定（PATCH007.2，抄 CT 预览窗几何）：右缘对齐托盘图标右缘；默认图标上方，屏上缘
@@ -241,9 +264,9 @@ fn anchor_tray_hover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32, i3
         return;
     };
     let px = x + w - size.width as i32; // 右对齐托盘图标
-    let mut py = y - size.height as i32 - HOVER_ANCHOR_MARGIN; // 默认图标上方
+    let mut py = y - size.height as i32 - TRAY_ANCHOR_MARGIN; // 默认图标上方
     if py < 0 {
-        py = y + h + HOVER_ANCHOR_MARGIN; // 翻到下方
+        py = y + h + TRAY_ANCHOR_MARGIN; // 翻到下方
     }
     if let Err(err) = window.set_position(PhysicalPosition::new(px, py)) {
         warn_diag(&format!("hover 窗定位失败：{err}"));
@@ -294,14 +317,40 @@ fn hide_tray_hover(app: &AppHandle) {
     }
 }
 
-/// 托盘右键（原生菜单将弹出）：先收悬浮窗 + **相位归零**（防守候线程在菜单弹出后再把它显示
-/// 出来）—— 等价 CT 的 `Suppressed` 锁死（CP 托盘是原生菜单、无"菜单窗可见性"事实源，故以
-/// 相位归零 + 光标在菜单上时 `in_tray = false` 天然不弹覆盖；菜单收起后需重新移入图标才再出卡）。
+/// 托盘右键（PATCH008.6）：先收悬浮窗 + **转 `Suppressed` 锁死**（菜单窗即将弹出，照 CT）——
+/// 守候线程据菜单窗可见性维持锁死，菜单收起后回 `Idle`（需新 `Enter` 重新移入图标才再出卡）。
 fn dismiss_tray_hover(app: &AppHandle) {
     if let Ok(mut watch) = HOVER_WATCH.lock() {
-        watch.phase = Phase::Idle;
+        watch.phase = Phase::Suppressed;
     }
     hide_tray_hover(app);
+}
+
+/// 托盘右键（PATCH008.4；照 CT `on_tray_right_button`）：菜单窗已开 ⇒ 再右键 = 收窗返回；
+/// 未开 ⇒ 记锚点 + **先收 hover 窗**（它恒置顶、会浮在菜单之上）+ 按锚定规则定位（含屏缘
+/// 钳制，单一来源）+ 显示 + 起点外收起守候。失败仅落日志（装饰层纪律）。
+fn on_tray_right_button(app: &AppHandle, rect: tauri::Rect) {
+    let (tauri::Position::Physical(pos), tauri::Size::Physical(size)) = (rect.position, rect.size)
+    else {
+        return;
+    };
+    let Some(menu_win) = app.get_webview_window("tray-menu") else {
+        return;
+    };
+    if menu_win.is_visible().unwrap_or(false) {
+        if let Err(err) = menu_win.hide() {
+            warn_diag(&format!("菜单窗收起失败：{err}"));
+        }
+        return; // 菜单开着再右键 = 收起
+    }
+    menu::set_anchor((pos.x, pos.y, size.width as i32, size.height as i32));
+    dismiss_tray_hover(app);
+    menu::reanchor_menu(&menu_win);
+    if let Err(err) = menu_win.show() {
+        warn_diag(&format!("菜单窗显示失败：{err}"));
+        return;
+    }
+    menu::spawn_menu_watch(app);
 }
 
 /// 托盘图标悬停进入（PATCH007.2）：记录图标矩形 + 相位分派——`Shown` 只清 `miss` **不重武装**
@@ -346,14 +395,24 @@ fn spawn_hover_watcher(app: &AppHandle) {
             // 窗口查询（is_visible / outer_*）与动作（show / hide / set_position）全在锁外执行
             let visible = window.is_visible().unwrap_or(false);
             let in_window = visible && cursor_in_window(&window);
+            // **窗口调用一律锁外**：`menu_is_open` 与 `cursor_in_window` 同属"等主线程应答"的
+            // 查询——放进下面的锁块内会与主线程（`on_tray_hover_enter` / `dismiss_tray_hover`
+            // 取同一把锁）互等死锁（PATCH008.6 初版即踩此坑：悬停/右键双双卡死）。
+            let menu_open = menu_is_open(&handle);
             let (action, anchor, phase_after) = {
                 let mut watch = match HOVER_WATCH.lock() {
                     Ok(guard) => guard,
                     Err(_) => continue, // 锁中毒：跳过本拍（守候是装饰层，不阻断主流程）
                 };
                 let in_tray = cursor_in_tray(watch.anchor).unwrap_or(false);
-                let (next, action) =
-                    hover::step_watch(watch.phase.clone(), now_ms(), in_tray, in_window, visible);
+                let (next, action) = hover::step_watch(
+                    watch.phase.clone(),
+                    now_ms(),
+                    in_tray,
+                    in_window,
+                    menu_open,
+                    visible,
+                );
                 watch.phase = next.clone();
                 (action, watch.anchor, next)
             };
@@ -522,12 +581,12 @@ pub(crate) fn toggle_main_window(app: &AppHandle) {
     }
 }
 
-/// 窗口偏好全量同步（PL028.3 单一同步出口）：广播 `prefs-changed`（设置面板回显）+
-/// 刷新托盘勾选态——设置面板与托盘菜单双入口的改动都经此收口。
+/// 窗口偏好全量同步（PL028.3 单一同步出口）：广播 `prefs-changed`（设置面板与自绘菜单窗
+/// 回显）——设置面板与托盘菜单双入口的改动都经此收口。PATCH008 起原生菜单退役，勾选态刷新
+/// 由菜单窗自身的 `prefs-changed` 监听承担（本函数只剩广播）。
 pub(crate) fn sync_prefs_ui(app: &AppHandle) {
     let ctx = app.state::<AppContext>();
     commands::reminder::emit_prefs_changed(app, &ctx);
-    refresh_tray_menu(app);
 }
 
 /// 托盘窗口偏好切换（PL028.3）：读当前值取反 → 落库 + 置顶即时生效 → 双入口同步。
@@ -548,79 +607,13 @@ fn toggle_window_pref(app: &AppHandle, kind: PrefKind) {
     sync_prefs_ui(app);
 }
 
-/// 构建托盘菜单（PL028.3）：显示/隐藏 + 开始/暂停 + 分隔线 + **窗口置顶 / 贴边吸附**
-/// （`CheckMenuItem`，勾选态 = 设置事实源）+ 退出。重建即勾选态刷新（[`refresh_tray_menu`]）。
-fn build_tray_menu(
-    manager: &impl Manager<tauri::Wry>,
-    always_on_top: bool,
-    snap_to_edge: bool,
-) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-    let toggle_visible =
-        MenuItem::with_id(manager, "toggle_visible", "显示/隐藏", true, None::<&str>)?;
-    let toggle_timer = MenuItem::with_id(manager, "toggle_timer", "开始/暂停", true, None::<&str>)?;
-    let on_top = CheckMenuItem::with_id(
-        manager,
-        "toggle_always_on_top",
-        "窗口置顶",
-        true,
-        always_on_top,
-        None::<&str>,
-    )?;
-    let snap = CheckMenuItem::with_id(
-        manager,
-        "toggle_snap_to_edge",
-        "贴边吸附",
-        true,
-        snap_to_edge,
-        None::<&str>,
-    )?;
-    let quit = MenuItem::with_id(manager, "quit", "退出", true, None::<&str>)?;
-    let sep_a = PredefinedMenuItem::separator(manager)?;
-    let sep_b = PredefinedMenuItem::separator(manager)?;
-    Ok(Menu::with_items(
-        manager,
-        &[
-            &toggle_visible,
-            &toggle_timer,
-            &sep_a,
-            &on_top,
-            &snap,
-            &sep_b,
-            &quit,
-        ],
-    )?)
-}
-
-/// 托盘菜单勾选态刷新（PL028.3）：`TrayIcon` 只有 `set_menu`、无菜单读取口 ⇒ 按设置
-/// 事实源**重建菜单并回灌**。失败落日志（托盘为体验层，下次刷新自愈）。
-fn refresh_tray_menu(app: &AppHandle) {
-    let ctx = app.state::<AppContext>();
-    let (on_top, snap) = match ctx.settings.lock() {
-        Ok(settings) => (settings.always_on_top, settings.snap_to_edge),
-        Err(err) => {
-            warn_diag(&format!("设置锁中毒，托盘勾选态未刷新：{err:?}"));
-            return;
-        }
-    };
-    let menu = match build_tray_menu(app, on_top, snap) {
-        Ok(menu) => menu,
-        Err(err) => {
-            warn_diag(&format!("托盘菜单重建失败（勾选态未刷新）：{err}"));
-            return;
-        }
-    };
-    let Some(tray) = app.tray_by_id("main-tray") else {
-        return;
-    };
-    if let Err(err) = tray.set_menu(Some(menu)) {
-        warn_diag(&format!("托盘菜单刷新失败：{err}"));
-    }
-}
-
-/// 托盘菜单动作分发（按菜单项 id；计时切换与退出落库复用命令层自由函数）。
-fn handle_action(app: &AppHandle, id: &str) {
+/// 托盘菜单动作分发（按动作 id；计时切换与退出落库复用命令层自由函数）——PATCH008 起由
+/// 自绘菜单窗命令 [`commands::tray_menu::tray_menu_action`] 调用（原生菜单事件分发已退役）。
+pub(crate) fn handle_action(app: &AppHandle, id: &str) {
     match id {
-        "toggle_visible" => toggle_main_window(app),
+        // 聚焦主窗（PATCH008：照 CT 语义——只显示 + 还原 + 聚焦，**不再负责隐藏**；
+        // 隐藏仍走标题栏关闭 / 显隐热键）
+        "focus_main" => show_main_window(app),
         "toggle_timer" => {
             let ctx = app.state::<AppContext>();
             if let Err(err) = commands::session::toggle_session(&ctx) {
@@ -647,38 +640,30 @@ fn handle_action(app: &AppHandle, id: &str) {
     }
 }
 
-/// 构建托盘：应用图标 + 菜单（显示/隐藏、开始/暂停、窗口置顶、贴边吸附、退出）；
-/// 左键单击 = 显隐切换。菜单项勾选态按 config 初始化（PL028.3）。
+/// 构建托盘：应用图标 + 事件接线（左键单击 = 显隐切换；右键 = 自绘菜单窗开关；悬停 = 概览卡）。
+/// PATCH008 起菜单为自绘 HTML 窗（`tray-menu`），原生菜单及其勾选态刷新链已退役。
 fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let (on_top, snap) = {
-        let ctx = app.state::<AppContext>();
-        let settings = ctx
-            .settings
-            .lock()
-            .map_err(|err| format!("设置锁中毒，托盘无法构建：{err:?}"))?;
-        (settings.always_on_top, settings.snap_to_edge)
-    };
-    let menu = build_tray_menu(app, on_top, snap)?;
     let icon = app
         .default_window_icon()
         .ok_or("缺少应用图标（tauri.conf.json bundle.icon），托盘无法构建")?;
     TrayIconBuilder::with_id("main-tray")
         .icon(icon.clone())
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| handle_action(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| match event {
-            // 左键单击 = 显隐切换；右键弹菜单（show_menu_on_left_click 已关）
+            // 左键单击 = 显隐切换
             TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } => toggle_main_window(tray.app_handle()),
-            // 右键（原生菜单将弹出）：先收掉 hover 概览窗 + 相位归零——它恒置顶，会浮在菜单之上
+            // 右键（PATCH008，照 CT「右键**按下**」）：自绘菜单窗开关（再按 = 收；内部先收 hover 窗）。
+            // **必须过滤 `button_state`**：`Click` 对按下/抬起**各发一次**，不过滤会"按下弹窗、
+            // 抬起又收窗" = 一闪即没（左键臂同款过滤在先，PATCH008 订正）。
             TrayIconEvent::Click {
                 button: MouseButton::Right,
+                button_state: MouseButtonState::Down,
+                rect,
                 ..
-            } => dismiss_tray_hover(tray.app_handle()),
+            } => on_tray_right_button(tray.app_handle(), rect),
             // PL028.1 / PATCH007.2：悬停托盘图标 ⇒ 只记录矩形与相位，显隐由守候线程结算
             // （`Leave` 不参与判定——CT PL019.1 实证其慢速移出会丢失）
             TrayIconEvent::Enter { rect, .. } => on_tray_hover_enter(rect),
@@ -795,6 +780,8 @@ pub fn run() {
             commands::reminder::set_hotkey,
             commands::hover::tray_hover,
             commands::hover::tray_hover_resize,
+            commands::tray_menu::tray_menu_action,
+            commands::tray_menu::tray_menu_resize,
             commands::workday::clock_in,
             commands::workday::clock_out,
             commands::workday::overtime,
@@ -934,6 +921,33 @@ pub fn run() {
             // 系统圆角；我给悬浮窗只抄了后一步 ✗）：DWM 给窗口画的那圈系统描边落在**卡片之外**
             // （webview 之外 ⇒ CSS 改不动 ✗）⇒ 表现为"卡片外还有一圈" ✓。与主窗完全对齐 ✓。
             glass_backdrop::hide_active_border(&hover);
+            // 托盘菜单窗（PATCH008）：自绘 HTML 菜单替代原生 Win32 菜单（照 CT PL021 逻辑）——
+            // 生命周期与 hover 窗同款（屏外创建 + visible(true) 让 webview 首绘即完成 + build 后
+            // 立即 hide；不显任务栏 / 不可缩放 / 不获焦 / 置顶 / 无投影），窗口整定两步一致
+            // （系统圆角 + 激活描边隐藏）。
+            let menu_win = tauri::WebviewWindowBuilder::new(
+                app,
+                "tray-menu",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("CapsulePulse 菜单")
+            .position(-2000.0, -2000.0)
+            .inner_size(menu::WINDOW_WIDTH, menu::HEIGHT_MIN)
+            .transparent(true)
+            .decorations(false)
+            .skip_taskbar(true)
+            .resizable(false)
+            .visible(true)
+            .focused(false)
+            .focusable(false)
+            .always_on_top(true)
+            .shadow(false)
+            .build()?;
+            if let Err(err) = menu_win.hide() {
+                warn_diag(&format!("菜单窗首绘后隐藏失败：{err}"));
+            }
+            glass_backdrop::apply_round_corners(&menu_win);
+            glass_backdrop::hide_active_border(&menu_win);
             // 悬浮窗守候线程（PATCH007.2 + .6）：100ms 步进结算显隐（**唯一调用者**）
             // + 显示中按 1 秒节拍重推概览
             spawn_hover_watcher(&app.handle().clone());

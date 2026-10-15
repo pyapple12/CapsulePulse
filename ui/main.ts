@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import App from "./App.vue";
 import TrayHover from "./src/components/TrayHover.vue";
+import TrayMenu from "./src/components/TrayMenu.vue";
 import "./style.css";
 
 // DEV 冒烟基座：浏览器直开 ui/（无 Tauri 外壳）时拦截 IPC（对比探针依赖）；
@@ -30,10 +31,13 @@ function devWindowOverride(): string | null {
   return new URLSearchParams(window.location.search).get("window");
 }
 
-// 应用入口：按窗口 label 分流（PL028.1）——托盘 hover 概览窗挂概览组件，其余挂主窗骨架
+// 应用入口：按窗口 label 分流（PL028.1 / PATCH008）——托盘 hover 概览窗挂概览组件、
+// 托盘菜单窗挂菜单组件，其余挂主窗骨架
 const label = devWindowOverride() ?? currentWindowLabel();
 if (label === "tray-hover") {
   createApp(TrayHover).mount("#app");
+} else if (label === "tray-menu") {
+  createApp(TrayMenu).mount("#app");
 } else {
   createApp(App).mount("#app");
 }

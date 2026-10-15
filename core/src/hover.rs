@@ -149,10 +149,10 @@ pub const MISS_LIMIT: u32 = 4;
 /// 悬停期重推节拍（拍）：`WATCH_STEP_MS` × 本值 = 1 秒（PATCH007.6 用户定案）。
 pub const PUSH_EVERY_TICKS: u32 = 10;
 
-/// 守候相位（PATCH007.2，抄 CT `tray.rs`）：`Idle` 无事；`Armed` 已武装（`Enter` 已触发，
-/// 图标上持续停留满 [`DWELL_MS`] 才显示）；`Shown` 显示中（离开两区域连续 [`MISS_LIMIT`] 拍才收起）。
-/// CT 的 `Suppressed`（菜单活跃期锁死）态**不移植**——CP 托盘是**原生菜单**、无"菜单窗可见性"
-/// 这一事实源；CP 以「右键先收 + 相位归零」等价覆盖（见 `lib.rs::dismiss_tray_hover`）。
+/// 守候相位（PATCH007.2 抄 CT `tray.rs`；PATCH008.6 补齐 `Suppressed`）：`Idle` 无事；
+/// `Armed` 已武装（`Enter` 已触发，图标上持续停留满 [`DWELL_MS`] 才显示）；`Shown` 显示中
+/// （离开两区域连续 [`MISS_LIMIT`] 拍才收起）；`Suppressed` **菜单窗开着 ⇒ 锁死**（照 CT：
+/// 菜单收起后回 `Idle`，**需新 Enter 重新武装**，不自动弹出）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Phase {
     /// 无事（未武装、未显示）
@@ -167,6 +167,8 @@ pub enum Phase {
         /// 连续离开两区域的采样步数
         miss: u32,
     },
+    /// 菜单窗开着：锁死（PATCH008.6，照 CT `Suppressed`）——菜单收起后回 `Idle`
+    Suppressed,
 }
 
 /// 守候单步的窗口动作（悬浮窗 `show`/`hide` 的唯一调用者 = 守候线程）。
@@ -180,26 +182,34 @@ pub enum WatchAction {
     Hide,
 }
 
-/// 守候状态机单步（**纯函数**，单测直测；照 CT `tray.rs::step_watch` 移植，去 `Suppressed` 态）。
+/// 守候状态机单步（**纯函数**，单测直测；照 CT `tray.rs::step_watch` 形态，PATCH008.6 补齐
+/// `Suppressed` 态）。
 ///
 /// # 参数
 /// `phase` 当前相位；`now_ms` 当下 Unix 毫秒；`in_tray` 光标是否在托盘图标矩形内；
-/// `in_window` 光标是否在悬浮窗矩形内；`window_visible` 悬浮窗此刻是否可见。
+/// `in_window` 光标是否在悬浮窗矩形内；`menu_open` 菜单窗此刻是否可见（锁死事实源）；
+/// `window_visible` 悬浮窗此刻是否可见。
 ///
 /// # 返回
-/// 新相位 + 本拍窗口动作。规则：`Idle` 不动；`Armed` 遇**残留可见窗先收**（新周期从隐藏态
-/// 计时）、离开图标即取消、停留满 [`DWELL_MS`] 转 `Shown` 并显示；`Shown` 在图标或窗内即清零
-/// `miss`（守住），连续离开满 [`MISS_LIMIT`] 拍转 `Idle` 并收起。
+/// 新相位 + 本拍窗口动作。规则：`Idle` 不动；`Armed` 遇**菜单开即锁死**、遇残留可见窗先收
+/// （新周期从隐藏态计时）、离开图标即取消、停留满 [`DWELL_MS`] 转 `Shown` 并显示；`Shown` 在
+/// 图标或窗内即清零 `miss`（守住）、**菜单开则收窗并锁死**，连续离开满 [`MISS_LIMIT`] 拍转
+/// `Idle` 并收起；`Suppressed` 菜单收 ⇒ 回 `Idle`（需新 `Enter` 重新武装），**窗可见一律收走**
+/// （兜底 show 后到 / 残留两形态）。
 pub fn step_watch(
     phase: Phase,
     now_ms: u64,
     in_tray: bool,
     in_window: bool,
+    menu_open: bool,
     window_visible: bool,
 ) -> (Phase, WatchAction) {
     match phase {
         Phase::Idle => (Phase::Idle, WatchAction::None),
         Phase::Armed { since_ms } => {
+            if menu_open {
+                return (Phase::Suppressed, WatchAction::None); // 武装期菜单开：锁死
+            }
             if window_visible {
                 return (Phase::Armed { since_ms }, WatchAction::Hide);
             }
@@ -212,6 +222,9 @@ pub fn step_watch(
             (Phase::Armed { since_ms }, WatchAction::None)
         }
         Phase::Shown { miss } => {
+            if menu_open {
+                return (Phase::Suppressed, WatchAction::Hide); // 显示中菜单开：收窗锁死
+            }
             if in_tray || in_window {
                 return (Phase::Shown { miss: 0 }, WatchAction::None); // 两区域任一在内：守住
             }
@@ -221,6 +234,13 @@ pub fn step_watch(
             } else {
                 (Phase::Shown { miss }, WatchAction::None)
             }
+        }
+        Phase::Suppressed => {
+            let next = if menu_open { phase } else { Phase::Idle };
+            if window_visible {
+                return (next, WatchAction::Hide); // 锁死期窗可见一律收走（兜底）
+            }
+            (next, WatchAction::None)
         }
     }
 }
@@ -492,7 +512,7 @@ mod tests {
     #[test]
     fn idle_ignores_all_input() {
         assert_eq!(
-            step_watch(Phase::Idle, 1_000, true, true, true),
+            step_watch(Phase::Idle, 1_000, true, true, false, true),
             (Phase::Idle, WatchAction::None)
         );
     }
@@ -502,7 +522,14 @@ mod tests {
     fn armed_waits_until_dwell() {
         let phase = Phase::Armed { since_ms: 1_000 };
         assert_eq!(
-            step_watch(phase.clone(), 1_000 + DWELL_MS - 1, true, false, false),
+            step_watch(
+                phase.clone(),
+                1_000 + DWELL_MS - 1,
+                true,
+                false,
+                false,
+                false
+            ),
             (phase, WatchAction::None)
         );
     }
@@ -516,6 +543,7 @@ mod tests {
                 1_000 + DWELL_MS,
                 true,
                 false,
+                false,
                 false
             ),
             (Phase::Shown { miss: 0 }, WatchAction::Show)
@@ -527,7 +555,7 @@ mod tests {
     fn armed_hides_residual_window() {
         let phase = Phase::Armed { since_ms: 1_000 };
         assert_eq!(
-            step_watch(phase.clone(), 1_500, true, false, true),
+            step_watch(phase.clone(), 1_500, true, false, false, true),
             (phase, WatchAction::Hide)
         );
     }
@@ -536,7 +564,14 @@ mod tests {
     #[test]
     fn armed_cancels_when_leaving_tray() {
         assert_eq!(
-            step_watch(Phase::Armed { since_ms: 1_000 }, 1_400, false, false, false),
+            step_watch(
+                Phase::Armed { since_ms: 1_000 },
+                1_400,
+                false,
+                false,
+                false,
+                false
+            ),
             (Phase::Idle, WatchAction::None)
         );
     }
@@ -545,11 +580,11 @@ mod tests {
     #[test]
     fn shown_keeps_while_in_tray_or_window() {
         assert_eq!(
-            step_watch(Phase::Shown { miss: 3 }, 2_000, true, false, true),
+            step_watch(Phase::Shown { miss: 3 }, 2_000, true, false, false, true),
             (Phase::Shown { miss: 0 }, WatchAction::None)
         );
         assert_eq!(
-            step_watch(Phase::Shown { miss: 3 }, 2_000, false, true, true),
+            step_watch(Phase::Shown { miss: 3 }, 2_000, false, true, false, true),
             (Phase::Shown { miss: 0 }, WatchAction::None)
         );
     }
@@ -558,7 +593,7 @@ mod tests {
     #[test]
     fn shown_tolerates_short_absence() {
         assert_eq!(
-            step_watch(Phase::Shown { miss: 0 }, 2_000, false, false, true),
+            step_watch(Phase::Shown { miss: 0 }, 2_000, false, false, false, true),
             (Phase::Shown { miss: 1 }, WatchAction::None)
         );
     }
@@ -574,8 +609,56 @@ mod tests {
                 2_000,
                 false,
                 false,
+                false,
                 true
             ),
+            (Phase::Idle, WatchAction::Hide)
+        );
+    }
+
+    /// PATCH008.6：武装期菜单开 ⇒ 转锁死（不出窗）。
+    #[test]
+    fn armed_goes_suppressed_when_menu_open() {
+        assert_eq!(
+            step_watch(
+                Phase::Armed { since_ms: 1_000 },
+                1_200,
+                true,
+                false,
+                true,
+                false
+            ),
+            (Phase::Suppressed, WatchAction::None)
+        );
+    }
+
+    /// PATCH008.6：显示中菜单开 ⇒ 收窗 + 锁死。
+    #[test]
+    fn shown_hides_and_suppresses_when_menu_open() {
+        assert_eq!(
+            step_watch(Phase::Shown { miss: 0 }, 2_000, true, false, true, true),
+            (Phase::Suppressed, WatchAction::Hide)
+        );
+    }
+
+    /// PATCH008.6：锁死期菜单收 ⇒ 回空闲（需新 `Enter` 重新武装，不自动弹出）。
+    #[test]
+    fn suppressed_releases_when_menu_closes() {
+        assert_eq!(
+            step_watch(Phase::Suppressed, 3_000, true, false, false, false),
+            (Phase::Idle, WatchAction::None)
+        );
+    }
+
+    /// PATCH008.6：锁死期窗可见一律收走（兜底 show 后到 / 残留两形态）。
+    #[test]
+    fn suppressed_always_hides_visible_window() {
+        assert_eq!(
+            step_watch(Phase::Suppressed, 3_000, true, false, true, true),
+            (Phase::Suppressed, WatchAction::Hide)
+        );
+        assert_eq!(
+            step_watch(Phase::Suppressed, 3_000, true, false, false, true),
             (Phase::Idle, WatchAction::Hide)
         );
     }

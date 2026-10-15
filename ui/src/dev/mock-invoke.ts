@@ -147,6 +147,8 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
       };
     case "set_settings":
     case "main_hide_to_tray":
+    case "tray_menu_action":
+    case "tray_menu_resize":
       return null;
     /* 会话链（PATCH002.2）：与后端同语义——打卡即工作、工作/休息幂等切换、重置收段归零回休息 */
     case "clock_in":
