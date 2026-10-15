@@ -14,9 +14,10 @@ export function hhmm(secs: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** 秒数 → 简洁时长（Xh Ym；不足 1 小时只显分钟） */
-export function fmtDuration(total: number): string {
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+/** 分钟数 → 时长三段 `{h, m}`（**不做任何字符补位**）：数字列对齐由 CSS 承担 —— `.num`
+ * `min-width: 2ch; text-align: right`（PATCH007.12 **方案 B**，用户 2026-10-16 定案：比字符补位
+ * 更确定，不依赖字体是否有 U+2007 等宽空格 ✓）。 */
+export function splitDuration(minutes: number): { h: number; m: number } {
+  const total = Math.max(0, minutes);
+  return { h: Math.floor(total / 60), m: Math.round(total) % 60 };
 }

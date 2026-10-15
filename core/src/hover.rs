@@ -10,6 +10,14 @@ use serde::Serialize;
 use crate::reminder::ReminderConfig;
 use crate::workday::DaySummary;
 
+/// 悬浮窗宽度（逻辑 px，**固定**）：用户 2026-10-16 定案 **226**（225 → 224 试窄后内容换行 ✗ ⇒ 定 226）。
+/// 内容实测（该行）≈ **202.5**（「工作 0小时25分钟　休息 0小时 0分钟」）⇒ 可用 = 226 − 22 = **204** ✓ 不换行 ✓。
+/// ⚠️ 226 × 1.25 = **282.5 物理（非整数）** ⇒ 系统取整后等效 225.6/226.4 ⇒ 右缘 1px 仍可能半像素吸附
+/// （用户已知并接受，先按 226 落 ✓）。
+pub const WINDOW_WIDTH: f64 = 228.0;
+/// 悬浮窗内容高度下限（逻辑 px；创建期初始高用 ✓）
+pub const HEIGHT_MIN: f64 = 24.0;
+
 /// hover 概览状态（决定行数与行①文案）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,19 +49,19 @@ pub struct HoverSummary {
     pub single_line: bool,
 }
 
-/// 归约 hover 概览（PL028.1 纯函数，注入输入直测）。
+/// 归约 hover 概览（PL028.1；行①段带口径见 PATCH007.7 修正版）。
 ///
 /// # 参数
-/// `day` 今日明细（数据日 = 打卡日，PL027 单一口径）；`base_hours` 自动下班基准（算加班次数）；
-/// `now_secs` 当下 Unix 秒；`segment` 本段连续工作（Paused/Idle 为零）；`config` 提醒配置；
-/// `last_fired` 段内上次提醒触发点（未触发为 `None`）。
+/// `day` 今日明细（数据日 = 打卡日，PL027 单一口径；**行②与状态判定**用）；`bands` 行①段带输入
+/// （[`ShiftBands`]；`None` = 未在岗 / 暂下班）；`now_secs` 当下 Unix 秒；`segment` 本段连续工作
+/// （Paused/Idle 为零）；`config` 提醒配置；`last_fired` 段内上次提醒触发点（未触发为 `None`）。
 ///
 /// # 返回
 /// [`HoverSummary`]——`state` 三分支：无打卡 ⇒ 一行；有打卡且已收段 ⇒ 三行「暂下班」；
-/// 末班未闭合 ⇒ 三行「正班 / 1st 加班 / 2nd 加班」。
+/// 末班未闭合 ⇒ 三行（行①按**本班已过时长**落带：`本班` / `1st 加班` / `2nd 加班`）。
 pub fn hover_summary(
     day: &DaySummary,
-    base_hours: u32,
+    bands: Option<ShiftBands>,
     now_secs: i64,
     segment: Duration,
     config: &ReminderConfig,
@@ -77,15 +85,27 @@ pub fn hover_summary(
         // 暂下班：行①固定文案、行③冻结在阈值
         ("暂下班".to_string(), None)
     } else {
-        // 在岗：本班到点 = 本班打卡 + 剩余预算（与表盘底轨同一口径；加班推后 ⇒ 跟着跳）
-        let deadline = duty_started_at + day.remaining_secs;
-        let steps = overtime_steps(day.budget_hours, base_hours);
-        let label = match steps {
-            0 => "正班",
-            1 => "1st 加班",
-            _ => "2nd 加班",
+        // 在岗：行① = 本班已过时长落在哪一段带（PATCH007.7 修正版）——**锚点 = 本班带长
+        // `d0 = 基准 − 本班之前已用`**（A2.8：7h50m 后再打卡 ⇒ 到点 = 剩 10 分钟处）；
+        // 剩余取**自动下班到点**（与主表盘轴末/蓝条同一事实源）——到点恒等于当前带的带末
+        // （加班只在到点弹框里点、点一次推一带），故两者等价、取前者即天然单一口径。
+        let b = bands.unwrap_or(ShiftBands {
+            clock_in_at: duty_started_at,
+            d0_secs: i64::from(crate::workday::OVERTIME_CAP_HOURS) * 3_600,
+            base_hours: crate::workday::OVERTIME_CAP_HOURS,
+            due_at: None,
+        });
+        let (band, band_end_offset) = shift_band(now_secs - b.clock_in_at, b.d0_secs, b.base_hours);
+        let label = match band {
+            Band::Base => "本班",
+            Band::First => "1st 加班",
+            Band::Second => "2nd 加班",
         };
-        (label.to_string(), Some((deadline - now_secs).max(0)))
+        let remaining = b
+            .due_at
+            .map(|due| due - now_secs)
+            .unwrap_or_else(|| b.clock_in_at + band_end_offset - now_secs);
+        (label.to_string(), Some(remaining.max(0)))
     };
     let until = if paused {
         config.threshold
@@ -107,12 +127,6 @@ pub fn hover_summary(
     }
 }
 
-/// 加班次数（PL028.1）：本日上限 = 基准 + 4h × 次数（硬顶 12h）⇒ 次数 = (上限 − 基准) / 4，
-/// 只可能 0 / 1 / 2（基准 12h ⇒ 0；8h ⇒ 1；4h ⇒ 2）。
-fn overtime_steps(budget_hours: u32, base_hours: u32) -> u32 {
-    budget_hours.saturating_sub(base_hours) / 4
-}
-
 /// 距下次休息提醒的剩余时长（PL028.1）：未触发过 = 阈值 − 本段连续工作；
 /// 已触发 = 重发间隔 −（本段 − 上次触发点）；两者下溢均夹到 0（时钟/状态竞态不产生负值）。
 fn until_next_reminder(
@@ -126,6 +140,141 @@ fn until_next_reminder(
     }
 }
 
+/// 悬停停留阈值（ms）：图标上持续停留满此值才出卡（瞬间划过不打扰）。
+pub const DWELL_MS: u64 = 500;
+/// 守候步进周期（ms）：守候线程节拍与离开判据共用（单一来源）。
+pub const WATCH_STEP_MS: u64 = 100;
+/// 离开判据拍数：离开两区域连续满此拍数才收起（`WATCH_STEP_MS` × 本值 = 400ms）。
+pub const MISS_LIMIT: u32 = 4;
+/// 悬停期重推节拍（拍）：`WATCH_STEP_MS` × 本值 = 1 秒（PATCH007.6 用户定案）。
+pub const PUSH_EVERY_TICKS: u32 = 10;
+
+/// 守候相位（PATCH007.2，抄 CT `tray.rs`）：`Idle` 无事；`Armed` 已武装（`Enter` 已触发，
+/// 图标上持续停留满 [`DWELL_MS`] 才显示）；`Shown` 显示中（离开两区域连续 [`MISS_LIMIT`] 拍才收起）。
+/// CT 的 `Suppressed`（菜单活跃期锁死）态**不移植**——CP 托盘是**原生菜单**、无"菜单窗可见性"
+/// 这一事实源；CP 以「右键先收 + 相位归零」等价覆盖（见 `lib.rs::dismiss_tray_hover`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Phase {
+    /// 无事（未武装、未显示）
+    Idle,
+    /// 已武装：`since_ms` = 武装时刻（Unix 毫秒），停留满阈值才显示
+    Armed {
+        /// 武装时刻（Unix 毫秒）
+        since_ms: u64,
+    },
+    /// 显示中：`miss` = 连续离开两区域的采样步数（满 [`MISS_LIMIT`] 拍收起）
+    Shown {
+        /// 连续离开两区域的采样步数
+        miss: u32,
+    },
+}
+
+/// 守候单步的窗口动作（悬浮窗 `show`/`hide` 的唯一调用者 = 守候线程）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchAction {
+    /// 无动作
+    None,
+    /// 显示悬浮窗
+    Show,
+    /// 收起悬浮窗
+    Hide,
+}
+
+/// 守候状态机单步（**纯函数**，单测直测；照 CT `tray.rs::step_watch` 移植，去 `Suppressed` 态）。
+///
+/// # 参数
+/// `phase` 当前相位；`now_ms` 当下 Unix 毫秒；`in_tray` 光标是否在托盘图标矩形内；
+/// `in_window` 光标是否在悬浮窗矩形内；`window_visible` 悬浮窗此刻是否可见。
+///
+/// # 返回
+/// 新相位 + 本拍窗口动作。规则：`Idle` 不动；`Armed` 遇**残留可见窗先收**（新周期从隐藏态
+/// 计时）、离开图标即取消、停留满 [`DWELL_MS`] 转 `Shown` 并显示；`Shown` 在图标或窗内即清零
+/// `miss`（守住），连续离开满 [`MISS_LIMIT`] 拍转 `Idle` 并收起。
+pub fn step_watch(
+    phase: Phase,
+    now_ms: u64,
+    in_tray: bool,
+    in_window: bool,
+    window_visible: bool,
+) -> (Phase, WatchAction) {
+    match phase {
+        Phase::Idle => (Phase::Idle, WatchAction::None),
+        Phase::Armed { since_ms } => {
+            if window_visible {
+                return (Phase::Armed { since_ms }, WatchAction::Hide);
+            }
+            if !in_tray {
+                return (Phase::Idle, WatchAction::None); // 停留期内离开：取消出现
+            }
+            if now_ms.saturating_sub(since_ms) >= DWELL_MS {
+                return (Phase::Shown { miss: 0 }, WatchAction::Show);
+            }
+            (Phase::Armed { since_ms }, WatchAction::None)
+        }
+        Phase::Shown { miss } => {
+            if in_tray || in_window {
+                return (Phase::Shown { miss: 0 }, WatchAction::None); // 两区域任一在内：守住
+            }
+            let miss = miss + 1;
+            if miss >= MISS_LIMIT {
+                (Phase::Idle, WatchAction::Hide)
+            } else {
+                (Phase::Shown { miss }, WatchAction::None)
+            }
+        }
+    }
+}
+
+/// 行①段带（PATCH007.7）：按**当前班已过时长**落在哪一段带。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Band {
+    /// 本班 `[0, 基准)`
+    Base,
+    /// 1st 加班 `[基准, 基准 + 4h)`
+    First,
+    /// 2nd 加班 `[基准 + 4h, 12h)`（仅当基准 < 8h 时该带非空）
+    Second,
+}
+
+/// 行①段带输入（PATCH007.7 修正版）：本班打卡 + **本班带长 d0** + 基准 + 自动下班到点。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShiftBands {
+    /// 本班打卡（当前班，Unix 秒）
+    pub clock_in_at: i64,
+    /// 本班带长 `d0 = 基准 − 今日在本班之前的已用`（秒；到顶/已用≥基准时为 0）
+    pub d0_secs: i64,
+    /// 自动下班基准小时数（算总账可用 = 12h 硬顶扣掉本班之前已用）
+    pub base_hours: u32,
+    /// 自动下班到点（`auto_out.due_at`；未武装为 `None` ⇒ 剩余兜底用带末）
+    pub due_at: Option<i64>,
+}
+
+/// 段带判定与带末偏移（PATCH007.7 修正版；纯函数，单测直测）。
+/// **锚点 = 本班带长 `d0 = 基准 − 今日在本班之前的已用`**（不是原始基准 ✗ —— A2.8 实测：
+/// 做到 7h50m 再打卡 ⇒ 到点 = 剩 10 分钟处；A2.7 实测：已用 8h + 隐式加班 ⇒ 到点 = 打卡 + 4h）。
+/// 带末（相对本班打卡）：本班 `d0` / 1st `min(d0 + 4h, 总账可用)` / 2nd `总账可用`；
+/// **总账可用 = d0 + (12h − 基准)**（= 12h 硬顶扣掉本班之前已用 ⇒ 基准 8h + 已用 0 时 2nd 带为空）。
+///
+/// # 参数
+/// `elapsed_secs` 本班已过秒数；`d0_secs` 本班带长；`base_hours` 自动下班基准小时数。
+///
+/// # 返回
+/// `(段带, 带末相对本班打卡的偏移秒数)`。
+pub fn shift_band(elapsed_secs: i64, d0_secs: i64, base_hours: u32) -> (Band, i64) {
+    let step = i64::from(crate::workday::OVERTIME_STEP_HOURS) * 3_600;
+    let cap_offset =
+        i64::from(crate::workday::OVERTIME_CAP_HOURS) * 3_600 - i64::from(base_hours) * 3_600;
+    let total = d0_secs + cap_offset; // 总账可用（相对本班打卡）
+    let first_end = (d0_secs + step).min(total);
+    if elapsed_secs < d0_secs {
+        (Band::Base, d0_secs)
+    } else if elapsed_secs < first_end {
+        (Band::First, first_end)
+    } else {
+        (Band::Second, total)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,8 +285,6 @@ mod tests {
         duty_ended_at: Option<i64>,
         work_secs: i64,
         rest_secs: i64,
-        budget_hours: u32,
-        remaining_secs: i64,
     ) -> DaySummary {
         DaySummary {
             duty_started_at,
@@ -146,9 +293,9 @@ mod tests {
             work_secs,
             rest_secs,
             blocks: Vec::new(),
-            budget_hours,
+            budget_hours: 0,
             used_secs: work_secs + rest_secs,
-            remaining_secs,
+            remaining_secs: 0,
         }
     }
 
@@ -160,12 +307,89 @@ mod tests {
         ReminderConfig::from_minutes(50)
     }
 
+    fn hours(n: i64) -> i64 {
+        n * 3_600
+    }
+
+    /// 段带边界（已用 0 ⇒ `d0` = 基准 = 6h）：本班 `[0,6h)` / 1st `[6h,10h)` / 2nd `[10h,12h)`，
+    /// 带末分别 6h / 10h / 12h（与用户例一致）。
+    #[test]
+    fn shift_band_boundaries_for_base_six() {
+        let d0 = hours(6);
+        assert_eq!(shift_band(hours(5) + 3_599, d0, 6), (Band::Base, hours(6)));
+        assert_eq!(shift_band(hours(6), d0, 6), (Band::First, hours(10)));
+        assert_eq!(shift_band(hours(10) - 1, d0, 6), (Band::First, hours(10)));
+        assert_eq!(shift_band(hours(10), d0, 6), (Band::Second, hours(12)));
+    }
+
+    /// 基准 8h（已用 0）：1st 带末即 12h 硬顶（2nd 带为空）；基准 12h：只有本班。
+    #[test]
+    fn shift_band_base_eight_and_twelve() {
+        assert_eq!(shift_band(hours(8), hours(8), 8), (Band::First, hours(12)));
+        assert_eq!(
+            shift_band(hours(9), hours(12), 12),
+            (Band::Base, hours(12)),
+            "基准 12h 无处加班"
+        );
+    }
+
+    /// **红线**：带锚点 = 本班带长 `d0 = 基准 − 本班之前已用`（PATCH007.7 修正版）。
+    /// 用户实机场景：基准 8h、今日在本班之前已用 **7h57m** ⇒ `d0 = 3 分钟`；本班已走 **35 分钟**
+    /// ⇒ 应显示 **1st 加班**、剩余 = 到点（打卡 + 3min + 4h）− now（错法锚在原始 8h ⇒ 误显
+    /// 「本班 剩余 7h25m」✗ —— A2.8 实测口径即为反例）。
+    #[test]
+    fn band_anchors_on_d0_after_prior_usage() {
+        let clock_in = 1_000;
+        let now = clock_in + 35 * 60;
+        let d0 = hours(8) - (7 * 3_600 + 57 * 60); // 3 分钟
+        let s = hover_summary(
+            &day(Some(clock_in), None, 3_600, 0),
+            Some(ShiftBands {
+                clock_in_at: clock_in,
+                d0_secs: d0,
+                base_hours: 8,
+                due_at: Some(clock_in + d0 + hours(4)),
+            }),
+            now,
+            Duration::ZERO,
+            &config(),
+            None,
+        );
+        assert_eq!(s.label, "1st 加班", "已用 7h57m ⇒ 本班带只剩 3 分钟");
+        assert_eq!(s.remaining_secs, Some(hours(4) + d0 - 35 * 60));
+    }
+
+    /// 无到点时剩余兜底用**带末**（已用 0、本班 35 分钟 ⇒ 仍本班、剩余 = 8h − 35min）。
+    #[test]
+    fn band_remaining_falls_back_to_band_end() {
+        let clock_in = 1_000;
+        let s = hover_summary(
+            &day(Some(clock_in), None, 0, 0),
+            Some(ShiftBands {
+                clock_in_at: clock_in,
+                d0_secs: hours(8),
+                base_hours: 8,
+                due_at: None,
+            }),
+            clock_in + 35 * 60,
+            Duration::ZERO,
+            &config(),
+            None,
+        );
+        assert_eq!(s.label, "本班");
+        assert_eq!(
+            s.remaining_secs,
+            Some(hours(8) - 35 * 60),
+            "无到点时兜底用带末"
+        );
+    }
+
     /// 未上班（今天无打卡）：**只一行**「未在岗」，无剩余值。
     #[test]
     fn off_state_is_single_line() {
         let s = hover_summary(
-            &day(None, None, 0, 0, 0, 0),
-            8,
+            &day(None, None, 0, 0),
+            None,
             10_000,
             Duration::ZERO,
             &config(),
@@ -177,72 +401,44 @@ mod tests {
         assert!(s.single_line, "未上班只渲染一行");
     }
 
-    /// 在岗正班：三行；剩余 = 本班到点（打卡 + 剩余预算）− now；加班次数 0。
+    /// 在岗：三行、行② 工作/休息 照给、行③ 按阈值倒计（未触发过）。
     #[test]
-    fn on_duty_regular_shift() {
-        // 打卡 1_000，剩余预算 3h ⇒ 到点 1_000 + 10_800 = 11_800；now 10_000 ⇒ 剩 1_800
+    fn on_duty_rows_and_countdown() {
+        let clock_in = 1_000;
         let s = hover_summary(
-            &day(Some(1_000), None, 3_600, 600, 8, 10_800),
-            8,
-            10_000,
+            &day(Some(clock_in), None, 3_600, 600),
+            Some(ShiftBands {
+                clock_in_at: clock_in,
+                d0_secs: hours(8),
+                base_hours: 8,
+                due_at: None,
+            }),
+            clock_in + 30 * 60,
             mins(30),
             &config(),
             None,
         );
         assert_eq!(s.state, HoverState::OnDuty);
-        assert_eq!(s.label, "正班");
-        assert_eq!(s.remaining_secs, Some(1_800));
         assert!(!s.single_line);
         assert_eq!(s.work_secs, 3_600);
         assert_eq!(s.rest_secs, 600);
-        // 行③：阈值 50 − 本段 30 = 20 分钟
         assert!(
             (s.until_reminder_min - 20.0).abs() < 1e-9,
-            "未触发过按阈值倒计"
+            "未触发过按阈值倒计（50 − 30）"
         );
-    }
-
-    /// 加班标签互斥：上限 12h ⇒ 按基准推 1st / 2nd；到顶后再无第三档。
-    #[test]
-    fn overtime_label_reflects_steps() {
-        let one = hover_summary(
-            &day(Some(1_000), None, 0, 0, 12, 0),
-            8,
-            1_000,
-            Duration::ZERO,
-            &config(),
-            None,
-        );
-        assert_eq!(one.label, "1st 加班", "基准 8h + 一次加班 ⇒ 上限 12h");
-        let two = hover_summary(
-            &day(Some(1_000), None, 0, 0, 12, 0),
-            4,
-            1_000,
-            Duration::ZERO,
-            &config(),
-            None,
-        );
-        assert_eq!(
-            two.label, "2nd 加班",
-            "基准 4h + 两次加班 ⇒ 上限 12h（硬顶）"
-        );
-        let zero = hover_summary(
-            &day(Some(1_000), None, 0, 0, 12, 0),
-            12,
-            1_000,
-            Duration::ZERO,
-            &config(),
-            None,
-        );
-        assert_eq!(zero.label, "正班", "基准 12h 无处加班");
     }
 
     /// 到点已过（竞态）夹到 0，不出现负剩余。
     #[test]
     fn remaining_never_negative() {
         let s = hover_summary(
-            &day(Some(1_000), None, 0, 0, 8, 100),
-            8,
+            &day(Some(1_000), None, 0, 0),
+            Some(ShiftBands {
+                clock_in_at: 1_000,
+                d0_secs: hours(8),
+                base_hours: 8,
+                due_at: None,
+            }),
             99_999,
             Duration::ZERO,
             &config(),
@@ -255,8 +451,8 @@ mod tests {
     #[test]
     fn paused_state_freezes_reminder() {
         let s = hover_summary(
-            &day(Some(1_000), Some(9_000), 7_200, 1_800, 8, 0),
-            8,
+            &day(Some(1_000), Some(9_000), 7_200, 1_800),
+            None,
             20_000,
             mins(40),
             &config(),
@@ -274,15 +470,113 @@ mod tests {
     /// 行③已触发后按 5 分钟重发节拍倒数（1 位小数由前端格式化）。
     #[test]
     fn reminder_countdown_after_fire() {
+        let clock_in = 1_000;
         let s = hover_summary(
-            &day(Some(1_000), None, 0, 0, 8, 3_600),
-            8,
-            1_000,
+            &day(Some(clock_in), None, 0, 0),
+            Some(ShiftBands {
+                clock_in_at: clock_in,
+                d0_secs: hours(8),
+                base_hours: 8,
+                due_at: None,
+            }),
+            clock_in + 60,
             mins(52),
             &config(),
             Some(mins(50)),
         );
         // 已触发：5 分钟间隔 − 距上次触发 2 分钟 = 3 分钟
         assert!((s.until_reminder_min - 3.0).abs() < 1e-9);
+    }
+
+    /// 空闲期：任何输入都不动作（未武装 = 启动后未 hover 过）。
+    #[test]
+    fn idle_ignores_all_input() {
+        assert_eq!(
+            step_watch(Phase::Idle, 1_000, true, true, true),
+            (Phase::Idle, WatchAction::None)
+        );
+    }
+
+    /// 武装期未满停留：继续守候（不显示）。
+    #[test]
+    fn armed_waits_until_dwell() {
+        let phase = Phase::Armed { since_ms: 1_000 };
+        assert_eq!(
+            step_watch(phase.clone(), 1_000 + DWELL_MS - 1, true, false, false),
+            (phase, WatchAction::None)
+        );
+    }
+
+    /// 武装期停留满阈值：显示。
+    #[test]
+    fn armed_shows_after_dwell() {
+        assert_eq!(
+            step_watch(
+                Phase::Armed { since_ms: 1_000 },
+                1_000 + DWELL_MS,
+                true,
+                false,
+                false
+            ),
+            (Phase::Shown { miss: 0 }, WatchAction::Show)
+        );
+    }
+
+    /// 武装期遇残留可见窗：先收掉并保持武装（新周期从隐藏态计时）。
+    #[test]
+    fn armed_hides_residual_window() {
+        let phase = Phase::Armed { since_ms: 1_000 };
+        assert_eq!(
+            step_watch(phase.clone(), 1_500, true, false, true),
+            (phase, WatchAction::Hide)
+        );
+    }
+
+    /// 武装期离开图标：取消出现回空闲（瞬间划过不打扰）。
+    #[test]
+    fn armed_cancels_when_leaving_tray() {
+        assert_eq!(
+            step_watch(Phase::Armed { since_ms: 1_000 }, 1_400, false, false, false),
+            (Phase::Idle, WatchAction::None)
+        );
+    }
+
+    /// 显示期：在图标或悬浮窗内 ⇒ 守住并清零 miss（从卡片移回图标不闪没）。
+    #[test]
+    fn shown_keeps_while_in_tray_or_window() {
+        assert_eq!(
+            step_watch(Phase::Shown { miss: 3 }, 2_000, true, false, true),
+            (Phase::Shown { miss: 0 }, WatchAction::None)
+        );
+        assert_eq!(
+            step_watch(Phase::Shown { miss: 3 }, 2_000, false, true, true),
+            (Phase::Shown { miss: 0 }, WatchAction::None)
+        );
+    }
+
+    /// 显示期：离开两区域未满判据拍数 ⇒ 暂不收起（防抖动）。
+    #[test]
+    fn shown_tolerates_short_absence() {
+        assert_eq!(
+            step_watch(Phase::Shown { miss: 0 }, 2_000, false, false, true),
+            (Phase::Shown { miss: 1 }, WatchAction::None)
+        );
+    }
+
+    /// 显示期：连续离开满判据拍数 ⇒ 收起回空闲。
+    #[test]
+    fn shown_hides_after_full_absence() {
+        assert_eq!(
+            step_watch(
+                Phase::Shown {
+                    miss: MISS_LIMIT - 1
+                },
+                2_000,
+                false,
+                false,
+                true
+            ),
+            (Phase::Idle, WatchAction::Hide)
+        );
     }
 }

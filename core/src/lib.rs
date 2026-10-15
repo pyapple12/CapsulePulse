@@ -29,6 +29,7 @@ use std::time::Duration;
 
 use crate::commands::reminder::{HotkeyAction, PrefKind};
 use crate::commands::{AppContext, AutoOutWatch};
+use crate::hover::{Phase, WatchAction};
 use crate::reminder::ReminderFire;
 use crate::session::WorkSession;
 use crate::settings::{ReminderSettings, WindowPos};
@@ -147,25 +148,33 @@ fn snap_if_needed(window: &tauri::Window) {
     }
 }
 
-// —— 托盘 hover 今日概览窗（PL028.1）——
-// 几何与节奏（抄 CT PL018 预览窗形态，收敛为一进一出两拍）：
-// Enter → 记录图标矩形 + 停留阈值后仍悬停才显示（防"划过托盘"误触）；Leave → 延迟收起
-// （给"从图标移向悬浮窗"留缓冲，防闪烁）。光标判据仅 Windows 有（非 Windows 退化为纯事件驱动）。
-/// 悬浮窗宽度（逻辑 px；高度按内容行数在显示前由后端设定——两端同源）
-const HOVER_WIDTH: f64 = 200.0;
-/// 一行态（未在岗）高度
-const HOVER_ONE_LINE_HEIGHT: f64 = 46.0;
-/// 三行态（在岗 / 暂下班）高度
-const HOVER_THREE_LINE_HEIGHT: f64 = 112.0;
+// —— 托盘 hover 今日概览窗（PL028.1；PATCH007 收口）——
+// 显隐 = **单一常驻守候线程 + 三态状态机**（PATCH007.2，抄 CT `tray.rs` 形态）：`Enter` 只记录
+// 图标矩形与相位（**不直接 show**），守候线程 100ms 步进结算 show/hide（**唯一调用者** ⇒
+// 杜绝多线程换代的孤儿窗）；停留阈值防划过误触、离开两区域连续 4 拍（400ms）才收起——CT
+// PL019.1 实证「`Leave` 事件慢速移出会丢失」，故**不依赖 `Leave`**。显示中按 1 秒节拍重推
+// 概览（PATCH007.6：悬停期实时刷新）。光标判据仅 Windows 有（非 Windows 退化为事件驱动）。
 /// 悬浮窗与托盘图标的间距（物理 px）
 const HOVER_ANCHOR_MARGIN: i32 = 8;
-/// 悬停停留阈值（ms）：防划过误触
-const HOVER_DWELL_MS: u64 = 400;
-/// 离开后延迟收起（ms）：防图标↔悬浮窗之间的闪烁
-const HOVER_HIDE_DELAY_MS: u64 = 250;
+/// 守候线程退出口：悬浮窗连续缺席拍数上限（满即自灭，防退出收尾空转）
+const HOVER_ABSENT_LIMIT: u32 = 50;
 
-/// 托盘图标矩形（物理坐标 x/y/w/h；Enter 事件记录，供锚定与光标判据）——未 hover 过为 None
-static HOVER_ANCHOR: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
+/// 守候状态（唯一事实源）：相位 + 托盘图标矩形锚点（物理坐标 x / y / 宽 / 高；`None` = 启动后
+/// 未 hover 过）。事件处理（`Enter` / 右键）与守候线程经本锁读写；**锁内只做纯数据读写与
+/// `GetCursorPos` 纯 FFI**——任何窗口调用（`is_visible` / `outer_position` / `show` / `hide` /
+/// `set_position`）**一律锁外**（CT PL020.3 两轮死锁实证：Tauri 2 非主线程窗口调用同步等待
+/// 主线程应答，持锁调用 = 与主线程互等死锁）。
+struct HoverWatch {
+    /// 守候相位（见 [`hover::Phase`]）
+    phase: Phase,
+    /// 托盘图标矩形（物理坐标）
+    anchor: Option<(i32, i32, i32, i32)>,
+}
+
+static HOVER_WATCH: Mutex<HoverWatch> = Mutex::new(HoverWatch {
+    phase: Phase::Idle,
+    anchor: None,
+});
 
 #[cfg(target_os = "windows")]
 mod win_cursor {
@@ -199,26 +208,32 @@ mod win_cursor {
     }
 }
 
-/// 光标是否仍在托盘图标矩形内：`Some(true/false)` 为判定结果，`None` = 本平台无查询能力
-/// （Enter 路径视为"仍在"继续、Leave 路径视为"已离开"收起——纯事件驱动语义）。
-fn cursor_in_tray() -> Option<bool> {
-    let anchor = match HOVER_ANCHOR.lock() {
-        Ok(slot) => *slot,
-        Err(_) => None,
-    };
+/// 光标是否在托盘图标矩形内：`Some(true/false)` 为判定结果，`None` = 本平台无查询能力
+/// （调用方按"不在"处理 ⇒ 退化为纯事件驱动语义）。锚点由调用方从锁内拷出（本函数不取锁）。
+fn cursor_in_tray(anchor: Option<(i32, i32, i32, i32)>) -> Option<bool> {
     let Some((x, y, w, h)) = anchor else {
         return Some(false);
     };
     win_cursor::cursor_pos().map(|(cx, cy)| cx >= x && cx < x + w && cy >= y && cy < y + h)
 }
 
-/// 悬浮窗锚定（PL028.1，抄 CT 预览窗几何）：右缘对齐托盘图标右缘；默认图标上方，屏上缘
-/// 放不下则翻到下方（任务栏在顶部场景）。锚点未记录则跳过（启动后未 hover 过，窗也从未显示）。
-fn anchor_tray_hover(window: &tauri::WebviewWindow) {
-    let anchor = match HOVER_ANCHOR.lock() {
-        Ok(slot) => *slot,
-        Err(_) => None,
+/// 光标是否在悬浮窗矩形内（PATCH007.2，抄 CT `cursor_in_window`）：**物理位置兜底**——窗
+/// hide/show 切换期 webview 的 `mouseenter` 可能丢失，物理位置不依赖事件。非 Windows 恒
+/// `false`（无查询能力 ⇒ 卡片不因"光标在卡上"而保持，随 [problems#1] 一并验证）。
+fn cursor_in_window(window: &tauri::WebviewWindow) -> bool {
+    let (Some((cx, cy)), Ok(pos), Ok(size)) = (
+        win_cursor::cursor_pos(),
+        window.outer_position(),
+        window.outer_size(),
+    ) else {
+        return false;
     };
+    cx >= pos.x && cx < pos.x + size.width as i32 && cy >= pos.y && cy < pos.y + size.height as i32
+}
+
+/// 悬浮窗锚定（PATCH007.2，抄 CT 预览窗几何）：右缘对齐托盘图标右缘；默认图标上方，屏上缘
+/// 放不下则翻到下方（任务栏在顶部场景）。锚点由调用方从锁内拷出（本函数不取锁、窗口调用锁外）。
+fn anchor_tray_hover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32, i32, i32)>) {
     let Some((x, y, w, h)) = anchor else {
         return;
     };
@@ -235,38 +250,41 @@ fn anchor_tray_hover(window: &tauri::WebviewWindow) {
     }
 }
 
-/// 显示悬浮窗（PL028.1）：聚合概览 → 按行数定尺寸 → 推送 `hover-update`（前端据此渲染）
-/// → 锚定 → show。任一步失败落日志（装饰层不阻断主流程——容错白名单登记项）。
-fn show_tray_hover(app: &AppHandle) {
+/// 重锚悬浮窗（PATCH007.8）：窗高变化后重算位置（**下缘保持"托盘顶 − 间距"、顶缘移动** ——
+/// CT `reanchor_to_tray` 同款，用户定案的收缩方向）。锚点从锁内拷出（窗口调用锁外）。
+pub(crate) fn reanchor_tray_hover(window: &tauri::WebviewWindow) {
+    let anchor = match HOVER_WATCH.lock() {
+        Ok(watch) => watch.anchor,
+        Err(_) => None,
+    };
+    anchor_tray_hover(window, anchor);
+}
+
+/// 推送一次概览（PATCH007.6 单一出口）：聚合 DTO → 按行数设窗高 → `emit_to` 推给悬浮窗。
+/// **每次悬停首帧**与**悬停期每秒节拍**共用本函数（同一单一口径）。任一步失败落日志并返回
+/// `false`（装饰层不阻断主流程——容错白名单登记项；首帧失败则不显示空壳）。
+fn push_hover_summary(app: &AppHandle) -> bool {
     let Some(window) = app.get_webview_window("tray-hover") else {
-        return;
+        return false;
     };
     let ctx = app.state::<AppContext>();
     let summary = match commands::hover::hover_summary_inner(&ctx) {
         Ok(summary) => summary,
         Err(err) => {
-            warn_diag(&format!("hover 概览聚合失败（不显示）：{err}"));
-            return;
+            warn_diag(&format!("hover 概览聚合失败（跳过本拍）：{err}"));
+            return false;
         }
     };
-    let height = if summary.single_line {
-        HOVER_ONE_LINE_HEIGHT
-    } else {
-        HOVER_THREE_LINE_HEIGHT
-    };
-    if let Err(err) = window.set_size(tauri::LogicalSize::new(HOVER_WIDTH, height)) {
-        warn_diag(&format!("hover 窗尺寸设置失败：{err}"));
-    }
+    // 窗尺寸**不在此设**（PATCH007.8）：宽固定于 `hover::WINDOW_WIDTH`（创建期已设）、高由
+    // 前端量内容后经 `tray_hover_resize` 命令重设 —— 单一归属，避免两处打架
     if let Err(err) = window.emit_to("tray-hover", "hover-update", &summary) {
         warn_diag(&format!("hover 概览推送失败：{err}"));
+        return false;
     }
-    anchor_tray_hover(&window);
-    if let Err(err) = window.show() {
-        warn_diag(&format!("hover 窗显示失败：{err}"));
-    }
+    true
 }
 
-/// 收起悬浮窗（PL028.1；失败仅日志）。
+/// 收起悬浮窗（失败仅日志）。
 fn hide_tray_hover(app: &AppHandle) {
     let Some(window) = app.get_webview_window("tray-hover") else {
         return;
@@ -276,34 +294,104 @@ fn hide_tray_hover(app: &AppHandle) {
     }
 }
 
-/// 托盘图标悬停进入（PL028.1）：记录图标矩形 → 停留阈值后仍悬停才显示（防划过误触）。
-fn on_tray_hover_enter(app: &AppHandle, rect: tauri::Rect) {
+/// 托盘右键（原生菜单将弹出）：先收悬浮窗 + **相位归零**（防守候线程在菜单弹出后再把它显示
+/// 出来）—— 等价 CT 的 `Suppressed` 锁死（CP 托盘是原生菜单、无"菜单窗可见性"事实源，故以
+/// 相位归零 + 光标在菜单上时 `in_tray = false` 天然不弹覆盖；菜单收起后需重新移入图标才再出卡）。
+fn dismiss_tray_hover(app: &AppHandle) {
+    if let Ok(mut watch) = HOVER_WATCH.lock() {
+        watch.phase = Phase::Idle;
+    }
+    hide_tray_hover(app);
+}
+
+/// 托盘图标悬停进入（PATCH007.2）：记录图标矩形 + 相位分派——`Shown` 只清 `miss` **不重武装**
+/// （CT FIX006.18 连续性：光标自悬浮窗移回图标不闪没）；其余相位转 `Armed` 重新计时。
+/// **显隐动作由守候线程执行**，本函数只写状态（`Leave` 不再参与判定——CT PL019.1 实证其慢速
+/// 移出会丢失）。
+fn on_tray_hover_enter(rect: tauri::Rect) {
     let (tauri::Position::Physical(pos), tauri::Size::Physical(size)) = (rect.position, rect.size)
     else {
         return;
     };
-    if let Ok(mut slot) = HOVER_ANCHOR.lock() {
-        *slot = Some((pos.x, pos.y, size.width as i32, size.height as i32));
-    }
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(HOVER_DWELL_MS));
-        if cursor_in_tray() == Some(false) {
-            return; // 已划过 / 已移开：不显示
-        }
-        show_tray_hover(&handle);
-    });
+    let Ok(mut watch) = HOVER_WATCH.lock() else {
+        return;
+    };
+    watch.anchor = Some((pos.x, pos.y, size.width as i32, size.height as i32));
+    watch.phase = match watch.phase {
+        Phase::Shown { .. } => Phase::Shown { miss: 0 },
+        _ => Phase::Armed { since_ms: now_ms() },
+    };
 }
 
-/// 托盘图标悬停离开（PL028.1）：延迟收起（缓冲"从图标移向悬浮窗"，防闪烁）。
-fn on_tray_hover_leave(app: &AppHandle) {
+/// 悬浮窗守候线程（PATCH007.2 + PATCH007.6；抄 CT `spawn_preview_watcher` 形态）：100ms 步进
+/// 驱动 [`hover::step_watch`]，是悬浮窗 **show/hide 的唯一调用者**（事件处理只写状态 ⇒ 杜绝
+/// 多线程换代的孤儿窗）；相位为 `Shown` 时按 1 秒节拍重推概览（悬停期实时刷新，离开即停、
+/// 零空转）。窗口查询与动作**全在锁外**（见 [`HoverWatch`] 注释）。退出口：窗连续缺席满
+/// [`HOVER_ABSENT_LIMIT`] 拍 ⇒ 线程自灭（应用退出收尾或创建失败，不再空转）。
+fn spawn_hover_watcher(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(HOVER_HIDE_DELAY_MS));
-        if cursor_in_tray() == Some(true) {
-            return; // 又回到图标上：保持显示
+        let mut absent_ticks: u32 = 0;
+        let mut push_ticks: u32 = 0;
+        loop {
+            std::thread::sleep(Duration::from_millis(hover::WATCH_STEP_MS));
+            let Some(window) = handle.get_webview_window("tray-hover") else {
+                absent_ticks += 1;
+                if absent_ticks >= HOVER_ABSENT_LIMIT {
+                    return;
+                }
+                continue;
+            };
+            absent_ticks = 0;
+            // 窗口查询（is_visible / outer_*）与动作（show / hide / set_position）全在锁外执行
+            let visible = window.is_visible().unwrap_or(false);
+            let in_window = visible && cursor_in_window(&window);
+            let (action, anchor, phase_after) = {
+                let mut watch = match HOVER_WATCH.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => continue, // 锁中毒：跳过本拍（守候是装饰层，不阻断主流程）
+                };
+                let in_tray = cursor_in_tray(watch.anchor).unwrap_or(false);
+                let (next, action) =
+                    hover::step_watch(watch.phase.clone(), now_ms(), in_tray, in_window, visible);
+                watch.phase = next.clone();
+                (action, watch.anchor, next)
+            };
+            match action {
+                WatchAction::Show => {
+                    // 锁内结算与锁外执行之间有毫秒级空窗：此间右键会把相位归零并收窗
+                    // ⇒ 复核"仍是 Shown"再显示（CT FIX007.17 同款竞态复核）
+                    let still_shown = HOVER_WATCH
+                        .lock()
+                        .map(|watch| matches!(watch.phase, Phase::Shown { .. }))
+                        .unwrap_or(false);
+                    if !still_shown {
+                        continue;
+                    }
+                    // PATCH007.11（与 CT 对齐）：**先锚定 + 显示**，数据推送只作尽力而为 ——
+                    // CT 守候线程即 `anchor_preview + show` 直给、不把显示绑在推送成功上；我原版
+                    // 多了一道"推送成功才显示"的闸门 ⇒ 推送瞬时失败就整窗不出现 = **概率性不出窗**
+                    // 的根因 ✗（`push_hover_summary` 内部失败已自行落日志）。
+                    anchor_tray_hover(&window, anchor);
+                    if let Err(err) = window.show() {
+                        warn_diag(&format!("hover 窗显示失败：{err}"));
+                    }
+                    push_hover_summary(&handle);
+                }
+                WatchAction::Hide => hide_tray_hover(&handle),
+                WatchAction::None => {}
+            }
+            // PATCH007.6：显示中按 1 秒节拍重推（首帧已由 Show 分支推）；非显示态归零计数
+            if matches!(phase_after, Phase::Shown { .. }) {
+                push_ticks += 1;
+                if push_ticks >= hover::PUSH_EVERY_TICKS {
+                    push_ticks = 0;
+                    let _ = push_hover_summary(&handle);
+                }
+            } else {
+                push_ticks = 0;
+            }
         }
-        hide_tray_hover(&handle);
     });
 }
 
@@ -550,6 +638,9 @@ fn handle_action(app: &AppHandle, id: &str) {
                 // 容错白名单 ④：退出前落库失败仍退出（退出意图优先）；双写助手统一出口（FIX005.5）
                 warn_diag(&format!("退出前落库失败（仍退出）：{err}"));
             }
+            // PATCH007.4（CT PL021.5 三重闭环）：显式移除托盘图标双保险（App drop 亦会删；
+            // 多窗存在时确认退出链不残留幽灵图标）；返回值 None = 图标本不存在（异常态，无错误可吞）
+            drop(app.remove_tray_by_id("main-tray"));
             app.exit(0);
         }
         _ => {}
@@ -573,7 +664,6 @@ fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("缺少应用图标（tauri.conf.json bundle.icon），托盘无法构建")?;
     TrayIconBuilder::with_id("main-tray")
         .icon(icon.clone())
-        .tooltip("CapsulePulse")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| handle_action(app, event.id.as_ref()))
@@ -584,14 +674,14 @@ fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 button_state: MouseButtonState::Up,
                 ..
             } => toggle_main_window(tray.app_handle()),
-            // 右键（原生菜单将弹出）：先收掉 hover 概览窗——它恒置顶，会浮在菜单之上
+            // 右键（原生菜单将弹出）：先收掉 hover 概览窗 + 相位归零——它恒置顶，会浮在菜单之上
             TrayIconEvent::Click {
                 button: MouseButton::Right,
                 ..
-            } => hide_tray_hover(tray.app_handle()),
-            // PL028.1：悬停托盘图标 → 今日概览悬浮窗（停留阈值 + 光标判据防误触）
-            TrayIconEvent::Enter { rect, .. } => on_tray_hover_enter(tray.app_handle(), rect),
-            TrayIconEvent::Leave { .. } => on_tray_hover_leave(tray.app_handle()),
+            } => dismiss_tray_hover(tray.app_handle()),
+            // PL028.1 / PATCH007.2：悬停托盘图标 ⇒ 只记录矩形与相位，显隐由守候线程结算
+            // （`Leave` 不参与判定——CT PL019.1 实证其慢速移出会丢失）
+            TrayIconEvent::Enter { rect, .. } => on_tray_hover_enter(rect),
             _ => {}
         })
         .build(app)?;
@@ -704,6 +794,7 @@ pub fn run() {
             commands::reminder::set_settings,
             commands::reminder::set_hotkey,
             commands::hover::tray_hover,
+            commands::hover::tray_hover_resize,
             commands::workday::clock_in,
             commands::workday::clock_out,
             commands::workday::overtime,
@@ -715,6 +806,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             // 关闭语义 = 隐藏到托盘（PL004 定案）；退出走托盘菜单
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // PATCH007.4（CT FIX005.1 / FIX006.2）：非主窗（悬浮窗）一律只拦不处理——
+                // 否则其关窗会误落主窗位置记忆，且 runtime 默认销毁会让悬浮窗本会话失效
+                if window.label() != "main" {
+                    api.prevent_close();
+                    return;
+                }
                 api.prevent_close();
                 if let Err(err) = hide_main_window(window.app_handle()) {
                     warn_diag(&err);
@@ -758,6 +855,11 @@ pub fn run() {
             // 焦点联动分态纱（PL021.4 CT 定案）：失焦 30% 纱、聚焦 0% 纱（桌面直透）——
             // DWM 系统背板材质已随 CT 化退役（恒纯 alpha 透明窗），此处仅转发焦点态给前端
             if let WindowEvent::Focused(focused) = event {
+                // PATCH007.4（CT FIX005.2）：焦点态只服务主窗——悬浮窗（focusable(false) 理论
+                // 不获焦，此处防御式过滤）获焦不得翻转主窗纱态
+                if window.label() != "main" {
+                    return;
+                }
                 // 分态纱浓度联动：前端监听本事件切换 focused class；发送失败落日志不吞
                 // （观感降级为常纱态，功能不受损；容错白名单 FIX003.7 剩余适用部分）
                 if let Err(err) = window.emit("window-focus", *focused) {
@@ -809,7 +911,7 @@ pub fn run() {
             )
             .title("CapsulePulse 概览")
             .position(-2000.0, -2000.0)
-            .inner_size(HOVER_WIDTH, HOVER_ONE_LINE_HEIGHT)
+            .inner_size(hover::WINDOW_WIDTH, hover::HEIGHT_MIN)
             .transparent(true)
             .decorations(false)
             .skip_taskbar(true)
@@ -823,6 +925,18 @@ pub fn run() {
             if let Err(err) = hover.hide() {
                 warn_diag(&format!("hover 窗首绘后隐藏失败：{err}"));
             }
+            // 补系统圆角（PATCH007 漏抄补上；CT 预览窗同款）：`shadow(false)` 关掉 Tauri 投影后
+            // 窗口**隐式圆角随之丢失** ⇒ 不补则卡片四角外露方角（CP AGENTS 已记该根因；
+            // CT `glass_backdrop::apply_round_corners(&preview)` ✓）—— 让 DWM 切掉 CSS 圆角外的
+            // 窗口直角区，窗角与卡片 `border-radius` 视觉统一。
+            glass_backdrop::apply_round_corners(&hover);
+            // 隐藏 Win11 窗口描边（PATCH007.15 漏抄补上 —— 主窗窗口整定是**两步**：描边隐藏 +
+            // 系统圆角；我给悬浮窗只抄了后一步 ✗）：DWM 给窗口画的那圈系统描边落在**卡片之外**
+            // （webview 之外 ⇒ CSS 改不动 ✗）⇒ 表现为"卡片外还有一圈" ✓。与主窗完全对齐 ✓。
+            glass_backdrop::hide_active_border(&hover);
+            // 悬浮窗守候线程（PATCH007.2 + .6）：100ms 步进结算显隐（**唯一调用者**）
+            // + 显示中按 1 秒节拍重推概览
+            spawn_hover_watcher(&app.handle().clone());
             build_tray(app)?;
             register_global_shortcuts(app)?;
             // 惰性按天汇总（PL027.7）：启动时把"已封口但未滚"的过去日滚进 days（幂等；

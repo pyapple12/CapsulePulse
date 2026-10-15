@@ -133,15 +133,16 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
     /* PL028.2 录键：基座无注册能力，回显规范化串（真注册与冲突拒绝在 Rust 侧） */
     case "set_hotkey":
       return String(args?.combo ?? "");
-    /* PL028.1 悬浮概览：基座给"在岗三行"样例（真值由 Rust 侧聚合，四状态见 hover.rs 用例） */
+    /* PL028.1 悬浮概览：基座给"在岗三行"样例，**按最长行取值**（供窗宽核对：10小时09分钟）
+       —— 真值由 Rust 侧聚合，段带/四状态见 hover.rs 用例 */
     case "tray_hover":
       return {
         state: "on_duty",
-        label: "正班",
-        remaining_secs: 8_100,
-        work_secs: 19_800,
-        rest_secs: 1_800,
-        until_reminder_min: 12.3,
+        label: "本班",
+        remaining_secs: 10_860,
+        work_secs: 36_540,
+        rest_secs: 0,
+        until_reminder_min: 48.3,
         single_line: false,
       };
     case "set_settings":

@@ -708,19 +708,20 @@ pub(super) fn try_auto_clock_out<C: Clock>(
 /// 加班步数 = 该数据日 `overtime` 事件条数（只追加流水，账可重推）。
 /// 已累计两口径：`used_before_shift_secs` 把**末窗视为当前班**而排除（在岗时调用）；
 /// `used_total_secs` 为全部窗口之和——**打卡前**（尚无开窗）必须用后者，它才是"本班之前"。
-struct DayBudgetContext {
+pub(super) struct DayBudgetContext {
     /// 今日基准小时（当天第一次打卡时的自动下班小时数；整日锁定 ⇒ 直取设置值，无需快照事件）。
     basis_hours: u32,
     /// 加班步数（本数据日 `overtime` 事件条数）。
     overtime_steps: u32,
     /// 本班（末窗）之前的今日已累计在岗秒。
-    used_before_shift_secs: i64,
+    pub(super) used_before_shift_secs: i64,
     /// 今日已累计在岗秒（全部窗口之和；打卡前 = 全部已关窗口）。
     used_total_secs: i64,
 }
 
-/// 今日预算上下文取数（见 [`DayBudgetContext`]）。
-fn day_budget_context<C: Clock>(
+/// 今日预算上下文取数（见 [`DayBudgetContext`]）。`pub(super)`：托盘悬浮概览取"本班之前已用"
+/// 算行①段带锚点 `d0 = 基准 − used_before`（与自动下班同一套口径，单一来源）。
+pub(super) fn day_budget_context<C: Clock>(
     ctx: &AppContext<C>,
     clock_in_at: i64,
     now: i64,
