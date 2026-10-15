@@ -3058,3 +3058,128 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 **做法**：`.temp/pl027-visual-standards.md` 追加**附录 C：PATCH008 目测组**（照 B 组同规）；`AGENTS.md` 状态行补 PATCH008 段；`x.progress` 本组条目勾选；README 徽章推进。
 
 **验证**：门禁全量 + live 全项 + 提交前 `git status` / `git diff --stat` 核对。
+
+## 附录 PATCH009：设置板精修（快捷键改名 / 自动下班开关下线 / 提醒通知合并）（2026-10-16 立项）
+
+**目标**：设置板按用户定案精修 —— ① 「工作/休息快捷键」改名「**状态快捷键**」；② 设计稿"自动下班"开关**下线**（后端自动下班本就是常开固定功能，不再渲染占位开关）；③ 「系统通知」+「提醒声音」**合并为「提醒通知」**（一期口径待定）。
+
+**用户原话（2026-10-16）**：① 工作/休息快捷键 → 状态快捷键；② 自动下班切换按钮下线、变成固定功能；③ 系统通知和提醒声音合并为提醒通知（一期不做声音切换或者可设定一个开一个关）；**先处理 ① ② 这两个**。
+
+### 一、PATCH009.1 「工作/休息快捷键」→「状态快捷键」（2026-10-16 已落）
+
+**做法**：`ui/components/SettingsPanel.vue` 该行 `setting-name` 文案改「**状态快捷键**」（描述行保持"全局切换工作 / 休息"）；纯前端文案，零逻辑改动。
+
+**验证**：`vue-tsc` + build + live（板内行名正确、录键仍可用）。
+
+### 二、PATCH009.2 「自动下班」开关下线（2026-10-16 已落）
+
+**问题**：设计稿第五行"自动下班"开关在 CP 侧是**零接线的常开禁用占位**（文件头「登记差异 ①」）——后端自动下班本就是**常开固定功能**（core 零功能变更红线，z.plan 附录 PL016），渲染一个不可点的开关属语义噪音。
+
+**做法**：`ui/components/SettingsPanel.vue` **删除该行**（含 `checked disabled` 占位开关）；**「自动下班（小时）」步进行保留**（小时数仍可调，4–12 与整日锁定规则不变）；文件头「登记差异 ①」与样式注释"九行"表述同步改为八行。**后端零改动**（自动下班常开是既有事实）。
+
+**验证**：`vue-tsc` + build + live（板内八行、无该开关、小时步进仍可用）。
+
+### 三、PATCH009.3 「系统通知」+「提醒声音」→「提醒通知」（2026-10-16 已落）
+
+**问题**：原为两行两开关（`notify_enabled` / `sound_enabled`），用户要合并为**一行「提醒通知」**。
+
+**用户定案（2026-10-16）**：**一个开关控两者 —— 要么都开、要么都关；本版不分（以后再分）**。
+
+**门控核实（落前）**：通知门控在**后端**（`deliver_reminder` 读 `notify_enabled`）、声音门控在**前端**（`App.vue` 提示音读 `sound_enabled`）⇒ 两字段同写即"都关 = 真不响" ✓，**后端零改动**。
+
+**做法**：`ui/components/SettingsPanel.vue` 两行并一行「提醒通知」（`notifyOn` = 两字段**与**——旧配置不一致时"都开才算开"；`onNotifyChange` 一次写入**同时置** `notify_enabled` / `sound_enabled`）；`BooleanSettingKey` 收为三路（通知 / 置顶 / 贴边）；错误回弹列表同步（回弹值取"与"）；文件头与样式注释行数表述改七行。
+
+**验证**：`vue-tsc` 0 + build + live（一行生效、设置持久、开关两态都正确：都开 ⇒ 通知 + 提示音；都关 ⇒ 都不响）。
+
+### 四、PATCH009.4 设置板七行高度分配 + 分隔线全去（2026-10-16 已落）
+
+**背景**：7 行成为当前版本全部设置后 —— 板几何：`#settings-board`（窗口 300×400 里 top 54 / bottom 14 ⇒ **272×332**）→ `.sheet`（宽 236 / padding 12 ⇒ 内容盒 **212×308**）；7 行**顶排**只占约 3/4 ⇒ **底部空一大截**，且行距仍是九行时代压到 **4px** 的临时值 ✗。
+
+**用户定案（2026-10-16）**：① 走**等分铺满**（明确否掉"保守：回 6px 行距 + 整体居中"）；② 行内**垂直居中**；③ 各行**同高**；④ 错误行**自行长高**；⑤ 行间**分隔线全去**。
+
+**做法**：
+
+- `ui/components/SettingsPanel.vue`（scoped）：`#settings-board .setting-row { flex: 1; padding: 6px 0 }` —— **每行等分**板内可用高（⇒ 自动同高、铺满；行内 `align-items: center` 由 `boards.css` 既有规则提供 ⇒ 垂直居中；错误行内容超高时靠 flex 的 **min-content 行为自行长高**、其余行略缩）；
+- 同文件：`#settings-board .board-glass { display: flex; flex-direction: column; justify-content: center; justify-content: safe center }`（纵列 + `safe center` 兜底 ⇒ 内容超高退化为顶排可滚、不裁顶）；
+- `ui/src/styles/boards.css`：**删除 `.setting-row + .setting-row` 的 `border-top`**（分隔线全去；全仓复查确认该规则只服务设置行）。
+
+**验证**：`vue-tsc` 0 + build + live（用户目测：七行**铺满且同高**、**无分隔线**、错误行自行长高）。
+
+### 五、PATCH009.5 录键按钮两态同高 + 补动效（2026-10-16 已落）
+
+**背景（用户实测目测提出）**：录制态「录制中…」比常态按钮**高一档**，且按钮**没有任何动效**。两因叠加：
+
+- **布局层**：按钮高度 = 上下 padding + 文字行盒；行盒走 `line-height: normal`，按**实际渲染字体的度量**算 —— 常态 `Alt+Shift+P` 全拉丁字形走 `--font-stack` 首选字体，录制态 `录制中…` 是 CJK、只能由**回退字体**（雅黑系）绘制，回退字体 normal 行高更高 ⇒ 行盒被撑高（CT `settings.css` 有同款注释：撑高 0.8px，解法即 `line-height: 1`）。
+- **视觉层**：录制态原用 `outline: 1.5px`，outline 画在 border box **外面**、不参与布局 ⇒ 上下各外扩 1.5px（共 3px）视觉外扩。
+
+**用户定案（2026-10-16）**：照 CT —— `line-height: 1` + `padding: 6px 10px` **不动**（接受按钮整体收一档）；动效取 CT 原样的**背景呼吸**。
+
+**做法**（`ui/components/SettingsPanel.vue` scoped 的 `.hotkey-btn`）：
+
+- `line-height: 1` 锁行盒（CT 同款惯例）；
+- 录制态 `outline` → **inset accent 描边** `inset 0 0 0 1.5px var(--accent)`（画在盒内 ⇒ 两态同尺寸）；常态补 **0 宽同位槽位** `inset 0 0 0 0 var(--accent)` ⇒ 描边出现可平滑过渡（`box-shadow` 过渡要求结构同位）；
+- 动效照 CT：`transition: background 0.15s ease, box-shadow 0.15s ease` + `:hover` 提亮一档 + 录制态 `hotkey-pulse 0.8s ease-in-out infinite alternate`（背景呼吸；亮度步进用 `color-mix` 表达 CT 的 0.08→0.14 / 0.16 比例，双主题自适应）+ `prefers-reduced-motion` 守卫关过渡与呼吸（PL009 纪律；录制态仍靠 accent 描边静态可辨）。
+
+**验证**：`vue-tsc` 0 + build + live（用户目测：录制态与常态**同高**、按钮有 hover 反馈、录制时背景呼吸、Esc 取消后回到常态）。
+
+> **补记（同日，用户目测提出"按下去的动效没做"）**：CT 的 `.hotkey-btn` **本身没有** `:active`（`settings.css` 只有 `:hover` 提亮 + `.recording` 描边/脉冲）⇒ 照 CT 抄必然缺按下反馈；CT **同板**的 `.stepper-btn:not(:disabled):active { transform: scale(0.94) }` 有。**用户定案：取 CP stepper 双速版**（按下 `0.07s ease-out` 瞬时缩 `0.94`、松手 `0.22s cubic-bezier(0.23, 1, 0.32, 1)` 弹性回位；数值全同 stepper，不引新值）——`SettingsPanel.vue` 的 `.hotkey-btn` 的 `transition` 增 `transform` 一项，并新增 `.hotkey-btn:active`。
+
+> **补记二（同日，用户定案"框与文字必须是一体的、照 stepper 全面 SVG 化"）**：录键按钮整体重装（`ui/components/SettingsPanel.vue`）——
+>
+> - **结构**：按钮只剩透明点击壳（`background: none`）+ **不可见量宽占位** `<span class="hk-sizer">`（`visibility: hidden`；按钮宽高仍由文字内容决定），视觉全部落进**同一个 `<svg class="hk-vec">`**：`<rect class="hk-frame">`（框面 + 内环）、`<rect class="hk-ring">`（accent 录制环，常态 `stroke-width: 0`）、`<text class="hk-label">`（矢量文字）；**按压缩放由按钮改到 `.hk-vec` 上**（stepper 同款双速参数不变）⇒ 框与文字作为一个矢量单元整体缩放，文字不再吃 HTML 文字在形变时的整设备像素吸附（"按下下沉"的根因）。
+> - **几何**：SVG **无 `viewBox`**（宽度随组合键文案动态、不做等比缩放变形），改用 CSS 的 SVG 几何属性 —— 框 `x/y 0.5px` + `width/height calc(100% - 1px)` + `rx 8.5px`（1px 描边**内贴**、外缘正落按钮边缘；8.5 = 现有圆角 9 − 0.5）；录制环再内缩 0.25px（`rx 8.25px`）⇒ 1.5px 环完整落在框内。
+> - **令牌**：`ui/src/styles/glass.css` 抽出 `--panel-ring`（浅 `rgba(255,255,255,0.65)` / 暗 `0.14`，三处主题块），`--panel-stroke` 改写为 `inset 0 0 0 1px var(--panel-ring)`（单一来源）；**未新增投影滤镜令牌**。
+> - **投影不进 SVG 内容**：留在 `.hk-vec` 自身的 `box-shadow: var(--panel-shadow)` —— SVG 内的 `drop-shadow` 按**填充透明度**衰减（框面半透明，暗主题 0.14 ⇒ 投影几乎不可见，stepper 现即此状态）；留在元素上则与改造前**逐像素一致**，且随该元素一起缩放（仍是一体）。
+> - **文字投影**：`text-shadow` 走继承（与改造前同一条链）—— 用户明确要求"和现在一样"。
+> - **动效不变**：hover 提亮一档、CT 背景呼吸（改为动框面 `fill`）、按下双速、reduced-motion 守卫。
+>
+> **待目测**：① 文字垂直定位改 em 盒居中（`dominant-baseline: central`）是否有 1px 级微移；② SVG 文字是否照旧吃 `text-shadow`；③ 按下时文字是否不再下沉。
+
+> **补记三（同日，用户目测发现"点录键 → 按 Esc 后留一圈黑框"）**：那是 **Chromium 默认焦点环**（UA 的 `outline: auto` 两色对比环，暗底上呈黑框、跟按钮圆角）—— 机理：点按钮获焦（鼠标点击本身不给 `:focus-visible`），**紧接着按任意键**（Esc 取消等）把元素提升为 `:focus-visible`，UA 遂画环。设置板数字输入框早有 `.setting-row input[type="number"]:focus { outline: 1.5px solid var(--accent) }`，录键按钮（PL028.2 新增）漏了这条。**修法**：`.hotkey-btn:focus-visible { outline: 1.5px solid var(--accent) }`（同板语言；用 `:focus-visible` 而非 `:focus` —— 纯鼠标点击不需要环，键盘 Tab / 录键才给）。**同源待办**：`.stepper-btn` 同为"透明壳 + SVG"按钮、亦无焦点环规则，键盘 Tab 到它会露同一个 UA 黑框（本次未动，待用户定）。
+
+> **补记四（同日，用户目测"补了焦点环之后反而多一圈蓝框"）**：焦点环规则细化 —— 定案 **录键这条路不留任何环**。三件：① `.hotkey-btn:focus-visible { outline: 1.5px solid var(--accent) }` **保留**（服务键盘 Tab 使用者，与数字输入框同语言）；② 新增 `.hotkey-btn.recording:focus-visible { outline: none }`（录制中 accent 录制环已是信号，不再叠一圈）；③ `stopRecord()` 内**主动 `blur()` 放弃录键按钮焦点**（判据 = `document.activeElement` 命中 `.hotkey-btn`）—— 鼠标点击获焦 + 录制期按键会把按钮提升为 `:focus-visible`，不放弃则环一直挂到用户点别处（看着像故障）。
+
+### 六、PATCH009.6 焦点环全局退役（2026-10-16 已落）
+
+**背景（用户目测逐条追出来的）**：① 点录键 → 按 Esc，按钮留一圈**黑框** ⇒ 查明是 Chromium 默认焦点环（点按钮获焦、**再按任意键**会把元素提升为 `:focus-visible`，UA 遂画 `outline: auto` 两色对比环，暗底呈黑框）；② 给录键按钮补 `.hotkey-btn:focus-visible { outline: 1.5px solid var(--accent) }` 后又变成**蓝框**；③ **用户定案：全应用不留任何焦点环** —— 主页左右两个侧角图标（统计 / 设置）、提醒阈值输入框、步进按钮、录键按钮，一律不出现 UA 框，**Tab 也不给环**。
+
+**做法**：
+
+- `ui/src/styles/glass.css`（与既有 `* { box-sizing / margin / padding }` 全局重置同址）：新增 `:focus, :focus-visible { outline: none }` —— 双写彻底压掉 UA 的 `outline: auto` 两色环；注释内登记"这是**有意放弃键盘焦点指示**（用户定案），后续若做无障碍，应在此处统一补可见焦点样式"。
+- `ui/src/styles/boards.css`：**删除** `.setting-row input[type="number"]:focus { outline: 1.5px solid var(--accent) }` —— 其特异度高于全局重置，不删则提醒阈值输入框仍会留蓝环。
+- `ui/components/SettingsPanel.vue`：删除上一轮新增的 `.hotkey-btn:focus-visible` / `.hotkey-btn.recording:focus-visible` 两条规则；`.hotkey-btn` 的 `border-radius` 随焦点环退役一并移除（其唯一用途是给焦点环取形，按钮视觉已全交内层 SVG）；`stopRecord()` 里的 `blur()` **保留**，理由改记为"收尾不留残留焦点（否则一个 Enter / Space 就会重新进入录制态，而录制态吞掉全部键盘输入，属风险态）"。
+
+**验证**：`vue-tsc` 0 + build + live（用户目测：上述各处点击 / 按键 / Tab 均不再出现任何环）。
+
+### 七、PATCH009.7 点板外单击即收两板（含标题）（2026-10-16 已落）
+
+**背景（用户实测）**：统计 / 设置板开着时**点标题没反应**（既不收板、也不拖）。**定案：单击任何"不是两板板内位置"就退出两板。**
+
+**根因**：`ui/App.vue::onWindowDown` 把**拖拽白名单**（`DRAG_INTERACTIVE`，含 `.topbar` —— 标题自 PATCH001.2 起在列，为的是"按下只记起点、超 5px 才启动拖拽"的阈值把手）**复用成了收板判据** —— 命中白名单即 `return` ⇒ 点标题既不收板也不拖 ✗。两个集合本质不同（板内 / 遮罩 / 开板钮要"不收"，标题要"收"），被一个常量混住。
+
+**做法**（`ui/App.vue`）：
+
+- 新增**收板豁免**常量（与拖拽白名单**刻意分开**，注释写明理由）：`const BOARD_KEEP_OPEN = "#stats-board, #settings-board, .overlay, .sideButton";`
+- `onWindowDown` 里**把收板判定提到拖拽判定之前**、改用豁免集：`if ((statsOpen.value || panelVisible.value) && target?.closest(BOARD_KEEP_OPEN) == null) { 两板置 false; return; }` —— 收板消费本次按下（不抢拖拽），元素自身 click 照常派发。
+- 标题的阈值把手无需改动：`ui/src/use-threshold-drag.ts` 只 `preventDefault()`、**无** `stopPropagation()` ⇒ window 冒泡监听照常收到（已核代码）。
+- 顺带更正 `DRAG_INTERACTIVE` 上方过时注释（"板区不拖不收" → "板区不拖，收板另由 `BOARD_KEEP_OPEN` 管"）。
+
+**行为**：点标题 / 内容区 / dock / 空白 / 打卡 pill ⇒ 收两板（该元素自身 click 仍生效）；点板内 / 遮罩 / 两个侧角钮 ⇒ 不收（侧角钮仍自己切换 / 开合）；板没开时一切照旧；收板后同一次按下不启动窗口拖拽。
+
+**验证**：`vue-tsc` 0 + build + live（板开着点标题 / 板外各处 ⇒ 两板收起；点板内 ⇒ 不收起；点另一侧角钮 ⇒ 切过去）。
+
+### 八、PATCH009.8 标题：拖拽照旧、只有单击才收板（2026-10-16 已落）
+
+**背景（用户实测 PATCH009.7 后）**：板开着时**标题上拖不动窗了**（PATCH009.7 把收板放在 mousedown ⇒ 按下即收板、且消费本次按下）。定案：**标题上拖拽照旧拖窗，只有单击才收板。**
+
+**参照物（CT 早有解法）**：CT `ui/src/composables/useThresholdDrag.ts` 的注释记的正是这段历史 —— "大标题是窗口拖动把手，同时是浮板关闭的点击目标（文档级板外点击关闭）。原机制 mousedown 即异步启动系统拖拽循环，**吞掉后续 click —— 浮板打开时单击标题永远关不上板**……阈值分流：按下只记录起点，移动超阈值才启动拖拽；**单击不启动，click 正常派发**，两职能按意图自动分流"。⇒ 结论：**把手不改**，收板改挂 `click` 即可（拖拽启动时 click 被吞，天然分流）。
+
+**做法**（`ui/App.vue`；`ui/src/use-threshold-drag.ts` **一字未动**）：
+
+- 收板豁免常量改名并加 `.topbar`：`const NO_CLOSE_ON_PRESS = "#stats-board, #settings-board, .overlay, .sideButton, .topbar";` —— 语义 = "**按下时**不收板"；标题因此不进"按下即收"这条路 ⇒ 阈值拖拽照旧。
+- 新增 `onTitleClick()`（板开着即收两板，板没开时空操作），挂在**顶栏条**上：`<header ref="topbarEl" class="topbar" @click="onTitleClick">`（不是 `h1` —— `.title` 是文字宽度，条两侧空白也属"板外位置"）。
+- 更新 `onWindowDown` 的注释与常量引用；`DRAG_INTERACTIVE` 一字未动。
+
+**行为**：标题拖动（>5px）⇒ 拖窗、不收板（click 被系统拖拽吞掉）；标题单击（≤5px）⇒ 收两板；标题双击 ⇒ 第一次单击收板 + 双击缩回托盘；板内 / 遮罩 / 侧角钮 ⇒ 不收；内容区 / dock / 空白 ⇒ 仍是按下即收（沿用 PATCH009.7）。
+
+**验证**：`vue-tsc` 0 + build + live（用户实测：板开着标题拖动 ⇒ 窗口动、板不关；标题单击 ⇒ 两板收；双击 ⇒ 收板 + 缩回托盘）。

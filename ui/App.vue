@@ -94,12 +94,21 @@ let unlistenPrefs: (() => void) | undefined;
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
 // 交互元素白名单命中不抢，其余一律启动窗口拖拽（点按语义不受影响）；
-// 浮层件全部在列（PL019：板区不拖不收、确认遮罩不拖，design 无拖拽语义）；
+// 浮层件全部在列（PL019：板区不拖、确认遮罩不拖，design 无拖拽语义；**收板**另由下方
+// NO_CLOSE_ON_PRESS 管 —— PATCH009.7 起两者刻意分开）；
 // .topbar 自 PATCH001.2 起在列——标题改走阈值拖拽把手（否则"按下即拖"会吞掉双击）；
 // label 自 PATCH002.2 起在列——三段控件的「工作/休息」是 <label>，不在白名单时按下即被
 // startDragging 抢走鼠标捕获、click 永不派发（"按了没反应"根因；凡交互控件一律在列）
 const DRAG_INTERACTIVE =
   "button, input, textarea, select, a, label, .sideButton, #stats-board, #settings-board, .overlay, .topbar";
+
+/** 按下（mousedown）时**不收板**的区域（PATCH009.7 / PATCH009.8 用户定案）：板内交互、确认
+ * 遮罩、两个开板钮（各自负责开合，点另一侧钮仍由钮自己切到那一板）+ **标题**。与
+ * `DRAG_INTERACTIVE` **刻意分开**：标题必须在拖拽白名单里（阈值把手：按下只记起点、超 5px
+ * 才启动拖拽）—— 原先两者共用一个常量，标题命中白名单即 return，导致"板开着点标题没反应"。
+ * 标题的收板改挂 `click`（PATCH009.8）：拖动时 `startDragging()` 会吞掉 click ⇒ 拖拽与单击
+ * 天然分流（CT `useThresholdDrag` 注释同史），故标题不进"按下即收"这条路。 */
+const NO_CLOSE_ON_PRESS = "#stats-board, #settings-board, .overlay, .sideButton, .topbar";
 
 // —— design flyBoard（PL019.2）：把开板按钮中心换算成板内坐标写入 transform-origin，
 // 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = boards.css 板位常量（design 同名）——
@@ -131,24 +140,36 @@ function flyBoard(board: HTMLElement | null, btn: HTMLElement | null): void {
   );
 }
 
-/** 非交互区按下：板开着先收板（design 点板外收板，PL019.6；板区/开合钮在白名单不收），
- * 收板动作消费本次按下不抢拖拽；无板时启动窗口拖拽 */
+/** 窗口级按下分流（PATCH009.7 起**收板判定与拖拽判定分离**）：先收板（`NO_CLOSE_ON_PRESS`
+ * 之外的位置按下即收两板，收板消费本次按下、不抢拖拽，元素自身 click 照常派发）→
+ * 再按拖拽白名单分流 → 其余启动窗口拖拽。标题不在收板之列（改由 `onTitleClick` 走 click）。 */
 function onWindowDown(e: MouseEvent): void {
   if (e.button !== 0) {
     return;
   }
-  // 文案条浮层（PATCH005.11）：任意位置按下即隐（先于白名单 / 收板分支，保证"任意位置"语义）
+  // 文案条浮层（PATCH005.11）：任意位置按下即隐（先于收板 / 白名单分支，保证"任意位置"语义）
   hideAllBanners();
   const target = e.target as HTMLElement | null;
-  if (target?.closest(DRAG_INTERACTIVE)) {
-    return;
-  }
-  if (statsOpen.value || panelVisible.value) {
+  // 收板：除"板内 / 遮罩 / 开板钮 / 标题"外，任何位置（内容区、dock、空白…）按下即收两板
+  if ((statsOpen.value || panelVisible.value) && target?.closest(NO_CLOSE_ON_PRESS) == null) {
     statsOpen.value = false;
     panelVisible.value = false;
     return;
   }
+  if (target?.closest(DRAG_INTERACTIVE)) {
+    return;
+  }
   void getCurrentWindow().startDragging();
+}
+
+/** 标题单击收两板（PATCH009.8 用户定案）：板开着时点标题即收两板；**拖拽不触发** —— 阈值把手
+ * 在位移超 5px 时启动系统拖拽，拖拽循环吞掉后续 click（CT 实测同款分流），故本回调只在
+ * "真单击"时到达；板没开时是空操作。 */
+function onTitleClick(): void {
+  if (statsOpen.value || panelVisible.value) {
+    statsOpen.value = false;
+    panelVisible.value = false;
+  }
 }
 
 /** 双击标题缩回托盘（PATCH001.2，CT 同款交互）：与 Alt+F4 / 托盘显隐同语义（隐藏到托盘，
@@ -539,7 +560,7 @@ onUnmounted(() => {
 <template>
   <main ref="winEl" class="window" id="win" :class="{ focused: windowFocused }">
     <div class="content">
-      <header ref="topbarEl" class="topbar">
+      <header ref="topbarEl" class="topbar" @click="onTitleClick">
         <h1 class="title" @dblclick="onTitleDblClick">
           CapsulePulse<canvas class="title-canvas" aria-hidden="true"></canvas>
         </h1>

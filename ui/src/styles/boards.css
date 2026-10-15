@@ -51,9 +51,8 @@
 .setting-row {
   padding: 6px 0;
 }
-.setting-row + .setting-row {
-  border-top: 1px solid rgba(128, 128, 128, 0.18);
-}
+/* 行间分隔线（原 `.setting-row + .setting-row { border-top }`）已按用户定案**全去**（PATCH009.4）——
+   设置行与行之间不再有任何横线 */
 .setting-row.inline {
   display: flex;
   align-items: center;
@@ -85,9 +84,8 @@
   box-shadow: var(--panel-stroke), var(--panel-shadow);
   color: var(--ink);
 }
-.setting-row input[type="number"]:focus {
-  outline: 1.5px solid var(--accent);
-}
+/* 提醒阈值输入框的焦点环已随"焦点环全局退役"（PATCH009.6，glass.css）一并撤除 ——
+   原 `.setting-row input[type="number"]:focus { outline: 1.5px solid var(--accent) }` 删除 */
 
 /* 步进器（CT 移植 + 整体 SVG 化）：− 数值 +，范围 4~12（自动下班小时，用户定案）；
    按钮视觉（圆角框 + 符号）全部由内联 SVG 矢量承担，HTML 按钮只剩透明点击外壳 */

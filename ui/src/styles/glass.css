@@ -24,7 +24,9 @@
   --glass-bg-strong: rgba(0, 0, 0, 0.25); /* 浮板黑纱档（深浅主题同值） */
   --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.78);
   --panel-bg: rgba(255, 255, 255, 0.76); /* 玻璃板深度 ×2（REC 配方推广） */
-  --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+  /* 面板内环**颜色**（PATCH009.5 抽出：box-shadow 与 SVG 描边共用单一来源） */
+  --panel-ring: rgba(255, 255, 255, 0.65);
+  --panel-stroke: inset 0 0 0 1px var(--panel-ring);
   --panel-shadow: rgba(0, 0, 0, 0.35) 1.7px 1.7px 8px; /* 模糊须盖过偏移防贴边暗环 */
   --text-shadow: none;
   --glass-highlight:
@@ -61,7 +63,9 @@
     --glass-bg-strong: rgba(0, 0, 0, 0.25);
     --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
     --panel-bg: rgba(255, 255, 255, 0.14);
-    --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+    /* 面板内环颜色（PATCH009.5 抽出，与 box-shadow 单一来源） */
+    --panel-ring: rgba(255, 255, 255, 0.14);
+    --panel-stroke: inset 0 0 0 1px var(--panel-ring);
     --panel-shadow: rgba(0, 0, 0, 0.566) 1.7px 1.7px 4px;
     --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     --glass-highlight:
@@ -82,7 +86,9 @@
   --glass-bg-strong: rgba(0, 0, 0, 0.25);
   --glass-stroke: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
   --panel-bg: rgba(255, 255, 255, 0.14);
-  --panel-stroke: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  /* 面板内环颜色（PATCH009.5 抽出，与 box-shadow 单一来源） */
+  --panel-ring: rgba(255, 255, 255, 0.14);
+  --panel-stroke: inset 0 0 0 1px var(--panel-ring);
   --panel-shadow: rgba(0, 0, 0, 0.566) 1.7px 1.7px 4px;
   --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   --glass-highlight:
@@ -97,6 +103,16 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+/* 焦点环**全局退役**（PATCH009.6，用户 2026-10-16 定案）：全应用不要任何焦点环 —— 蓝环与 UA 环
+   都不要。背景：本应用是鼠标优先的桌面小组件，交互反馈一律由控件自身状态承担（录制环 / 开关滑块 /
+   按下缩放 / 侧角按钮 .open 态等）；而 Chromium 在"点按钮获焦 → 按任意键"时会把元素提升为
+   `:focus-visible`，画出它默认的 `outline: auto` 两色对比环（暗底上呈黑框，跟着圆角），
+   在录键按钮、侧角按钮等处都露过。`:focus` 与 `:focus-visible` 双写彻底压掉该 UA 环。
+   注：这是**有意放弃键盘焦点指示**（用户定案），后续若要做无障碍，应在此处统一补可见焦点样式。 */
+:focus,
+:focus-visible {
+  outline: none;
 }
 svg {
   display: block;
