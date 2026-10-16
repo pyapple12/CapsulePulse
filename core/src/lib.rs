@@ -24,6 +24,8 @@ mod diag;
 mod glass_backdrop;
 mod paths;
 
+pub mod aumid;
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -894,6 +896,20 @@ pub fn run() {
                 }
                 glass_backdrop::hide_active_border(&window);
                 glass_backdrop::apply_round_corners(&window);
+            }
+            // 通知署名（PATCH012）：绿色单 exe 也能署名"应用名 + 正式图标"——把 `identifier` 当 AUMID
+            // 注册进 HKCU（免管理员；与通知插件传给 `Toast::new` 的值同源，故必须一致）。
+            // 失败仅日志：署名回退 "Windows PowerShell"，通知本体不受影响（容错白名单 PATCH012）。
+            {
+                let config = app.config();
+                let aumid = config.identifier.clone();
+                let product = config
+                    .product_name
+                    .clone()
+                    .unwrap_or_else(|| "CapsulePulse".to_string());
+                if let Err(err) = aumid::ensure_notification_identity(&aumid, &product) {
+                    warn_diag(&format!("通知署名注册失败（署名回退 PowerShell）：{err}"));
+                }
             }
             // 托盘 hover 概览窗（PL028.1）：屏外创建 + visible(true) 让 webview 首绘即完成，
             // build 后立即 hide（CT 预览窗同款——隐藏创建会首 hover 空窗；屏外 show 会被

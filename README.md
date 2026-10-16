@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#english)
 
-[![Version](https://img.shields.io/badge/Version-0.1.6.2-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.9.1-blue.svg)](core/Cargo.toml)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6.svg)](#下载)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org)
@@ -26,13 +26,15 @@
 
 ### ✨ 功能亮点
 
-- ⏱ **打卡出勤** —— 上班/下班打卡（双向确认框），未上班禁用计时，重启恢复在岗
-- 🕹 **班内计时** —— 一个大按钮，计时 = 工作、空隙 = 休息；自动下班（默认 8h 可调，回填记账）
-- 📊 **统计视图** —— 日翻看三值（在岗/工作/休息）+ 时间图谱 + 自然周周卡 + 全历史总日均（相对平均的高低指示）
-- 🔔 **休息提醒** —— 连续工作达阈值（默认 50 分钟，可配置）→ 声音 + 系统通知 + 卡片文案条
-- 🫧 **玻璃 UI** —— CT 分态纱：纯 alpha 透明窗（失焦 30% 纱 / 聚焦 0% 桌面直透）+ 浮板毛玻璃
-- 🛰 **常驻后台** —— 托盘常驻、全局快捷键唤起、关闭最小化到托盘
-- 🎒 **绿色便携** —— 数据全部落在同级 `configs\` 与 `data\`（备份/迁移 = 拷走这两个文件夹）
+- ⏱ **打卡出勤** —— 上班 / 下班打卡（双向确认框），未上班禁用计时，重启恢复在岗
+- 🕹 **三段计时** —— 工作 = 计时、休息 = 暂停、重置 = 收段落库回休息；自动下班（4–12 小时可调）到点前 60 秒确认框 + 加班步进（+4h 一档、硬顶 12 小时）
+- 📊 **统计视图** —— 前后翻日三值（在岗 / 工作 / 休息，含与历史平均的偏离）+ 时间图谱（每班一段、节点标注打卡 / 下班 / 自动下班）+ 自然周周卡 + 全历史总日均 + 当日明细
+- ⏳ **沙漏与提醒同步** —— 沙漏水位 = 本段连续工作进度，**铃声响起那一刻沙子刚好流完**；阈值可配（步进器 / 手打 / 长按连发），首次响铃报「连续工作 X 分钟」，之后每 5 分钟重发一次
+- 🛟 **崩溃恢复** —— 异常退出后重启：停机 ≤10 分钟无缝续（计时接着走），更久按最后心跳补记下班
+- 🫧 **玻璃 UI** —— 平时纯 alpha 透明（失焦 30% 纱 / 聚焦 0% 桌面直透）；**打开统计板 / 设置板且窗口聚焦时**才启用系统毛玻璃背板；托盘悬浮卡 / 自绘右键菜单 / 确认框同为玻璃形态
+- 🛰 **常驻后台** —— 托盘常驻（悬停出今日概览卡、右键自绘菜单）+ 全局快捷键可自定义（显隐 / 状态切换，最多 3 键）+ 关闭最小化到托盘 + 窗口置顶 / 贴边吸附 / 位置记忆
+- 🔔 **系统通知** —— 通知 + 提示音双通道（互不依赖降级）；绿色版也能署名 CapsulePulse 并带正式图标
+- 🎒 **绿色便携** —— 数据全部落在同级 `configs\` 与 `data\`（备份 / 迁移 = 拷走这两个文件夹）
 
 ### 📥 下载
 
@@ -137,11 +139,13 @@ A glassmorphic work-time board — clock in to open a day, in-session time count
 ### ✨ Highlights
 
 - ⏱ **Clock in / out** — punch in and out with a confirmation dialog; the timer is disabled until you clock in, and an open shift is restored on restart
-- 🕹 **In-session timing** — one big control: running time is work, gaps are rest; auto clock-out (default 8 h, configurable, backfilled accounting)
-- 📊 **Stats board** — browse any day's tri-values (duty/work/rest) + timeline graph + natural-week bars + all-history daily average (above/below-average indicator)
-- 🔔 **Break reminder** — configurable threshold (default 50 min) → sound + system notification + an in-card banner
-- 🫧 **Glass UI** — CT dual-state veil: a pure-alpha transparent window (30 % veil when idle, 0 % — desktop straight through — when focused) plus frosted overlay panels
-- 🛰 **Tray-native** — lives in the tray, summoned by a global hotkey; closing hides it instead of quitting
+- 🕹 **Three-state timing** — work = counting, rest = paused, reset = close the segment and return to rest; auto clock-out (4–12 h configurable) with a confirm dialog 60 s ahead and overtime stepping (+4 h per step, hard cap 12 h)
+- 📊 **Stats board** — day-by-day tri-values (duty / work / rest, with deviation from your historical average) + timeline graph (one bar per shift, nodes for clock-in / clock-out / auto clock-out) + natural-week card + all-history daily average + daily detail
+- ⏳ **Hourglass in sync with the reminder** — the water level is the current segment's progress toward the threshold, so **the sand runs out exactly when the chime rings**; threshold configurable (stepper / typed / press-and-hold), first ring reports "worked X minutes", then repeats every 5 minutes
+- 🛟 **Crash recovery** — after an abnormal exit: downtime ≤10 min resumes seamlessly (the timer keeps going), longer downtime books a clock-out at the last heartbeat
+- 🫧 **Glass UI** — fully transparent by default (30 % veil when unfocused, 0 % — desktop straight through — when focused); the system frosted backdrop is used **only while a stats/settings board is open and the window is focused**; the tray hover card, custom right-click menu and dialogs share the same glass language
+- 🛰 **Tray-native** — lives in the tray (hover for a today overview card, right-click for a custom menu) + customisable global hotkeys (show-hide / state toggle, at most 3 keys) + closing hides it + always on top / snap to edge / position memory
+- 🔔 **System notification** — notification and chime as two independent channels (each degrades gracefully); even the portable build is signed as CapsulePulse with its real icon
 - 🎒 **Portable** — all data stays in `configs\` + `data\` beside the exe (backup/migrate = copy those two folders)
 
 ### 📥 Download

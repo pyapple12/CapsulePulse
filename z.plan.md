@@ -3339,3 +3339,83 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 - **不改**：失焦自动收板（15s）口径不变；"真失焦立即摘"不变（拖拽结束 `drag-end` 到点即按真实焦点重算）。
 
 **验证**：`cargo fmt --check` / `clippy -D warnings` / `cargo test`（回归）+ `vue-tsc --noEmit` + `npm run build` + `cargo build`；live——L1 板开着**按住标题拖动** ⇒ 磨砂**全程不动、无闪烁**（对照修前：摘了又挂上）；L2 拖完立刻点其它程序（真失焦）⇒ **仍立即摘、无灰板**；L3 点标题 / 开板 / 收板 / 失焦自动收板（15s）行为**均不变**。
+
+## 附录 PATCH012：发版准备（通知署名修复 + 打包与发布链）（2026-10-16 立项）
+
+**背景**：0.2 正式发版前的收尾批。用户定案：**路线①**（首启自注册 HKCU AUMID，让绿色单 exe 的通知署名正确）、细节 **1b**（手写 FFI，零新依赖）、细节 **2b**（首启把嵌入图标解出到 `data/`，自包含）；**本批 = 上传 zip 前的全部工作**（正式图标由用户绘制，本批先用占位）。
+
+**通知署名的机理与取证（2026-10-16）**：
+
+- `tauri-plugin-notification-2.4.0` 的 Windows 实现把 **`tauri.conf.json` 的 `identifier`** 当 AUMID 传给底层 `Toast::new(app_id)`（`desktop.rs:27` + `desktop.rs:204`）⇒ CP 的 AUMID = `com.pyapple12.capsule-pulse`。
+- Windows 解析 toast 来源需要该 AUMID 的**注册信息**（显示名 + 图标）；未注册 ⇒ 回退显示 "Windows PowerShell"（crate 注释原文 "the toast will erroneously report its origin as powershell"）。
+- **未打包应用的正解**（crate 自带示例 `tauri-winrt-notification-0.7.3/examples/unpackaged_app.rs`）：在 **HKCU**（当前用户，免管理员）建 `SOFTWARE\Classes\AppUserModelId\<AUMID>`，写 `DisplayName` / `IconBackgroundColor` / `IconUri` ⇒ 通知署名 = 应用名 + 图标 ✓
+- **CT 未解决**（核实：CT 代码零 AUMID 实现、其 `y.problems#2` 仍挂"随安装器解决"，而它走绿色版 ⇒ 偏差保留）；CP 本批把它**产品化**为"首启自注册"（而非 CT 否掉的"手工配置"）。
+- **第一性原理**：Windows toast 来源解析**必须**有 AUMID 注册（快捷方式或注册表项）⇒ "纯绿色 + 零注册表"与"正确署名"不可兼得；用户选择写入**一条 HKCU 项**（免管理员、可清理）。
+
+**做法（文件 / 函数级）**：
+
+- **新模块**（`core/src/aumid.rs`，Windows 专属 + 非 Windows 空桩）：
+  - `pub fn ensure_notification_identity(aumid: &str, display_name: &str) -> Result<(), String>`：① 取 `paths::default_aumid_icon_path()`（新增，`data/aumid-icon.png`）⇒ 若内容与内嵌 `ICON_PNG`（`include_bytes!("../icons/icon.png")`）不同则写出（自包含，不依赖 zip 内附文件）；② 写 HKCU `SOFTWARE\Classes\AppUserModelId\<aumid>` 三值（`DisplayName` = 传入应用名、`IconBackgroundColor` = `"0"`、`IconUri` = 图标绝对路径）；**幂等**（每次启动覆盖写：`IconUri` 随 exe 路径变、用户删项亦自愈）。
+  - 手写 advapi32 FFI：`RegCreateKeyExW` / `RegSetValueExW` / `RegCloseKey`（`#[link(name = "advapi32")]`），私有 `RegKey` 小包装（create / set_string / Drop 关键）；`HKEY_CURRENT_USER = 0x8000_0001u32 as i32 as isize`（伪句柄需符号扩展）、`KEY_WRITE = 0x0006`、`REG_SZ = 1`；字符串走 UTF-16（含结尾 NUL，字节长度 = (len+1)×2）。
+- **路径助手**（`core/src/paths.rs`）：新增 `pub(crate) fn default_aumid_icon_path()` = `ensure_under("data", "aumid-icon.png")`。
+- **调用点**（`core/src/lib.rs`）：`pub mod aumid;` + setup 内（与 `glass_backdrop` 整定同段）以 `app.config().identifier` 与 `product_name` 调 `ensure_notification_identity`；失败 `warn_diag`（署名回退 PowerShell，通知本体不受影响）。
+- **图标占位**（`core/icons/icon.png`）：本批由现有占位 `.ico` 转出（供 `IconUri` 与后续 `bundle.icon` 五件套使用），**用户正式图标落地后覆盖**。
+- **打包配置**（`core/tauri.conf.json`）：build 段补 **`"beforeBuildCommand": "npm run build"`**（原缺 ⇒ `tauri build` 不重编前端、会嵌旧 dist，属高危缺口）。
+- **版本推进**：`core/Cargo.toml` `0.1.6` → **`0.2.0`**；`README.md` 徽章 → `0.2.0`（下载节**发版后**才改，避免 404）。
+- **发布目录**（`release/`）：新增 `release/README.md`（随包使用说明：快速上手 / 日常使用 / 更新日志 / 版本脚注，**中英双语**）；`.gitignore` 补 `release/*.exe`、`release/*.zip`（二进制不入库，仅 README 入库）。
+- **流程入档**（`AGENTS.md`）：新增「发布注意事项（Release 流程）」章节（照 CT 口径：命名与资产名 / 九步流程 / 坑清单——`--no-bundle` 必加、构建前停实例、tag 指向含最终文档的提交、gh 权限、修复项全量、`cargo doc` 入门禁）；容错白名单新增「通知署名注册失败仅日志不阻断」；目录规划补 `aumid.rs` 与 `release/`。
+- **Release 正文草稿**（`.temp/release-notes-v0.2.0.md`，不入库）：首版发布 ⇒ 全量内容（✨ 新特性 / 🐛 修复 / 📝 说明 + 英文段），供用户建 Release 时取用。
+
+**验证**：`cargo fmt --check` / `clippy -D warnings` / `cargo test`（回归）+ `vue-tsc --noEmit` + `npm run build` + `cargo build`；live——① 启动后查 `HKCU\SOFTWARE\Classes\AppUserModelId\com.pyapple12.capsule-pulse` 三值在位（`IconUri` 指向 `data/aumid-icon.png` 且文件已解出）；② 触发一次提醒 ⇒ 系统通知**署名 = CapsulePulse + 正式图标**（用户目测）；③ 删除该项后重启 ⇒ 自动重建（自愈）；④ 其它功能不受影响。
+
+### 补充：文案整定（PATCH012.5，2026-10-16 用户目测提出，**待用户定稿后落码**）
+
+**① 统计板「今日明细」进行中行**（`ui/components/StatsView.vue:1081-1096`）
+
+- 现状：时间列只显示起点（如 `23:24`），**行尾**另有独立蓝色标签 `至今`（`.ongoing`）。
+- 用户要求：把 `至今` **移入时间列**，形如 `23:24–至今`；**颜色不变**（仍为现在的蓝）。
+- 改法（定稿后落）：`.time` 内改为 `{{ fmtT(startMin) }}–` + `v-if ongoing ⇒ <span class="ongoing">至今</span>` / `v-else ⇒ {{ fmtT(endMin) }}`；删除行尾那个独立 `至今` 标签。**副作用**：行尾标签移除后 `.dur`（分钟数）列位置右移，需目测复核。
+
+**② 自动下班确认框**（`ui/App.vue:841`）
+
+- 现状（**已统一为单一口径**）：`今日在岗累计满 {budget_hours} 小时，到点将自动下班并记账。`（到顶时数字为 12）
+- 用户截图里那句"上班满 8 小时"是**旧版本口径**（PATCH005.3 之前），当前代码已无此措辞。
+- 候选（待用户选）：A `今天已在岗满 X 小时，到点自动下班并记账。` ／ B 保持现状 ／ C 用户另给。
+
+**③ 打卡确认框两段文案**（`ui/App.vue:827-831`）
+
+- 上班（现状）：`开始记录今日在岗时长；班内计时 = 工作、空隙 = 休息。`
+  - 候选：A1 `现在开始计时：计时中 = 工作，按「休息」= 暂停。` ／ A2 `开始记录今日在岗时长，计时 = 工作、休息 = 暂停。`
+- 下班（现状）：`班内计时将收段落库，并结算今日在岗 / 工作 / 休息三值。`
+  - 候选：B1 `结束本班并结算今日在岗 / 工作 / 休息三值（之后可再打卡开新班）。` ／ B2 `收段并落库，结算今日在岗 / 工作 / 休息三值。`
+
+**④ CI workflow**（`PATCH012.6`，2026-10-16 用户定案"照 CT 一致"）：新增 `.github/workflows/ci.yml`——`windows-latest` + `npm run build` **必须先跑**（`generate_context!` 编译期读 `dist/`，否则云端 clippy/test panic）+ `cargo fmt --check` / `clippy -D warnings` / `test` / `doc`（`RUSTDOCFLAGS=-D warnings`）；`rust-cache` 缓存 `core`；node 26 + `npm ci`。
+
+### 补充：图谱节点 z 序规则（PATCH012.7，2026-10-16 用户目测定案）
+
+**问题（用户目测）**：时间图谱的节点按**纯时间顺序**置顶（`nodesG.append` 依次追加、SVG 后画在上）。而**在岗状态下**，末尾那个 `D` 节点的 `ts = endTs` = **本班预算到点的未来时刻**（`endTs = max(currentShiftStart + remaining_secs×1000, now)`）⇒ 它是全图 **ts 最大者** ⇒ **被置顶** ✗ 但它只是"**预计下班**"的占位（真实下班尚未发生），却压在真正最新的节点（当前班的 `W` / 最近一段的起点节点）之上。
+
+**用户定案**：**在岗状态下，"最新的非 D 节点"永远在最上层**（末尾"预计下班 D"的 z 序让位）；**未在岗时不变**（那时末尾 `D` = 真实下班时刻，本就该在最上）。
+
+**做法**（`ui/components/StatsView.vue`，`renderGraph` 内 `nodes.push({ ts: endTs, ch: "D", kind: "end" })` 之后、`nodesG.append` 循环之前）：`if (onDutyToday) { const di = nodes.findIndex((n) => n.ch === "D" && n.ts === endTs); if (di >= 0) nodes.unshift(nodes.splice(di, 1)[0]!); }` —— 让末尾 D 先画（落最底），数组最后一个因此 = **最新的非 D 节点** ⇒ 最后 append ⇒ 置顶 ✓ 其余节点相对顺序不变 ✓
+
+**验证**：`vue-tsc --noEmit` + `npm run build` + `cargo build`；live——① **在岗中**：图谱最右端那个"预计下班 D"不再压住最新的非 D 节点（如当前班 `W`）✓；② **未在岗**：末尾 D 仍置顶（真实下班）✓ 无回归。
+
+### 补充：提醒文案与重发口径（PATCH012.8，2026-10-16 用户定案）
+
+**背景（用户目测追问）**：阈值 3 分钟 ⇒ 首次响铃文案「已连续工作 3 分钟」；响铃后不操作，系统每 **5 分钟**（`ReminderConfig::repeat = 300s`，固定）**重发**一次——重发文案的数值仍取**阈值**（`ReminderDecision.threshold_min = settings.threshold_min`），于是**重发时"说 3 分钟、其实已连续工作 8/13/18 分钟"** ✗ 与事实不符。
+
+**用户定案（2026-10-16）**：走**换句式**方案（不做"数值改实际时长"）——
+
+- **首次**：`～旦_(´ー｀*) CHILL，连续工作 {阈值} 分钟，快休息！`
+- **重发**：`～旦_(´ー｀*) CHILL，还没休息吗？快休息！`（**不带数值**）
+  （`repeat` 只决定"何时再响"，不进文案；悬浮卡的「离休息提醒 {n} 分钟」是倒计时口径，不动。）
+
+**做法（文件 / 函数级）**：
+
+- `core/src/commands/session.rs`：`ReminderDecision` 增 `refire: bool`；`status_snapshot` 里在 `evaluate` **之前**读 `fire.last_fired().is_some()` 作为 `refire`（有值 ⇒ 本段此前已响过 ⇒ 本次是重发）。
+- `core/src/commands/reminder.rs`：新增**纯函数** `reminder_text(refire: bool, threshold_min: u32) -> String`（文案单一来源）；`deliver_reminder` 用它拼文案 ⇒ 系统通知正文与 `reminder-due` 事件 **payload 同为该字符串**（payload 由"阈值分钟数"改为"完整文案"，前端零拼装）。
+- `ui/App.vue`：`reminderThreshold: ref(0)` → `reminderText: ref("")`；`listen<string>("reminder-due", …)`；文案条渲染 `{{ reminderText }}`。
+- 测试：新增 `reminder_text_first_vs_refire`（首次 / 重发两种句式断言）。
+
+**验证**：`cargo fmt --check` / `clippy -D warnings` / `cargo test`（含新用例）+ `vue-tsc --noEmit` + `npm run build` + `cargo build`；live——① 阈值改 1 分钟 + 打卡 ⇒ 首次响铃文案 = `～旦_(´ー｀*) CHILL，连续工作 1 分钟，快休息！`（通知与文案条同句）；② 不操作再等 5 分钟 ⇒ 重发文案 = `～旦_(´ー｀*) CHILL，还没休息吗？快休息！`（无数值）✓

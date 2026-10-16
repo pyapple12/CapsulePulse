@@ -18,6 +18,11 @@ dist/
 *.dmg
 *.msi
 
+## 发布目录产物（PATCH012 定案：release/README.md 入库版本化；exe 与 zip 二进制不入库
+## ——exe 由各版本构建产出，zip 为发布资产走 GitHub Release 挂载）
+release/*.exe
+release/*.zip
+
 ## Tauri 生成（schema 与平台文件）
 core/gen/
 
@@ -43,6 +48,7 @@ configs/config.json
 *.db.bak
 *.db.corrupt
 data/pulse.log
+data/aumid-icon.png
 
 ## IDE 和编辑器
 .vscode/

@@ -63,6 +63,7 @@ core/             # Tauri 2 后端（原框架默认名 src-tauri，整体改名
     diag.rs           # 诊断日志（FIX002.7：data/pulse.log；PL024.2 起 cfg(test) 不落盘）
     paths.rs          # 运行时数据双落址（config.json→configs/、pulse.db→data/；dev=项目根 / release=exe 同级）
     glass_backdrop.rs # 窗口框架与材质（PATCH001.3/.5：隐藏 Win11 激活描边 + 补系统圆角；PL029：按"板开合 + 焦点"挂摘系统背板；DWM 属性级 FFI，零新依赖）
+    aumid.rs          # 通知署名注册（PATCH012：首启把内嵌图标解出到 data/ + 写 HKCU 的 AppUserModelId 三项——让绿色单 exe 的通知署名 = 应用名 + 图标；手写 advapi32 FFI，零新依赖）
 ui/               # Vue 前端（展示层）
   App.vue             # 骨架：topbar + 计时页 + 浮层件装配（板开合 / 文案条 / 确认框 / 背板时序）
   components/         # 计时页与浮板
@@ -77,6 +78,7 @@ ui/               # Vue 前端（展示层）
     title-particles.ts / use-glass-bar.ts / use-threshold-drag.ts # 视觉与交互件
   types.ts            # IPC DTO 类型镜像（与 Rust serde 同源）；format.ts 展示格式化助手；main.ts 入口
 configs/          # 程序读的固定参数与用户参数（预建占位，首个实体文件出现于设置持久化落地时）
+release/          # 发布目录（PATCH012）：release/README.md 入库（随包使用说明，中英双语 + 更新日志）；exe 与 zip 二进制 gitignore（由各版本构建产出、zip 走 GitHub Release 挂载）
 assets/           # 提示音、图标
 .agents/skills/   # 项目自建 skill（audit-project / audit-report / progress-task）
 .temp/            # 临时脚本与文件（gitignore）；探针、验证记录放这里
@@ -183,6 +185,42 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **GitHub 身份与远程**：远程 `git@takechance:pyapple12/CapsulePulse.git`（SSH 别名 `takechance` = pyapple12 账号，密钥 id_b_takechance，经 socks5 127.0.0.1:10808）；仓库级身份 `git config user.name pyapple12` + `user.email takechance_bao@188.com`（覆盖全局 YiYi 身份，与 CapsuleRetro 同款做法）
 - **流程**：每次提交前 AI 必须 `git status` + `git diff`（含 `--stat`）核对改动范围无误，再草拟完整 commit 内容（add 清单 + 标题 + 正文）交用户确认；用户审阅后自行执行 `git add`/`git commit`/`git push`（AI 不执行任何 git 写操作）
 
+## 发布注意事项（Release 流程，2026-10-16 定案）
+
+> 目标：绿色单 exe 发版一条龙（改说明 → 建 exe → 打包 → GitHub Release），下次照此执行。**发布动作（建 tag / Release）由用户执行**。
+
+### 命名与口径
+
+- **tag 与 Release 标题 = 三段式** `CapsulePulse V<X.Y.Z> —— <主功能摘要>`（如 `CapsulePulse V0.2.0 —— 首个公开版本`）；**不用四段 R**（R 只进 commit 标题，见 Commit 提交规范）
+- **资产名** `CapsulePulse_v<X.Y.Z>_win_x64.zip`（zip 内 `capsule-pulse.exe` + `README.md`，根目录平铺，不带 `configs/`、`data/`）
+- **Release 正文与 `release/README.md` 均中英双语**：先**整段中文**、再**整段英文**（不逐段对照）
+- **Release 正文结构**：🚀 更新内容（✨ 新特性 / 🐛 修复 / 📝 说明）+ 对应英文段；**「修复」从 `git diff <上个 tag>..HEAD` 全量提取**、每条一句话
+- **README 双口径**（沿版本双轨）：徽章 = 代码版本（随 `Cargo.toml` 即时推进）；下载链接 = 实际发布产物（**发版后才改**，提前改 = 指向不存在文件 404）
+- `release/README.md` = 随包使用说明（入库、版本化）；脚注版本号随发版更新
+
+### 发布流程（顺序）
+
+1. **改说明文件**：`release/README.md`（补新功能 + 更新日志 + 脚注版本）、`README.md`（徽章 + 双语下载链接 + 功能亮点）
+2. **全量门禁**：`cargo fmt --check` / `clippy -D warnings` / `cargo test` / `cargo doc --no-deps` / `vue-tsc` + `vite build` / `prettier`
+3. **提交并推送**（一条提交带齐源码 + 配置 + 文档同步）
+4. **构建发布 exe**：`npm run tauri build -- --no-bundle`（`--no-bundle` 免安装器，只要绿色单 exe；`beforeBuildCommand` 自动重编前端）
+5. **拷 exe 入 `release/`**：`core/target/release/capsule-pulse.exe` → `release/capsule-pulse.exe`
+6. **打 zip**：`Compress-Archive -Path release/capsule-pulse.exe,release/README.md -DestinationPath release/CapsulePulse_v<X.Y.Z>_win_x64.zip -Force`（**直接用 `release/` 打包，不另建 staging**）
+7. **打 tag**：`git tag -a v<X.Y.Z> -m "CapsulePulse V<X.Y.Z>——<摘要>"` + `git push origin v<X.Y.Z>`（annotated）
+8. **建 GitHub Release**：挂 zip 资产，标题/正文按上面口径
+9. **发布自查**：Release 页标题 / 资产名 / 下载链接 404 核对；`README.md` 徽章与链接口径
+
+### 注意点（坑）
+
+- **`release/*.exe`、`release/*.zip` 已 gitignore**（二进制不入库）；仅 `release/README.md` 入库
+- **`--no-bundle` 必加**：默认会跑 Windows 安装器打包（NSIS/MSI），绿色单 exe 分发不需要
+- **构建前停运行实例**：exe 被占用时 cargo 无法覆盖产物（os error 5）
+- **tag 必须指向含最终文档的提交**：先提交文档再打 tag（tag 钉住发布点）
+- **gh 发布权限**：本机 `gh` 登录账号对 `pyapple12/CapsulePulse` 可能仅 READ ⇒ `gh release create` 会 403；Release 由用户手动发布，或先切到有写权限的账号 / `GH_TOKEN`
+- **修复项全量**：Release 的「修复」从 `git diff` 逐条核对，不漏
+- **图标**：`core/icons/` 需五件套（`32x32.png` / `64x64.png` / `128x128.png` / `128x128@2x.png` / `icon.ico` / `icon.png`）并与 `tauri.conf.json` 的 `bundle.icon` 数组同步；`icon.png` 同时供通知署名 `IconUri`（`aumid.rs` 的 `include_bytes!` 编译期嵌入）⇒ **换图标后必须重新构建 exe**
+- **通知署名**：绿色版靠 `aumid.rs` 首启写 HKCU 项署名（`SOFTWARE\Classes\AppUserModelId\<AUMID>`）；**AUMID 必须与 `tauri.conf.json` 的 `identifier` 一致**（通知插件同源取值，不一致则署名仍回退 PowerShell）
+
 ## 错误策略
 
 主线：**严格抛错**——配置缺失/非法输入直接返回错误（Rust 返回 `Result` 并定义明确错误类型；TS 抛出具体 Error），不静默兜底、不降级假成功。
@@ -207,6 +245,8 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 
 - **系统背板切换失败仅日志不阻断**（PL029 登记，2026-10-16）：场景——① `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)` 返回非零 HRESULT；② 取不到主窗口句柄；③ Win10 无该属性（Win11 22H2+ 才有）。降级行为——错误落诊断日志（`data/pulse.log`）+ dev 控制台，**维持前态**（观感回现状：板开时仍是纯透明），下次切换自愈。理由——系统背板是**纯装饰层**（只在板开合时切换的材质），失败唯一后果是观感回退（计时 / 打卡 / 统计 / 提醒 / 托盘全不受影响），与"窗口框架整定失败维持前态"同一条纪律。
 
+- **通知署名注册失败仅日志不阻断**（PATCH012 登记，2026-10-16）：场景——① 图标解出到 `data/aumid-icon.png` 失败（目录不可写 / 磁盘满）；② `RegCreateKeyExW` / `RegSetValueExW` 返回非零（组策略限制 / 注册表被锁）。降级行为——错误落诊断日志（`data/pulse.log`），**通知照常发送**但来源署名回退 "Windows PowerShell"（crate 内置回退），下次启动重试自愈。理由——署名是**观感层**（通知内容/时间/触发时机全不受影响），不得因装饰性注册把用户挡在应用外；与"窗口框架整定失败维持前态"同一条纪律。
+
 ## 素材与环境陷阱
 
 - **运行时数据不入仓库**：config.json（configs/）与 pulse.db（data/）是用户运行时数据——dev 落项目根、release 落 exe 同级，均已 gitignore（双落址，2026-09-10 定案）；测试用临时 db 一律落 `.temp/` 或系统临时目录，禁止对真实用户数据做测试写入
@@ -218,6 +258,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **Tauri 2 ACL 静默拒**：前端能力调用（事件 listen、`data-tauri-drag-region` 拖动、invoke 等）走 ACL 白名单，未授权时**静默失效、控制台零报错**（系列两例：listen 需 `core:event`、拖动需 `core:window:allow-start-dragging`，`core:default` 均不含）；权限事实源 = 构建产物 `core/gen/schemas/acl-manifests.json`；新增前端能力调用后必须 live 验证功能生效，构建绿不代表功能可用。**新增第二个窗口必须同步 `core/capabilities/default.json` 的 `windows`**（PATCH007.1 实例：悬浮窗 `tray-hover` 未入列 ⇒ 其 `listen` 被静默拒 ⇒ 卡片数据冻结在首次取数；**自定义命令不经 ACL 故 `invoke` 照常通**，症状是"能显示、不更新"——这类"半通"最易误判为业务 bug）
 - **DEV 基座无窗口拖拽层**（PATCH002.2 登记，2026-10-11）：`ui/src/dev/mock-invoke.ts` 的浏览器基座只有命令 mock，**没有窗口级 mousedown 拖拽层**——凡由拖拽白名单（`ui/App.vue` 的 `DRAG_INTERACTIVE`）吞掉点击引发的问题，在 DEV 基座里**必然复现不出**，四步实测全绿也判不了通过（实例：三段控件「工作/休息」是 `<label>` 未入列 → 按下即被 `startDragging` 抢走鼠标捕获、click 永不派发，表现为"按了没反应"；"重置"是 `<button>` 在列，故只有它能用）；此类交互必须 live 实机点击验证，DEV 只用来验前端状态与渲染（与上条同属"构建绿 ≠ 功能可用"）
 - **运行中 exe 锁文件**：调试运行 capsule-pulse.exe 期间 cargo build 无法覆盖产物（os error 5）——重建前先停运行实例（2026-09-08 实测）
+- **停旧实例后勿立即重启**（PATCH012 实测一次，2026-10-16）：`Stop-Process` 后仅约 2 秒就 `Start-Process` ⇒ 新实例**日志停在"启动：缓存中存在未闭合班（待对账）"、`Responding=False`**（setup 阻塞——主窗已由 builder 建好故 UI 正常渲染、命令层照常响应，阻塞点疑似第二窗 `tray-hover` 的 webview 创建：旧实例的 WebView2 进程/环境尚未完全退出）；等 **4 秒以上**重启即一切正常（日志立刻续上"启动恢复：无缝续"）。⇒ **重启流程固定为：停实例 → 等 ≥4 秒 → 再启动**；若发现"日志停在待对账 + Responding=False"，直接杀掉重来即可
 - **验证禁止更改电脑系统设置**：live 验证一律以系统当前态进行（当前 = Windows 深色主题 + 动画效果开）；禁止为验证去切换主题、动画效果（reduced-motion）等系统设置——替代手段 = 代码走查确认退避/令牌规则在位 + 用户日常使用复核（2026-09-13 用户定案，M2/M3 类验证照此执行）
 - **dev 无 HMR**：`beforeDevCommand = npm run build`、`frontendDist = dist`（静态产物）——改前端后必须重新 build + 重启 dev 流程才生效，热更不存在（2026-09-13 PL008 实测）。**补充（PATCH001 实测 2026-10-11）**：产物是**编译期嵌进 exe** 的——改源文件或 dist 都不会影响已编译二进制，必须 `npm run build` + `cargo build` + 重启三步（实证：仅重建 dist 即触发 crate 重编、exe 哈希变化）；且**前端构建产物进二进制后 cargo 才重编**，所以 `npm run tauri dev` 的 beforeDevCommand 与 cargo 构建不能并行跑 `vite`（见下条）
 - **vite dev 与 cargo 构建不可并行**（PATCH001 实测，2026-10-11）：`npm run dev` 以项目根为 root，会去 watch `core/target/**`；cargo 重建时覆盖 `target/debug/deps/*.exe` → vite 抛 `EBUSY: resource busy or locked` 直接崩（探针会话被中断一次）。跑浏览器探针前先停 cargo 构建，或探针跑完再构建

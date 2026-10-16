@@ -1,0 +1,56 @@
+# CapsulePulse CI（PATCH012，照 CapsuleTODO 同款）
+# 门禁云端化：本地门禁（fmt/clippy/test/doc + vue-tsc/build）推送到 GitHub 自动跑，
+# 红了立即暴露回归；README 可挂动态徽章作信任信号。
+# 跑在 windows-latest——托盘 / 热键 / 吸附 / DWM 材质 / 注册表等 cfg(windows) 模块的测试
+# 只有 Windows 跑得全（macOS/Linux 适配启动后再扩矩阵 runner）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # cargo 编译产物缓存（首次 ~6min，缓存命中后 ~3min）
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      - name: npm ci
+        run: npm ci
+
+      # 前端产物必须先建：generate_context! 宏在编译期读取 frontendDist(../dist)，
+      # 云端无产物则 clippy/test 直接 panic（CT 首跑实证）
+      - name: 前端类型检查与构建（vue-tsc + vite，产出 dist/）
+        run: npm run build
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+        working-directory: core
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: core
+
+      - name: cargo test
+        run: cargo test
+        working-directory: core
+
+      - name: cargo doc（broken link 检查）
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+        working-directory: core

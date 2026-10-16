@@ -10,7 +10,19 @@ use super::{lock, poison, AppContext, CommandError};
 use crate::session::Clock;
 use crate::settings::ReminderSettings;
 
+/// 提醒文案（PATCH012.8 用户定案）：**首次**带阈值分钟数、**重发**不带数值（换句式）。
+/// 纯函数 ⇒ 单测直测；系统通知正文与 `reminder-due` 事件 payload 共用同一份文案（单一来源）。
+pub(super) fn reminder_text(refire: bool, threshold_min: u32) -> String {
+    const PREFIX: &str = "～旦_(´ー｀*) CHILL，";
+    if refire {
+        format!("{PREFIX}还没休息吗？快休息！")
+    } else {
+        format!("{PREFIX}连续工作 {threshold_min} 分钟，快休息！")
+    }
+}
+
 /// 提醒副作用：系统通知（notify_enabled 门控；失败降级仅声音——容错白名单）+ reminder-due 事件。
+/// PATCH012.8：payload 由"阈值分钟数"改为**完整文案字符串**（文案只在 Rust 一处定义）。
 pub(super) fn deliver_reminder(
     app: &AppHandle,
     decision: ReminderDecision,
@@ -18,20 +30,21 @@ pub(super) fn deliver_reminder(
     if !decision.fire {
         return Ok(());
     }
+    let text = reminder_text(decision.refire, decision.threshold_min);
     if decision.notify_enabled {
-        send_notification(app, decision.threshold_min);
+        send_notification(app, &text);
     }
-    app.emit("reminder-due", decision.threshold_min)
+    app.emit("reminder-due", text)
         .map_err(|e| CommandError::Event(e.to_string()))
 }
 
 /// 系统通知（容错白名单：发送失败降级仅声音——错误落日志，不阻断事件）。
-fn send_notification(app: &AppHandle, threshold_min: u32) {
+fn send_notification(app: &AppHandle, body: &str) {
     if let Err(err) = app
         .notification()
         .builder()
         .title("CapsulePulse")
-        .body(format!("已连续工作 {threshold_min} 分钟，休息一下吧"))
+        .body(body)
         .show()
     {
         eprintln!("系统通知发送失败（降级仅声音）：{err}");
@@ -495,6 +508,19 @@ mod tests {
         let after = get_settings_inner(&ctx).unwrap();
         assert_eq!(after.notify_enabled, toggled, "其它字段照常生效");
         assert_eq!(after.threshold_min, 50, "阈值未被改动");
+    }
+
+    /// PATCH012.8（用户定案）：提醒文案——**首次**带阈值分钟数、**重发**换句式（不带数值）。
+    #[test]
+    fn reminder_text_first_vs_refire() {
+        assert_eq!(
+            reminder_text(false, 50),
+            "～旦_(´ー｀*) CHILL，连续工作 50 分钟，快休息！"
+        );
+        assert_eq!(
+            reminder_text(true, 50),
+            "～旦_(´ー｀*) CHILL，还没休息吗？快休息！"
+        );
     }
 
     /// PATCH001.4：整结构覆盖不抹窗口位置（位置归 Rust 管辖，命令层从内存态继承）。

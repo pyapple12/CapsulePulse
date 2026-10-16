@@ -19,6 +19,8 @@ withDefaults(
     note?: string;
     /** 取消按钮可见性（**缺省可见**；自动下班框在"加班无意义"时隐藏）。 */
     cancelVisible?: boolean;
+    /** 标题居中（PATCH012.5：打卡框标题居中；缺省左对齐——自动下班框沿用）。 */
+    titleCenter?: boolean;
   }>(),
   { cancelVisible: true },
 );
@@ -29,7 +31,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
 <template>
   <div v-if="open" class="overlay" role="alertdialog" :aria-label="title">
     <div class="sheet">
-      <h4>{{ title }}</h4>
+      <h4 :class="{ center: titleCenter }">{{ title }}</h4>
       <p>{{ message }}</p>
       <p v-if="note">{{ note }}</p>
       <!-- PL028.4：按钮顺序按用户定案 = **确认在左、取消在右**（有意偏离 design 的"取消/确认"） -->

@@ -37,8 +37,11 @@ pub struct SessionStatus {
 pub struct ReminderDecision {
     /// 是否应触发提醒。
     pub(super) fire: bool,
-    /// 当前阈值（分钟，供通知文案）。
+    /// 当前阈值（分钟，供**首次**提醒文案的数值；PATCH012.8）。
     pub(super) threshold_min: u32,
+    /// 本次触发是否为**重发**（`evaluate` 之前 `last_fired` 已有值 ⇒ 本段此前已响过）——
+    /// 决定文案走"首次句式"（带阈值分钟数）还是"重发句式"（不带数值）；PATCH012.8 用户定案。
+    pub(super) refire: bool,
     /// 系统通知开关。
     pub(super) notify_enabled: bool,
 }
@@ -235,10 +238,12 @@ pub(super) fn status_snapshot<C: Clock>(
         )
     };
     let on_duty_now = poison("工作日", ctx.workday.lock())?.is_on_duty();
-    let (threshold_min, notify_enabled, reminder_fired, fire_now) = {
+    let (threshold_min, notify_enabled, reminder_fired, fire_now, refire) = {
         let settings = poison("设置", ctx.settings.lock())?;
         let config = ReminderConfig::from_minutes(settings.threshold_min);
         let mut fire = poison("提醒", ctx.fire.lock())?;
+        // PATCH012.8：`evaluate` **之前**读 `last_fired` —— 有值即"本段此前已响过" ⇒ 本次是重发
+        let was_fired = fire.last_fired().is_some();
         let should = fire.evaluate(segment, &config);
         // 取值在 evaluate 之后：本拍刚触发的这一帧也如实报告"已触发过"（与 reminder-due 事件同拍）
         (
@@ -246,6 +251,7 @@ pub(super) fn status_snapshot<C: Clock>(
             settings.notify_enabled,
             fire.last_fired().is_some(),
             should,
+            was_fired,
         )
     };
     let status = SessionStatus {
@@ -259,6 +265,7 @@ pub(super) fn status_snapshot<C: Clock>(
     let decision = ReminderDecision {
         fire: fire_now,
         threshold_min,
+        refire,
         notify_enabled,
     };
     Ok((status, decision))

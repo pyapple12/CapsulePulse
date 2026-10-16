@@ -413,10 +413,19 @@
   text-align: right;
   flex: none;
 }
+/* 进行中行的「至今」（PATCH012.5 用户定案，方案 B）：**与时间同号（12px）+ 加粗**，颜色不变（accent）；
+   容器宽取 `HH:MM` 的**实测 ink 宽 28.36px**（`.time` 同款字体 12px + tabular-nums ⇒ 各时间串等宽）
+   + 两端对齐 ⇒ 「至」贴 `–` 侧、「今」贴右缘 ⇒ **右缘与其它行的时间串（如 23:38）对齐** ✓
+   （用户否掉的从来是 `–` 与 `至` 之间的**前面空隙**（= 行尾标签时代遗留的 `margin-left: 4px`，已删），
+   不是「至」「今」之间的字间空隙 —— 后者正是本方案用来补齐 4.36px 宽度差的手段。）
+   注：DOM 侧「至」「今」必须是**两个子元素**，否则 inline-flex 只有一个匿名 item、`space-between` 撑不开。 */
 .dl .ongoing {
-  font-size: 10.5px;
+  font-size: 12px;
+  font-weight: 700;
   color: var(--accent);
-  margin-left: 4px;
+  display: inline-flex;
+  justify-content: space-between;
+  width: 28.36px;
 }
 
 /* 查看日柱高亮已上移至 #wcSelRing（PL013.5 SVG 环版），旧 .wc-col.sel 规则随 HTML 柱退役 */

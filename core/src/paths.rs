@@ -56,6 +56,12 @@ pub(crate) fn default_log_path() -> io::Result<PathBuf> {
     ensure_under("data", "pulse.log")
 }
 
+/// 通知署名图标路径：data/aumid-icon.png（PATCH012）——首启由 `aumid` 模块把内嵌图标解出到此，
+/// 供 HKCU 的 `IconUri` 引用（`IconUri` 需要一个**文件路径**，不能引用 exe 内资源）。
+pub(crate) fn default_aumid_icon_path() -> io::Result<PathBuf> {
+    ensure_under("data", "aumid-icon.png")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

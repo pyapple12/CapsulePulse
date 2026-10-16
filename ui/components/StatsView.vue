@@ -268,6 +268,16 @@ function renderGraph(): void {
     list.push({ st: "duty", x: xpx(nowTs), w: W - xpx(nowTs), active: false });
   }
   nodes.push({ ts: endTs, ch: "D", kind: "end" });
+  // PATCH012.7（用户定案）：**在岗状态下**，末尾这个 `D` 是"**预计下班**"占位（`endTs` = 本班预算到点，
+  // 未来时刻 ⇒ 它是全图 ts 最大者），并非真实最新节点 ⇒ 让它的 z 序**让位**：先画（落最底），
+  // 使数组最后一个 = 原倒数第二 = **最新的非 D 节点** ⇒ 它最后 append ⇒ 永远置顶。
+  // 未在岗时不动：那时末尾 `D` = 真实下班时刻，本就该在最上（与"纯时间顺序"一致）。
+  if (onDutyToday) {
+    const di = nodes.findIndex((n) => n.ch === "D" && n.ts === endTs);
+    if (di >= 0) {
+      nodes.unshift(nodes.splice(di, 1)[0]!);
+    }
+  }
 
   // PATCH006.3：按 kind 分两组渲染（层序见模板）——duty（蓝）在彗星之下、work/rest/gap 在彗星之上；
   // 组内沿用 design 的"数量对齐 + 改属性"复用策略（抽 syncGroup 两次调用，DRY）
@@ -1079,8 +1089,12 @@ onUnmounted(() => {
           <h3>{{ detailTitle() }}</h3>
           <div class="detail">
             <div v-for="(r, i) in detailRows" :key="i" class="dl">
+              <!-- PATCH012.5：进行中行的「至今」由行尾标签移入时间列（形如 23:24–至今，颜色不变）；
+                   两字拆两个子元素 + 容器等宽 ⇒ 被 flex 撑到列首尾、右缘与时间串（如 23:38）对齐 -->
               <span class="time"
-                >{{ fmtT(r.startMin) }}{{ r.ongoing ? "" : `–${fmtT(r.endMin)}` }}</span
+                >{{ fmtT(r.startMin) }}–<span v-if="r.ongoing" class="ongoing"
+                  ><span>至</span><span>今</span></span
+                ><template v-else>{{ fmtT(r.endMin) }}</template></span
               >
               <span class="track">
                 <span
@@ -1092,7 +1106,6 @@ onUnmounted(() => {
                 ></span>
               </span>
               <span class="dur">{{ durText(r.secs) }}</span>
-              <span v-if="r.ongoing" class="ongoing">至今</span>
             </div>
             <p v-if="detailRows.length === 0 && !loadFailed" class="empty">本日无打卡记录</p>
           </div>

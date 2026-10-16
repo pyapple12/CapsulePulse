@@ -30,6 +30,10 @@
   font-weight: 700;
   margin-bottom: 6px;
 }
+/* 标题居中（PATCH012.5 用户定案：打卡确认框标题居中；自动下班框不加本类，保持左对齐） */
+.overlay .sheet h4.center {
+  text-align: center;
+}
 .overlay .sheet p {
   font-size: 12.5px;
   color: var(--ink-2);

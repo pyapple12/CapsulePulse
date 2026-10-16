@@ -41,8 +41,9 @@ const sessionHint = ref({ running: false, segmentMin: 0, reminderFired: false })
 const settings = ref<ReminderSettings | null>(null);
 const panelVisible = ref(false);
 const reminderVisible = ref(false);
-// 触发阈值取自 reminder-due 事件 payload（Rust 侧评估时的真实设置），不做前端默认值兜底
-const reminderThreshold = ref(0);
+// 触发阈值取自 reminder-due 事件 payload（PATCH012.8 起 payload = **完整文案字符串**，
+// Rust 侧单一来源；首次带阈值分钟数、重发换句式不带数值），不做前端默认值兜底
+const reminderText = ref("");
 // 设置保存失败的可见反馈（面板内展示，成功或重开面板时清除）
 const saveError = ref("");
 /** 录键失败反馈（PL028.2；带动作归属 ⇒ 显示在对应行下——后端已回滚旧键，界面仍显旧值） */
@@ -646,8 +647,8 @@ onMounted(() => {
     })
     .catch((err) => console.error("prefs-changed 监听注册失败", err));
   // reminder-due：Rust 侧评估触发（payload = 触发时的真实阈值分钟数，直显文案条）；注册失败必须可见
-  listen<number>("reminder-due", (event) => {
-    reminderThreshold.value = event.payload;
+  listen<string>("reminder-due", (event) => {
+    reminderText.value = event.payload;
     reminderVisible.value = true;
     playChime();
   })
@@ -760,8 +761,7 @@ onUnmounted(() => {
           <template #row-overlay>
             <div class="banner-layer" :class="{ open: anyBannerVisible }">
               <div v-if="reminderVisible" class="banner remind show">
-                <span class="dot"></span
-                ><span>已连续工作 {{ reminderThreshold }} 分钟，休息一下吧</span>
+                <span class="dot"></span><span>{{ reminderText }}</span>
               </div>
               <div v-if="autoOutVisible" class="banner auto show">
                 <span class="dot"></span><span>已于 {{ hhmm(autoOutAt) }} 自动下班</span>
@@ -822,14 +822,12 @@ onUnmounted(() => {
     </button>
 
     <!-- 打卡双向确认框（design .overlay .sheet；DOM 序照抄：侧钮后、设置板前） -->
+    <!-- PATCH012.5：标题居中 + 文案整定（用户定案） -->
     <ConfirmModal
       :open="confirmMode != null"
-      :title="confirmMode === 'in' ? '确认上班打卡' : '确认下班打卡'"
-      :message="
-        confirmMode === 'in'
-          ? '开始记录今日在岗时长；班内计时 = 工作、空隙 = 休息。'
-          : '班内计时将收段落库，并结算今日在岗 / 工作 / 休息三值。'
-      "
+      :title="confirmMode === 'in' ? '确认上班打卡' : '打卡下班喽！'"
+      :message="confirmMode === 'in' ? '(・∀・) EXCITED 上班啦！' : '＼(＾▽＾)／ YAY, Party!!!'"
+      title-center
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel"
     />
@@ -838,7 +836,7 @@ onUnmounted(() => {
     <ConfirmModal
       :open="autoOutDue != null"
       title="即将自动下班"
-      :message="`今日在岗累计满 ${day?.budget_hours ?? settings?.workday_auto_out_hours ?? 8} 小时，到点将自动下班并记账。`"
+      :message="`今日在岗累计满 ${day?.budget_hours ?? settings?.workday_auto_out_hours ?? 8} 小时，到点将自动下班。`"
       :note="autoOutLeft > 0 ? `剩余 ${autoOutLeft} 秒` : '正在自动下班…'"
       ok-text="下班"
       cancel-text="加班"
