@@ -338,6 +338,88 @@ function onSessionHint(running: boolean, segmentMin: number, reminderFired: bool
   sessionHint.value = { running, segmentMin, reminderFired };
 }
 
+// —— PL029 板开合驱动的系统背板：板开 && 聚焦 ⇒ 挂；收板 / 失焦 ⇒ 摘 ——
+/** 开板**挂**背板的延时（ms）：开板动画（`scale(0) → scale(1)`）共 400ms，
+ * 取"**结束前 200ms**" = 200ms —— 动画进行中挂上（板已基本展开），起手不突变（用户 2026-10-16 定案）。 */
+const BACKDROP_ON_DELAY_MS = 200;
+/** 收板**摘**背板的延时（ms）：收板动画共 350ms，取"**开始后 200ms**" —— 板已明显缩小再摘（同定案）。 */
+const BACKDROP_OFF_DELAY_MS = 200;
+let backdropOnTimer: number | undefined;
+let backdropOffTimer: number | undefined;
+/** 当前已下发的背板态（去重：避免重复 invoke） */
+let backdropOn = false;
+
+/** 挂背板（唯一出口）：清两定时器 + 下发 */
+function turnBackdropOn(): void {
+  window.clearTimeout(backdropOnTimer);
+  window.clearTimeout(backdropOffTimer);
+  backdropOnTimer = undefined;
+  backdropOffTimer = undefined;
+  backdropOn = true;
+  void invoke("set_board_backdrop", { open: true }).catch((err) =>
+    console.error("set_board_backdrop 调用失败", err),
+  );
+}
+
+/** 摘背板（唯一出口）：清两定时器 + 下发 */
+function turnBackdropOff(): void {
+  window.clearTimeout(backdropOnTimer);
+  window.clearTimeout(backdropOffTimer);
+  backdropOnTimer = undefined;
+  backdropOffTimer = undefined;
+  backdropOn = false;
+  void invoke("set_board_backdrop", { open: false }).catch((err) =>
+    console.error("set_board_backdrop 调用失败", err),
+  );
+}
+
+/** 板开合 / 焦点变化 ⇒ 同步系统背板（PL029）：开板延时 300ms 挂、收板延时 200ms 摘、失焦立即摘 */
+function syncBoardBackdrop(): void {
+  const want = (panelVisible.value || statsOpen.value) && windowFocused.value;
+  if (want) {
+    window.clearTimeout(backdropOffTimer);
+    backdropOffTimer = undefined;
+    if (!backdropOn && backdropOnTimer === undefined) {
+      backdropOnTimer = window.setTimeout(turnBackdropOn, BACKDROP_ON_DELAY_MS);
+    }
+    return;
+  }
+  // 不再需要：撤掉"待挂"（开板动画中途又收板 ⇒ 干脆不挂）
+  window.clearTimeout(backdropOnTimer);
+  backdropOnTimer = undefined;
+  if (!backdropOn || backdropOffTimer !== undefined) {
+    return;
+  }
+  if (!windowFocused.value) {
+    turnBackdropOff(); // 失焦：立即摘（防 DWM 灰板）
+    return;
+  }
+  backdropOffTimer = window.setTimeout(turnBackdropOff, BACKDROP_OFF_DELAY_MS);
+}
+
+watch([panelVisible, statsOpen, windowFocused], syncBoardBackdrop);
+
+// —— PL029 失焦自动收板（2026-10-16 用户定案）：板开着 + 窗口失焦**持续满 15s** ⇒ 自动收两板 ——
+// 语义 = "失焦相当于 app 没操作"（失焦期间收不到用户操作，故"没操作"实现为"失焦持续"）。
+// 重新聚焦或中途手动收板即取消计时；缩回托盘（窗口隐藏）同走失焦 ⇒ 15s 后自动收板。
+/** 失焦自动收板的阈值（ms；用户 2026-10-16 由 30s 收紧到 15s） */
+const BOARD_AUTOCLOSE_MS = 15_000;
+let boardAutocloseTimer: number | undefined;
+
+watch([windowFocused, panelVisible, statsOpen], () => {
+  window.clearTimeout(boardAutocloseTimer);
+  boardAutocloseTimer = undefined;
+  const boardOpen = panelVisible.value || statsOpen.value;
+  if (!boardOpen || windowFocused.value) {
+    return;
+  }
+  boardAutocloseTimer = window.setTimeout(() => {
+    boardAutocloseTimer = undefined;
+    panelVisible.value = false;
+    statsOpen.value = false;
+  }, BOARD_AUTOCLOSE_MS);
+});
+
 /** 打卡 pill（TimerCard 上抛方向）→ 弹对应方向确认框（双向确认，不直接执行） */
 function onPillClick(direction: "in" | "out"): void {
   confirmMode.value = direction;
@@ -602,6 +684,9 @@ onUnmounted(() => {
   }
   window.clearTimeout(hotkeyErrorTimer);
   window.clearTimeout(saveErrorTimer);
+  window.clearTimeout(backdropOnTimer);
+  window.clearTimeout(backdropOffTimer);
+  window.clearTimeout(boardAutocloseTimer);
   if (autoOutCountdown !== undefined) {
     window.clearInterval(autoOutCountdown);
   }

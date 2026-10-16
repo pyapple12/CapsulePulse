@@ -3287,3 +3287,31 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 **验证**：后端 TDD 用例 `set_settings_rejects_threshold_below_elapsed`（假钟推 2:30 ⇒ 改 3 被拒、改 4 通过）、`set_settings_rejects_threshold_after_fire`（触发后禁改、暂停后可改）、`set_settings_allows_other_fields_while_locked`（只改开关照常通过）、`session_status_exposes_segment_and_fired`（Running 有值 / Paused 为 0）；前端 `vue-tsc` 0 + `npm run build`；live 目测 8 项（见 x.progress `.9`）并入 `.temp/pl027-visual-standards.md` 附录 E 待用户签认。
 
 **落地补记（2026-10-16，`.6`–`.8` 已落）**：① 沙漏实现比原方案更彻底——水位改由 CSS 变量 `--hg-w` **直接驱动**（`translate(0, calc(13px × var(--hg-w)))` / `scale(1, var(--hg-w))`，默认值即 1 = 沉底），**`.run` 类整类退役**、`hg-mound-top/bottom` 关键帧删除 ⇒ "启动未挂类即两端满"从根上消失（不再需要"幂等挂载"）；水位过渡由 `--hg-drain`（0.6s）承担。② 探针实证（真 SVG + 真 CSS，Chromium）：`--hg-w` = 0 / 0.25 / 0.6 / 1 四档水位全部正确；真机启动未在岗 = **沉底**（修前为"两端满"）。③ 踩坑登记：**浏览器缓存会骗人**——探针改 CSS 后必须带 `?v=` 版本号，否则读到旧样式表（曾据此误判"`var()` 驱动不生效"，实际是缓存）。④ 会话提示贯通取 **`ceil(segment_ms / 60000)`**（与后端下限口径同源），且**分钟粒度 + 变化才发**（避免 10 次/秒的无效重渲染）。
+
+## 附录 PL029：板开合驱动的系统背板（按需毛玻璃）（2026-10-16 立项）
+
+**背景**：CP 玻璃观感为**恒纯 alpha 透明窗** + 前端分态纱（PL021.4 CT 化定案，DWM 背板退役；`glass_backdrop.rs` 文件头当时即留话"将来若做聚焦真磨砂再在本文件补 `set_focused_backdrop`"）。用户新需求：**只在打开统计板 / 设置板时**开启 CT 同款毛玻璃，平时保持现在的纯透明。
+
+**CT 现状（参照物）**：`glass_backdrop.rs::set_focused_backdrop(window, focused)`——聚焦挂 `DWMSBT_TRANSIENTWINDOW`（系统亚克力）、**失焦主动设 `DWMSBT_NONE`**；调用点 = `lib.rs` 的 `WindowEvent::Focused`（纯焦点两态）。
+
+**用户定案（2026-10-16）**：
+
+1. 触发口径 = **板开 && 窗口聚焦 ⇒ 挂**；**收板 或 失焦 ⇒ 摘**（两条件任一不满足即摘）。
+2. **失焦必须主动摘**（CT 同款）——否则 DWM 会把材质退回**不透明灰板**（PL010 已实证登记，无受支持 API 可拦）。
+3. 切换时机（**2026-10-16 用户修订**）：**开板动画结束前 200ms 挂**（开板动画 `scale(0) → scale(1)` = **400ms**，故 t = **200ms** 挂）；**收板动画开始后 200ms 摘**（收板动画 = **350ms**，故 t = **200ms** 摘）；**失焦立即摘**。
+4. 三端：**DWM 仅 Windows**，macOS/Linux 空桩 no-op（本次不做三端对齐，登记挂靠 [problems#1]）。
+5. 板自身 `backdrop-filter: blur(40px)` **先不动**（叠加观感实测后再决定是否调参）。
+6. **失焦自动收板**（2026-10-16 用户定案）：**板开着 + 窗口失焦持续满 15s ⇒ 自动收两板**（原定 30s，同日收紧到 15s）——语义 = "失焦相当于 app 没操作"（失焦期间收不到用户操作，故"没操作"实现为"失焦持续"）；重新聚焦或中途手动收板即取消计时。
+
+**做法**：
+
+- **后端 FFI**（`core/src/glass_backdrop.rs`）：补三常量 `DWMWA_SYSTEMBACKDROP_TYPE = 38` / `DWMSBT_NONE = 1` / `DWMSBT_TRANSIENTWINDOW = 3` 与公开壳 `pub fn set_backdrop(window: &tauri::WebviewWindow, on: bool)`——Windows 分支 `DwmSetWindowAttribute`（失败 `eprintln!` + `crate::warn_diag`，**维持前态**）；非 Windows 空桩（同签名，调用点零 `#[cfg]`）；文件头注释同步（"未启用"改为"按板开合启用"）。
+- **后端命令**（`core/src/commands/window.rs`）：新增 `#[tauri::command] pub fn set_board_backdrop(app: AppHandle, open: bool)`——`app.get_webview_window("main")` 取窗（缺失 `warn_diag` 跳过），调 `glass_backdrop::set_backdrop`；**返回 `()` 不抛错**（纯装饰层，容错白名单登记）；`core/src/lib.rs` 的 `tauri::generate_handler!` 注册该命令。
+- **前端**（`ui/App.vue`）：新增 `syncBoardBackdrop()`——`on = (panelVisible || statsOpen) && windowFocused`；`watch([panelVisible, statsOpen, windowFocused], …)` 驱动，两个延时常量：`BACKDROP_ON_DELAY_MS = 200`（开板动画 400ms 的**结束前 200ms** 挂）、`BACKDROP_OFF_DELAY_MS = 200`（收板动画 350ms 的**开始后 200ms** 摘）。该挂 ⇒ 清"待摘"定时器、尚未挂且无"待挂"定时器时 `setTimeout(挂, 200)`；该摘 ⇒ 清"待挂"定时器（开板中途收板则干脆不挂），已挂时**失焦立即摘 / 收板 `setTimeout(摘, 200)`**。边界：收板中途又开板 ⇒ 待摘被清、背板不断（不闪）；两板互斥切换 ⇒ `want` 仍真 ⇒ 不摘不挂、无抖动；组件卸载清两定时器。
+- **纱层三态矩阵**（**零改动**，自动成立）：板关 ⇒ 现状；板开 + 聚焦 ⇒ 背板在 + 纱 0%（现状聚焦 0%）；板开 + 失焦 ⇒ 背板已摘 + 纱 30%（现状失焦 30%）✓
+- **失焦自动收板**（`ui/App.vue`）：常量 `BOARD_AUTOCLOSE_MS = 15_000`（原 30s，同日收紧） + `boardAutocloseTimer`；`watch([windowFocused, panelVisible, statsOpen], …)`——先清旧计时器，**仅当"板开着 且 窗口失焦"**才 `setTimeout(收两板, 15s)`（收 = `panelVisible = false; statsOpen = false`）；`onUnmounted` 清定时器。缩回托盘（窗口隐藏）同走失焦 ⇒ 15s 后自动收板（合理：隐藏了不留板）。
+- **容错白名单新增**：「背板切换失败仅日志不阻断」——场景：`DwmSetWindowAttribute` 返回非零 HRESULT / 取不到窗口句柄 / Win10 无 `SYSTEMBACKDROP` 属性；降级行为：维持前态（观感回现状），下次切换自愈；理由：材质为纯装饰层，与"窗口框架整定失败维持前态"同一纪律。
+
+**验证**：`cargo fmt --check` / `clippy -D warnings` / `cargo test`（回归）+ `vue-tsc --noEmit` + `npm run build` + `cargo build`；live 目测 7 项——L1 板关（常态）⇒ 纯透明与现状**完全一致**；L2 开统计板（聚焦）⇒ 桌面被**实时磨砂**；L3 开设置板 ⇒ 同；L4 板开着点其它程序（失焦）⇒ **磨砂消失回透明、无灰板**；L5 收板 ⇒ 回纯透明且**飞出动画期间不突变**；L6 反复开合无残留（不会"板关了还磨砂"）；**L7 失焦自动收板**——开板后点其它程序（失焦）⇒ **满 15s 板自动收起**；失焦 ~10s 时切回窗口 ⇒ 计时取消、板保持开着；反复失焦 / 聚焦不误收。Win10 边界：调用失败仅日志、观感回现状。
+
+**版本**：`core/Cargo.toml` `0.1.5` → **`0.1.6`**（PL 里程碑推进 minor），对外四段式 **V0.1.6.1**（`README.md` 徽章与 commit 标题同步）。

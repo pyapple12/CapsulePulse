@@ -154,6 +154,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
       };
     case "set_settings":
     case "main_hide_to_tray":
+    case "set_board_backdrop":
     case "tray_menu_action":
     case "tray_menu_resize":
       return null;
