@@ -2,8 +2,6 @@
 //! 快照在此产出（纯逻辑可测）；**提醒评估归提醒子模块的守候线程**（FIX006.5），副作用（emit/通知）同在该模块。
 //! PL005：计时门禁（未上班严格拒绝）+ 段起止事件留痕（按下时间点，图谱数据源）。
 
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -49,7 +47,6 @@ pub struct ReminderDecision {
 /// at 为 None = 记账当下（自动下班传回填时刻）。
 fn persist_session_with_end<C: Clock>(
     ctx: &AppContext<C>,
-    _segment: Duration,
     at: Option<i64>,
 ) -> Result<(), CommandError> {
     let at = at.unwrap_or(now_secs(ctx)?);
@@ -104,8 +101,7 @@ pub(super) fn pause_session_at<C: Clock>(
         }
     };
     let segment = lock(ctx)?.pause()?;
-    let outcome =
-        clear_reminder_fire(ctx).and_then(|()| persist_session_with_end(ctx, segment, at));
+    let outcome = clear_reminder_fire(ctx).and_then(|()| persist_session_with_end(ctx, at));
     if let Err(err) = outcome {
         // 回滚后数据未落库——落诊断日志（容错白名单 ⑥ 通道；FIX002.7）
         crate::diag::log(&format!("暂停落库/留痕失败已回滚（计时继续）：{err}"));
@@ -249,24 +245,6 @@ pub(super) fn status_snapshot<C: Clock>(
     })
 }
 
-/// 开始新会话（仅 Idle 合法）。
-#[tauri::command]
-pub fn session_start(handle: State<'_, AppContext>) -> Result<(), CommandError> {
-    start_session(&handle)
-}
-
-/// 暂停进行中的会话（本段时长 > 0 时落库）。
-#[tauri::command]
-pub fn session_pause(handle: State<'_, AppContext>) -> Result<(), CommandError> {
-    pause_session(&handle)
-}
-
-/// 继续暂停的会话（累计继承）。
-#[tauri::command]
-pub fn session_resume(handle: State<'_, AppContext>) -> Result<(), CommandError> {
-    resume_session(&handle)
-}
-
 /// 重开（重置）：先收段落库，再归零并**回到休息态**（PATCH002：不再自动开跑）。
 #[tauri::command]
 pub fn session_restart(handle: State<'_, AppContext>) -> Result<(), CommandError> {
@@ -306,6 +284,8 @@ pub async fn session_status(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::commands::test_support::{begin_duty, ctx, secs, FakeClock};
     use crate::session::SessionError;

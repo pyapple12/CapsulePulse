@@ -35,6 +35,9 @@ function snap4(value: number): number {
  * （PATCH007.14 用户定案），两者一律经 `snap4` **向上取到 4 的倍数**（双整数 ⇒ 无取整差 ✓）；
  * 多行态传 `null` 交后端取固定 228（= 4×57 ✓ 已双整数）。Rust 命令设完会**重锚托盘**（右缘恒对齐
  * 图标右缘 ⇒ 宽度变化表现为**左缘移动、右缘不动** ✓）。 */
+/** FIX006.19b：上次已下发尺寸的键（`宽|高`）——相同即跳过 invoke（后端每秒推 `hover-update`，
+ * 原实现每秒都 `set_size` + 重锚，含跨线程窗口调用，而尺寸其实不变）。 */
+let lastSizeKey = "";
 watch(
   summary,
   async () => {
@@ -65,11 +68,16 @@ watch(
       parseFloat(cs.marginTop) +
       parseFloat(cs.marginBottom);
     const singleLine = summary.value?.single_line === true;
+    const width = singleLine ? snap4(bodyRect.width + chromeX) : null;
+    const height = snap4(bodyRect.height + chromeY);
+    // FIX006.19b：尺寸与上次相同 ⇒ 不再打扰后端（失败时不记键，下一拍重试）
+    const sizeKey = `${width}|${height}`;
+    if (sizeKey === lastSizeKey) {
+      return;
+    }
     try {
-      await invoke("tray_hover_resize", {
-        width: singleLine ? snap4(bodyRect.width + chromeX) : null,
-        height: snap4(bodyRect.height + chromeY),
-      });
+      await invoke("tray_hover_resize", { width, height });
+      lastSizeKey = sizeKey;
     } catch (err) {
       console.error("悬浮窗尺寸调整失败", err);
     }

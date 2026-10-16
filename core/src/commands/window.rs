@@ -3,13 +3,15 @@
 
 use tauri::{AppHandle, Manager};
 
+use super::CommandError;
 use crate::hide_main_window;
 
 /// 缩回托盘（双击标题触发）：复用 lib 的隐藏漏斗（含位置记忆）。
 /// 失败上抛文案供前端可见反馈——严格抛错主线（CT 同款命令只打日志、无用户可见反馈，CP 不沿）。
+/// FIX006.17：返回类型统一为 [`CommandError`]（原自拼 `String` ⇒ 全项目唯一的例外出口）。
 #[tauri::command]
-pub fn main_hide_to_tray(app: AppHandle) -> Result<(), String> {
-    hide_main_window(&app)
+pub fn main_hide_to_tray(app: AppHandle) -> Result<(), CommandError> {
+    hide_main_window(&app).map_err(CommandError::Window)
 }
 
 /// 板开合驱动的系统背板（PL029）：`open = true` 挂系统亚克力、`false` 摘回纯透明。

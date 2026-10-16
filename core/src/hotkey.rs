@@ -105,7 +105,9 @@ fn normalize_main_key(token: &str) -> Result<String, HotkeyError> {
     if let Some(rest) = upper.strip_prefix('F') {
         if let Ok(n) = rest.parse::<u32>() {
             if (1..=12).contains(&n) {
-                return Ok(upper);
+                // FIX006.12：**用解析值重组**（`F01` / `F001` → `F1`）——下游插件按**精确串**匹配
+                // （`global-hotkey` 的 `parse_hotkey` 只有 "F1"…"F12" 分支），原样透传会注册失败
+                return Ok(format!("F{n}"));
             }
         }
     }
@@ -142,6 +144,15 @@ mod tests {
     fn parse_digit_and_function_keys() {
         assert_eq!(parse("Ctrl+7").unwrap(), "Ctrl+7");
         assert_eq!(parse("Alt+F1").unwrap(), "Alt+F1");
+    }
+
+    /// FIX006.12：F 键归一——**前导零折叠为规范串**（下游插件按精确串匹配：`global-hotkey`
+    /// 只有 "F1"…"F12" 分支，原样透传 `F01` 会注册失败 ⇒ 静默不可用）。
+    #[test]
+    fn parse_function_key_normalizes_leading_zero() {
+        assert_eq!(parse("Alt+F01").unwrap(), "Alt+F1");
+        assert_eq!(parse("ctrl+f001").unwrap(), "Ctrl+F1");
+        assert_eq!(parse("Alt+F12").unwrap(), "Alt+F12", "两位数不受影响");
     }
 
     /// 空串与空段 → Empty。

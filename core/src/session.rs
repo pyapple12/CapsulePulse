@@ -206,14 +206,6 @@ impl<C: Clock> WorkSession<C> {
         self.state = state;
     }
 
-    /// 按给定基线恢复为运行态（PL027.5 崩溃恢复专用）：`start` = 本段起点的**单调**时刻、
-    /// `accumulated` = 本段之前的已完成段累计。调用方负责把墙钟起点换算成单调时刻
-    /// （见命令层恢复入口）；任意态合法（恢复即重建，不做状态校验）。
-    pub fn restore_running(&mut self, start: Duration, accumulated: Duration) {
-        self.accumulated = accumulated;
-        self.state = SessionState::Running { start };
-    }
-
     /// 按"本段已走时长 + 此前累计"恢复运行态（PL027.4 崩溃恢复专用）：内部以当前单调时刻
     /// 回推本段起点，故调用方只需给墙钟算出的 `elapsed`（= now − 段起点）；任意态合法。
     /// PATCH004.4：单调钟起点 = 本进程启动（[`RealClock`] 契约），而 `elapsed` 来自**墙钟**——
@@ -530,26 +522,6 @@ mod tests {
     }
 
     // —— PL027.5：崩溃恢复的会话入口 ——
-
-    /// PL027.5：按给定起点与累计恢复运行态——读数 = 累计 + 从原段起点续算（停机折入本段）。
-    #[test]
-    fn restore_running_continues_from_given_baseline() {
-        let clock = FakeClock::new();
-        let mut s = WorkSession::new(clock.clone());
-        clock.advance(secs(100)); // 墙钟意义上"本段已走了 100s"
-        s.restore_running(Duration::ZERO, secs(300));
-        assert_eq!(
-            s.state(),
-            &SessionState::Running {
-                start: Duration::ZERO
-            }
-        );
-        assert_eq!(s.total(), secs(400), "此前累计 300 + 本段 100");
-        clock.advance(secs(20));
-        assert_eq!(s.total(), secs(420), "恢复后继续走");
-        assert_eq!(s.pause().unwrap(), secs(120), "本段时长 = 起点到暂停");
-        assert_eq!(s.total(), secs(420));
-    }
 
     /// PATCH004.4：单调钟起点 = **本进程启动**（[`RealClock`] 契约），而恢复段的 `elapsed` 由
     /// **墙钟**算出——段起于进程之前时 `elapsed` 会大于"本进程已运行时长"，直接相减即 Duration

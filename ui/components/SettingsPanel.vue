@@ -12,6 +12,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import type { HotkeyAction, ReminderSettings } from "../types";
+// FIX006.16：自动下班区间与后端同源（镜像常量，勿再写裸字面量）
+import { AUTO_OUT_MIN_HOURS, OVERTIME_CAP_HOURS } from "../types";
 
 const props = defineProps<{
   /** 板开合（父持态，两板互斥）；.open 驱动 visibility + 自按钮中心 scale 飞出 */
@@ -113,20 +115,28 @@ const REPEAT_DELAY_MS = 400;
 const REPEAT_INTERVAL_MS = 80;
 let repeatDelayTimer = 0;
 let repeatTimer = 0;
-/** 本次指针手势是否已自行步进（吞 click 用；click 落下即复位） */
-let pointerStepped = false;
+/** 最近一次**指针手势**的时刻（`pointerdown` 与 `pointerup/cancel` 都刷新）——用于把紧随其后的
+ * 那次 `click` 判定为"同一次手势"并吞掉（避免双跳）。FIX006.20b **B 方案**（2026-10-17 用户定案）：
+ * 判据用**时间戳**而非布尔标志 ⇒ ① 单击 = 一步（按下那步 + click 被吞）② **长按释放后**那次
+ * click 也照吞（时间戳在 `pointerup` 刷新）③ "按下→移出按钮→松开"（不产生 click）**不留任何残留**
+ * ⇒ 不会像原布尔标志那样把**下一次**键盘 `Enter` 的单步吞掉（仅当 Enter 恰落在 500ms 手势窗口内
+ * 才并入同一次手势——属正常取舍）。 */
+let lastPointerGestureAt = 0;
+/** 手势内 click 的吞并窗口（ms）：真实点击的 click 紧随 pointerup（同帧~数十 ms），500 足够宽。 */
+const SWALLOW_CLICK_MS = 500;
 
-/** 停表（幂等）：连发结束的唯一出口；监听挂 window ⇒ 释放落在别处（甚至按钮已置灰）也能停 */
+/** 停表（幂等）：连发结束的唯一出口；监听挂 window ⇒ 释放落在别处（甚至按钮已置灰）也能停。 */
 function stopRepeat(): void {
   window.clearTimeout(repeatDelayTimer);
   window.clearInterval(repeatTimer);
   window.removeEventListener("pointerup", stopRepeat);
   window.removeEventListener("pointercancel", stopRepeat);
+  lastPointerGestureAt = performance.now(); // 记"手势收尾"时刻 ⇒ 紧随的 click 仍被吞（长按亦然）
 }
 
-/** 指针按下：立即一步 + 挂连发（首延迟后匀速） */
+/** 指针按下：记手势时刻 + 立即一步 + 挂连发（首延迟后匀速） */
 function onStepDown(delta: number): void {
-  pointerStepped = true;
+  lastPointerGestureAt = performance.now();
   stepThreshold(delta);
   stopRepeat();
   repeatDelayTimer = window.setTimeout(() => {
@@ -148,10 +158,10 @@ function onInputLeave(e: PointerEvent): void {
   (e.target as HTMLInputElement).blur();
 }
 
-/** click 分流：指针手势已步进过就吞掉（避免双跳）；键盘 Enter / Space 走单步 */
+/** click 分流：**同一手势内**的那次 click 吞掉（避免双跳）；键盘 Enter / Space 的独立 click 走单步。
+ * FIX006.20b B 方案：判据 = `lastPointerGestureAt` 距今是否在吞并窗口内（见其注释）。 */
 function onStepClick(delta: number): void {
-  if (pointerStepped) {
-    pointerStepped = false;
+  if (performance.now() - lastPointerGestureAt < SWALLOW_CLICK_MS) {
     return;
   }
   stepThreshold(delta);
@@ -173,14 +183,15 @@ function onNotifyChange(e: Event): void {
   emit("save", { ...props.settings, notify_enabled: checked, sound_enabled: checked });
 }
 
-/** 步进 ±1（4~12 边界外静默：禁用态已挡，此处为键盘兜底，design stepAutoOut 同款守卫）；
- * 在岗期间整体禁改（PL025.5：本班基准不可中途改）——UI 已置灰，此处再兜一层 */
+/** 步进 ±1（区间外静默：禁用态已挡，此处为键盘兜底，design stepAutoOut 同款守卫）；
+ * D 在岗期间整体禁改（PL025.5：本班基准不可中途改）——UI 已置灰，此处再兜一层。
+ * FIX006.16：边界改引 `AUTO_OUT_MIN_HOURS` / `OVERTIME_CAP_HOURS`（镜像后端常量）。 */
 function stepAutoOut(delta: number): void {
   if (props.onDuty || props.autoOutLocked) {
     return;
   }
   const v = props.settings.workday_auto_out_hours + delta;
-  if (v < 4 || v > 12) {
+  if (v < AUTO_OUT_MIN_HOURS || v > OVERTIME_CAP_HOURS) {
     return;
   }
   emit("save", { ...props.settings, workday_auto_out_hours: v });
@@ -360,7 +371,11 @@ watch(
         <div>
           <p class="setting-name">自动下班（小时）</p>
           <p class="setting-desc">
-            {{ autoOutLocked ? "今日已开启上班，明日上班前可改" : "上限 4~12 小时" }}
+            {{
+              autoOutLocked
+                ? "今日已开启上班，明日上班前可改"
+                : `上限 ${AUTO_OUT_MIN_HOURS}~${OVERTIME_CAP_HOURS} 小时`
+            }}
           </p>
         </div>
         <div class="stepper">
@@ -368,7 +383,9 @@ watch(
             class="stepper-btn"
             aria-label="减少"
             type="button"
-            :disabled="onDuty || autoOutLocked || settings.workday_auto_out_hours <= 4"
+            :disabled="
+              onDuty || autoOutLocked || settings.workday_auto_out_hours <= AUTO_OUT_MIN_HOURS
+            "
             @click="stepAutoOut(-1)"
           >
             <svg viewBox="0 0 26 22" aria-hidden="true">
@@ -381,7 +398,9 @@ watch(
             class="stepper-btn"
             aria-label="增加"
             type="button"
-            :disabled="onDuty || autoOutLocked || settings.workday_auto_out_hours >= 12"
+            :disabled="
+              onDuty || autoOutLocked || settings.workday_auto_out_hours >= OVERTIME_CAP_HOURS
+            "
             @click="stepAutoOut(1)"
           >
             <svg viewBox="0 0 26 22" aria-hidden="true">

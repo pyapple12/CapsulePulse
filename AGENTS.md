@@ -63,6 +63,7 @@ core/             # Tauri 2 后端（原框架默认名 src-tauri，整体改名
     diag.rs           # 诊断日志（FIX002.7：data/pulse.log；PL024.2 起 cfg(test) 不落盘）
     paths.rs          # 运行时数据双落址（config.json→configs/、pulse.db→data/；dev=项目根 / release=exe 同级）
     glass_backdrop.rs # 窗口框架与材质（PATCH001.3/.5：隐藏 Win11 激活描边 + 补系统圆角；PL029：按"板开合 + 焦点"挂摘系统背板；DWM 属性级 FFI，零新依赖）
+    window_icon.rs    # 窗口图标整定（PATCH013：Tauri 只取 icon.ico 首帧且只塞 ICON_SMALL 槽 ⇒ 首帧 16×16 时任务栏/Alt+Tab 只能放大它；改为 LoadImageW 从 exe 的 RT_GROUP_ICON 按尺寸取帧、ICON_BIG+ICON_SMALL 同设；零新依赖）
     aumid.rs          # 通知署名注册（PATCH012：首启把内嵌图标解出到 data/ + 写 HKCU 的 AppUserModelId 三项——让绿色单 exe 的通知署名 = 应用名 + 图标；手写 advapi32 FFI，零新依赖）
 ui/               # Vue 前端（展示层）
   App.vue             # 骨架：topbar + 计时页 + 浮层件装配（板开合 / 文案条 / 确认框 / 背板时序）
@@ -218,7 +219,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **tag 必须指向含最终文档的提交**：先提交文档再打 tag（tag 钉住发布点）
 - **gh 发布权限**：本机 `gh` 登录账号对 `pyapple12/CapsulePulse` 可能仅 READ ⇒ `gh release create` 会 403；Release 由用户手动发布，或先切到有写权限的账号 / `GH_TOKEN`
 - **修复项全量**：Release 的「修复」从 `git diff` 逐条核对，不漏
-- **图标**：`core/icons/` 需五件套（`32x32.png` / `64x64.png` / `128x128.png` / `128x128@2x.png` / `icon.ico` / `icon.png`）并与 `tauri.conf.json` 的 `bundle.icon` 数组同步；`icon.png` 同时供通知署名 `IconUri`（`aumid.rs` 的 `include_bytes!` 编译期嵌入）⇒ **换图标后必须重新构建 exe**
+- **图标**：`core/icons/` 需五件套（`32x32.png` / `64x64.png` / `128x128.png` / `128x128@2x.png` / `icon.ico` / `icon.png`）并与 `tauri.conf.json` 的 `bundle.icon` 数组同步；`icon.png` 同时供通知署名 `IconUri`（`aumid.rs` 的 `include_bytes!` 编译期嵌入）⇒ **换图标后必须重新构建 exe**。**`icon.ico` 的目录首帧必须是"大帧"（≥48，现为 64×64）**：Tauri 只把首帧当窗口图标（`tauri-codegen` 的 `entries()[0]`）且只塞 `ICON_SMALL`、清空 `ICON_BIG`，首帧是小帧时任务栏/Alt+Tab 只能放大它 ⇒ 图标发糊；生成/改图标一律走 **`core/icons/mk-icons.ps1`**（**已入库**——原在 `.temp/` 内、按"临时文件不入库"纪律后来者找不到；其第 5 步会直读目录首帧断言，中间产物与预览图落 `.temp/`），别用会重排帧序的工具（PATCH013）
 - **通知署名**：绿色版靠 `aumid.rs` 首启写 HKCU 项署名（`SOFTWARE\Classes\AppUserModelId\<AUMID>`）；**AUMID 必须与 `tauri.conf.json` 的 `identifier` 一致**（通知插件同源取值，不一致则署名仍回退 PowerShell）
 
 ## 错误策略
@@ -247,6 +248,8 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **系统背板切换失败仅日志不阻断**（PL029 登记，2026-10-16）：场景——① `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)` 返回非零 HRESULT；② 取不到主窗口句柄；③ Win10 无该属性（Win11 22H2+ 才有）。降级行为——错误落诊断日志（`data/pulse.log`）+ dev 控制台，**维持前态**（观感回现状：板开时仍是纯透明），下次切换自愈。理由——系统背板是**纯装饰层**（只在板开合时切换的材质），失败唯一后果是观感回退（计时 / 打卡 / 统计 / 提醒 / 托盘全不受影响），与"窗口框架整定失败维持前态"同一条纪律。
 
 - **通知署名注册失败仅日志不阻断**（PATCH012 登记，2026-10-16）：场景——① 图标解出到 `data/aumid-icon.png` 失败（目录不可写 / 磁盘满）；② `RegCreateKeyExW` / `RegSetValueExW` 返回非零（组策略限制 / 注册表被锁）。降级行为——错误落诊断日志（`data/pulse.log`），**通知照常发送**但来源署名回退 "Windows PowerShell"（crate 内置回退），下次启动重试自愈。理由——署名是**观感层**（通知内容/时间/触发时机全不受影响），不得因装饰性注册把用户挡在应用外；与"窗口框架整定失败维持前态"同一条纪律。
+
+- **应用图标整定失败维持前态**（PATCH013 登记，2026-10-17）：场景——① 取不到主窗句柄（`window.hwnd()`）；② `LoadImageW` 从本模块 `RT_GROUP_ICON` 取不到图标（资源缺失 / `tauri-build` 组号变更）；③ `GetModuleHandleW` 失败。降级行为——错误落诊断日志（`data/pulse.log`），**窗口保持 Tauri 默认那张单帧图标**（首帧尺寸的那张，观感可能偏糊），其余功能照常。理由——窗口图标是**纯装饰层**（计时/打卡/统计/提醒/托盘全不受影响），不得因图标失败阻断启动；与"窗口框架整定失败维持前态"同一条纪律。
 
 ## 素材与环境陷阱
 

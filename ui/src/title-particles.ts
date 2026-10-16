@@ -3,8 +3,10 @@
 //! 静止自动停帧省 GPU；reduced-motion 不初始化，保留静态文字（与 design 同款守卫）。
 //! 顶边滑出回位修复移植自 CapsuleTODO（2026-10-11，PATCH001.1）：标题贴窗顶时鼠标可
 //! 直接从顶边滑出，`mousemove` 停发 → 需补视口 `mouseleave` 作唯一离窗信号。
-//! 消费的 --panel-shadow / --input-focus-glow 两令牌 design 侧未定义，恒走 fallback
-//! （CT 软晕配方 1.7/1.7/8/0.35 与 --accent 辉光）；保留读取口子与设计同源。
+//! 消费 `--panel-shadow` 与 `--input-focus-glow` 两令牌（FIX006.20 复核：二者在 `glass.css` **有定义**
+//! ⇒ 按主题取值；仅当缺失才走 fallback 常量）。
+//! ⚠️ 本文件用 **`getPropertyValue("--…")`** 读令牌（JS 通道，**不是** CSS `var()`）——
+//! 排查"死令牌"时必须一并查这个通道（FIX006.15d 曾因只 grep `var(--…)` 而误删 `--input-focus-glow`）。
 //! 样式依托 topbar.css 的 .title--particles（原文字透明让位）与 .title-canvas（外扩余量）。
 
 /** 粒子状态：home = 字形坐标，ed = 到字形边缘距离（CSS px，辉光负 spread 只采深点） */
@@ -181,6 +183,10 @@ export function initTitleParticles(win: HTMLElement): (() => void) | undefined {
       if (homeDist > maxHome) maxHome = homeDist;
     }
     paint();
+    // FIX006.20d **已回滚**（2026-10-17 用户定案）：那段"停帧"块其实**同时把粒子强制归位**
+    // （`p.x = p.hx` + 速度清零）——它只在"光标**离开窗口**"（`far`）时语义成立（那正是"回到
+    // 标题形态"，见文件头 mouseleave 说明）。把"窗内静止"并进同一分支会让光标压在字上时粒子被
+    // 拉回原位、观感像"重来一遍" ⇒ 恢复原条件，不做该优化（观感件 + 收益不足）。
     const far = mouse.x < -999;
     if (far && (maxHome < SETTLE_DIST || frames > FRAME_CAP)) {
       for (const p of particles) {

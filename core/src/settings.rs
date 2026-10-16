@@ -95,12 +95,16 @@ impl Default for ReminderSettings {
 }
 
 impl ReminderSettings {
-    /// 校验：提醒阈值 1–99 分钟；自动下班 4–12 小时（PL025.5 与设置板 stepper 口径统一）。
+    /// 校验：提醒阈值 1–99 分钟；自动下班小时数取
+    /// [`AUTO_OUT_MIN_HOURS`](crate::workday::AUTO_OUT_MIN_HOURS)–[`OVERTIME_CAP_HOURS`](crate::workday::OVERTIME_CAP_HOURS)
+    /// （FIX006.16：区间**两端都由 `workday` 常量单一来源给出**，与设置板步进器同源——原为两处裸字面量）。
     pub fn validate(&self) -> Result<(), SettingsError> {
         if !(1..=99).contains(&self.threshold_min) {
             return Err(SettingsError::InvalidThreshold(self.threshold_min));
         }
-        if !(4..=12).contains(&self.workday_auto_out_hours) {
+        if !(crate::workday::AUTO_OUT_MIN_HOURS..=crate::workday::OVERTIME_CAP_HOURS)
+            .contains(&self.workday_auto_out_hours)
+        {
             return Err(SettingsError::InvalidAutoOutHours(
                 self.workday_auto_out_hours,
             ));
@@ -195,6 +199,28 @@ mod tests {
         assert_eq!(s.threshold_min, 30, "既有字段照常读入");
         assert_eq!(s.workday_auto_out_hours, 8);
         let _ = std::fs::remove_file(&p);
+    }
+
+    /// FIX006.16：区间**两端由 `workday` 常量给出**——边界内放行、跨界拒绝。
+    /// 用例随常量走（改 12/4 时本用例自动覆盖新边界，不再依赖裸字面量）。
+    #[test]
+    fn auto_hours_boundaries_follow_workday_constants() {
+        let min = crate::workday::AUTO_OUT_MIN_HOURS;
+        let max = crate::workday::OVERTIME_CAP_HOURS;
+        for ok in [min, max] {
+            let s = ReminderSettings {
+                workday_auto_out_hours: ok,
+                ..ReminderSettings::default()
+            };
+            assert!(s.validate().is_ok(), "{ok} 小时应放行（区间端点）");
+        }
+        for bad in [min - 1, max + 1] {
+            let s = ReminderSettings {
+                workday_auto_out_hours: bad,
+                ..ReminderSettings::default()
+            };
+            assert!(s.validate().is_err(), "{bad} 小时应拒绝（越界）");
+        }
     }
 
     /// 自动下班小时数越界（0 / 73）保存与载入均拒绝（合法 **4–12**）。

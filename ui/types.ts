@@ -21,19 +21,15 @@ export interface SessionStatus {
 /** 加班硬顶小时数（镜像 core/src/workday.rs `OVERTIME_CAP_HOURS`，单一来源在后端）：
  * 今日上限封顶于此值——到顶后加班钮隐藏、上班钮置灰（PATCH005.3）。 */
 export const OVERTIME_CAP_HOURS = 12;
+/** 自动下班小时数**可配下限**（镜像 `core/src/workday.rs` `AUTO_OUT_MIN_HOURS`，单一来源在后端；
+ * 与 `OVERTIME_CAP_HOURS` 一起构成设置板步进器的区间；FIX006.16 补齐镜像） */
+export const AUTO_OUT_MIN_HOURS = 4;
 /** PATCH006.4 电池分母：固定 12h = 100%（人一天能干的总量，与硬顶同源） */
 export const BATTERY_TOTAL_HOURS = OVERTIME_CAP_HOURS;
 /** PATCH006.4 电池红阈值：≤25%（= 相对 12h 只剩 3h，固定第 9h 起红） */
 export const BATTERY_RED_RATIO = 0.25;
 /** PATCH006.4 电池黄阈值下限：黄 = max(30%, 1 − 基准/12) ⇒ 基准 ≥9h 时固定 30% */
 export const BATTERY_YELLOW_FLOOR = 0.3;
-
-/** stats 命令返回体（镜像 core/src/commands/stats.rs SessionStats） */
-export interface SessionStats {
-  today_secs: number;
-  week_secs: number;
-  all_secs: number;
-}
 
 /** get/set_settings 命令参数与返回体（镜像 core/src/settings.rs ReminderSettings） */
 export interface ReminderSettings {
@@ -50,6 +46,9 @@ export interface ReminderSettings {
   hotkey_toggle_visible: string;
   /** 工作/休息切换全局热键（PL028.2；缺省 Alt+Shift+P） */
   hotkey_toggle_timer: string;
+  /** 窗口位置记忆（PL028.1；FIX006.17 补齐镜像）：后台每次隐藏/退出时写入，前端不消费；
+   * 保存设置时后端**从内存态继承**该字段（`set_settings_inner`），故前端不传也不会丢 */
+  window_pos: { x: number; y: number } | null;
 }
 
 /** 全局热键动作标识（镜像 core/src/commands/reminder.rs HotkeyAction，PL028.2）：
@@ -134,6 +133,9 @@ export interface HoverSummary {
  * `closed_at` = 补下班记账时刻（仅"判下班"分支有值；无缝续为 null，前端静默） */
 export interface RecoveryNotice {
   closed_at: number | null;
-  /** 该次补下班是否以"自动下班"名义（越过自动下班点） */
+  /** 该次补下班是否以"自动下班"名义（越过自动下班点）——**镜像完整性字段，前端当前未消费**
+   * （FIX006.15f：按本文件"与 Rust serde 逐字段对齐"约定保留，勿删） */
   auto: boolean;
+  /** 无缝续时的读数（= 断开前累计 + 停机时长；null = 未续）——FIX006.17 补齐的镜像字段 */
+  resumed_secs: number | null;
 }

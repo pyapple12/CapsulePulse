@@ -708,8 +708,13 @@ pub(super) fn try_auto_clock_out<C: Clock>(
     if now_secs(ctx)? < due {
         return Ok(None);
     }
-    // 若恰被并发手动下班，此处严格报错、下一 tick 基准已撤自然消停
-    clock_out_inner(ctx, due, EventKind::AutoClockOut).map(|_| Some(due))
+    // FIX006.11：并发到点（兜底线程或手动下班已在本拍之前收口）⇒ `NotOnDuty` 视为"已下班"，
+    // **幂等返回 None**——不把错误冒泡成整条 `session_status` 失败（其余错误照常上抛）
+    match clock_out_inner(ctx, due, EventKind::AutoClockOut) {
+        Ok(()) => Ok(Some(due)),
+        Err(CommandError::Workday(WorkdayError::NotOnDuty)) => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 /// 今日预算上下文（PATCH005.3 纯逻辑 + 存储读）：基准 / 加班步数 / 已累计两口径。
@@ -1985,6 +1990,20 @@ mod tests {
         // 未上班：不动
         clock_out_inner(&ctx, now_secs(&ctx).unwrap(), EventKind::ClockOut).unwrap();
         assert_eq!(try_auto_clock_out(&ctx).unwrap(), None);
+    }
+
+    #[test]
+    fn try_auto_clock_out_is_idempotent_when_already_off() {
+        let ctx = ctx(FakeClock::new());
+        let in_at = now_secs(&ctx).unwrap() - 9 * 3_600;
+        clock_in_inner(&ctx, in_at).unwrap(); // 武装基准（到点 = in_at + 8h，已过期）
+                                              // 模拟并发者已完成下班：状态置 Off，而基准**仍在**（正是"命令端与兜底线程同刻到点"的形态）
+        *ctx.workday.lock().unwrap() = WorkdayState::Off;
+        assert_eq!(
+            try_auto_clock_out(&ctx).unwrap(),
+            None,
+            "FIX006.11：已下班 ⇒ 幂等返回 None（不把 NotOnDuty 冒泡成整条命令失败）"
+        );
     }
 
     /// PL025.8：打卡武装基准（到点 = 上班 + N）；待决提示同一基准只发一次；下班撤基准。

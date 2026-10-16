@@ -16,6 +16,8 @@
 //! **幂等**：每次启动覆盖写（`IconUri` 随 exe 路径变；用户删项后亦自愈）。失败仅日志——署名回退
 //! PowerShell，通知本体不受影响（容错白名单 PATCH012 登记）。
 
+/// FIX006.15g：`Path` 只在 Windows 分支的函数里用到 ⇒ 加 cfg，免非 Windows 触发 unused import
+#[cfg(target_os = "windows")]
 use std::path::Path;
 
 /// 编译期嵌入的通知图标（正式图标落地后替换 `core/icons/icon.png` 即生效）。

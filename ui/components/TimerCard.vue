@@ -121,6 +121,7 @@ const MONTH_EN = [
   "December",
 ];
 
+/** 序号英文后缀（`1st` / `2nd` / `3rd` / `4th`；**11–13 恒 `th`** 是英语例外，不能用最后一位判）。 */
 function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
@@ -186,11 +187,14 @@ function splitByRing(t0: number, t1: number): { ring: number; a0: number; a1: nu
   return out;
 }
 
+/** 极坐标 → 画布坐标（**角度以 12 点为 0°、顺时针**：故 −90° 对齐 y 轴负向）。 */
 function polar(r: number, deg: number): [number, number] {
   const a = ((deg - 90) * Math.PI) / 180;
   return [DIAL_C + r * Math.cos(a), DIAL_C + r * Math.sin(a)];
 }
 
+/** 弧线 path（表盘弧段绘制）：r = 半径、a0/a1 = 起止角（12 点为 0°、顺时针）；
+ * **整圈（≥359.5°）走两段半圆收口**——单段 360° 在 SVG 里会被归一化成 0° 而画不出来。 */
 function arcPath(r: number, a0: number, a1: number): string {
   // 整圈（恰好 12h）：两段半圆收口（单段 360° 会被归一化成 0 而画不出来）
   if (a1 - a0 >= 359.5) {
@@ -241,7 +245,9 @@ const dialArcsSvg = computed(() => {
   if (!d?.duty_started_at) {
     return "";
   }
-  const nowMs = Date.now();
+  // FIX006.20c：时间源改用 **`secTs`（每秒档 ref）**——原用 `Date.now()` 而该 computed 只依赖
+  // `props.day`（30 秒才刷）⇒ 进行中弧最多滞后 30 秒（注释所称"每秒重建"名不副实）
+  const nowMs = secTs.value;
   const segs = daySegments(d.blocks);
   if (segs.length === 0) {
     return "";
@@ -306,6 +312,7 @@ let flipEls: HTMLElement[] = [];
 let lastSecShown = ""; // 秒位现值（PATCH005.2：变化即触发冒号/点号灭一下）
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+/** 一次性建好翻转钟的 7 格 DOM（时:分:秒）并缓存节点引用（此后只改文本与类，不再重建）。 */
 function buildFlipClock(): void {
   const host = flipClockEl.value;
   if (!host) {

@@ -220,22 +220,30 @@ impl Storage {
     /// 未配对打卡时刻（PL027.6 单一事实源）：最后一条 `clock_in` 之后没有任何下班事件
     /// （`clock_out` / `auto_clock_out` / `crash_clock_out`）→ 返回该打卡时刻，否则 None。
     /// 打卡门禁与启动恢复共用（与库同源，根治"内存态与库不同步时开出重叠班"）。
+    /// FIX006.13：判据一律按**写入序（id）**——时间戳在同秒"先下班后上班"时会误判（旧式
+    /// `at >= clock_in` 把更早的那条 `clock_out` 也算进来），与 `duty_windows_for_day` 的
+    /// 逐条开关窗口径不一致；id 才是流水的定序依据（`insert_events` 按入参顺序追加）。
     pub fn open_duty_clock_in(&self) -> Result<Option<i64>, StorageError> {
-        let last_in: Option<i64> = self.conn.query_row(
-            "SELECT MAX(at) FROM events WHERE kind = 'clock_in'",
+        let last_in_id: Option<i64> = self.conn.query_row(
+            "SELECT MAX(id) FROM events WHERE kind = 'clock_in'",
             [],
             |row| row.get(0),
         )?;
-        let Some(clock_in) = last_in else {
+        let Some(clock_in_id) = last_in_id else {
             return Ok(None);
         };
-        let closes: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM events
-             WHERE kind IN ('clock_out', 'auto_clock_out', 'crash_clock_out') AND at >= ?1",
-            [clock_in],
+        let clock_in_at: i64 = self.conn.query_row(
+            "SELECT at FROM events WHERE id = ?1",
+            [clock_in_id],
             |row| row.get(0),
         )?;
-        Ok((closes == 0).then_some(clock_in))
+        let closes: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM events
+             WHERE kind IN ('clock_out', 'auto_clock_out', 'crash_clock_out') AND id > ?1",
+            [clock_in_id],
+            |row| row.get(0),
+        )?;
+        Ok((closes == 0).then_some(clock_in_at))
     }
 
     /// 全历史最早记录时刻（events.at 最小；空库 None）——总日均聚合的窗口起点
@@ -634,24 +642,6 @@ impl Storage {
         self.insert_events(&[(at, kind)])
     }
 
-    /// 测试辅助：旧"落段 + 段末事件"夹具形态——只写段末事件（段时长由流水推）。
-    #[cfg(test)]
-    pub fn record_session_with_event(
-        &self,
-        _started_at: i64,
-        _seconds: i64,
-        at: i64,
-        kind: crate::workday::EventKind,
-    ) -> Result<(), StorageError> {
-        self.insert_events(&[(at, kind)])
-    }
-
-    /// 测试辅助：在岗行读取夹具——由流水推"未配对打卡"（id 占位 0）。
-    #[cfg(test)]
-    pub fn workday_latest(&self) -> Result<Option<(i64, i64, Option<i64>)>, StorageError> {
-        Ok(self.open_duty_clock_in()?.map(|at| (0, at, None)))
-    }
-
     /// 测试辅助：由流水配对（`segment_start` → `segment_end`）求"已落库段数"（零长段不计）。
     #[cfg(test)]
     pub fn session_count(&self) -> Result<i64, StorageError> {
@@ -911,6 +901,29 @@ mod tests {
         let _ = std::fs::remove_file(&db);
         let _ = std::fs::remove_file(&backup);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// FIX006.13：未配对打卡按**写入序（id）**判——同秒"先下班后上班"应判在岗（与
+    /// `duty_windows_for_day` 的逐条开关窗口径一致；旧式 `at >= clock_in` 会误判为已下班）。
+    #[test]
+    fn open_duty_clock_in_uses_insertion_order_at_same_second() {
+        let s = Storage::open_in_memory().unwrap();
+        s.insert_events(&[(1_000, EventKind::ClockOut), (1_000, EventKind::ClockIn)])
+            .unwrap();
+        assert_eq!(
+            s.open_duty_clock_in().unwrap(),
+            Some(1_000),
+            "同秒先下班后上班 ⇒ 仍判在岗（id 序）"
+        );
+
+        let s2 = Storage::open_in_memory().unwrap();
+        s2.insert_events(&[(1_000, EventKind::ClockIn), (1_000, EventKind::ClockOut)])
+            .unwrap();
+        assert_eq!(
+            s2.open_duty_clock_in().unwrap(),
+            None,
+            "同秒先上班后下班 ⇒ 已离岗"
+        );
     }
 
     /// 文件库往返：临时目录建库→流水/运行态/汇总/模型版本写入→重开→数据仍在

@@ -5,20 +5,17 @@
 
 use tauri::{AppHandle, Manager};
 
-use super::CommandError;
+use super::{clamp_side, CommandError, SIDE_MAX, SIDE_MIN};
+use crate::MENU_ACTIONS;
 
 /// 菜单项动作统一分发（PATCH008.5；照 CT `tray_menu_action`）：**先收菜单窗**（点项必收，
-/// 原生菜单同款语义），再按 action 执行——分发语义复用 [`crate::handle_action`]（零逻辑重复）。
-/// action 全集 = `focus_main` / `toggle_timer` / `toggle_always_on_top` /
-/// `toggle_snap_to_edge` / `quit`。未知动作**严格报错**（非法输入不静默）。
+/// 原生菜单同款语义），再按 action 执行——分发语义复用 `crate::handle_action`（零逻辑重复）。
+/// action 全集见 `crate::MENU_ACTIONS`（**单一来源**：FIX006.18 起校验与分发同源，
+/// 不再各写一份白名单）。未知动作**严格报错**（非法输入不静默）。
 #[tauri::command]
 pub fn tray_menu_action(action: String, app: AppHandle) -> Result<(), CommandError> {
-    match action.as_str() {
-        "focus_main" | "toggle_timer" | "toggle_always_on_top" | "toggle_snap_to_edge" | "quit" => {
-        }
-        other => {
-            return Err(CommandError::UnknownMenuAction(other.to_string()));
-        }
+    if !MENU_ACTIONS.contains(&action.as_str()) {
+        return Err(CommandError::UnknownMenuAction(action));
     }
     if let Some(menu_win) = app.get_webview_window("tray-menu") {
         if let Err(err) = menu_win.hide() {
@@ -34,6 +31,11 @@ pub fn tray_menu_action(action: String, app: AppHandle) -> Result<(), CommandErr
 /// 失败仅落日志（装饰层纪律，容错白名单同款）。
 #[tauri::command]
 pub fn tray_menu_resize(app: AppHandle, width: f64, height: f64) -> Result<(), CommandError> {
+    // FIX006.17：后端最后一道夹取（前端量内容算错的护栏）
+    let (width, height) = (
+        clamp_side(width, SIDE_MIN, SIDE_MAX),
+        clamp_side(height, SIDE_MIN, SIDE_MAX),
+    );
     let Some(window) = app.get_webview_window("tray-menu") else {
         return Ok(()); // 窗不存在（退出收尾）：跳过
     };

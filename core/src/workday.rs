@@ -66,6 +66,11 @@ impl EventKind {
 /// 加班上限（小时）：与自动下班小时的可配上限（设置板 4–12）同值，即"拉满到硬上限"（PL025.9）。
 pub const OVERTIME_CAP_HOURS: u32 = 12;
 
+/// 自动下班小时数的**可配下限**（小时，FIX006.16）：与 [`OVERTIME_CAP_HOURS`] 一起构成设置校验
+/// 区间（`settings::ReminderSettings::validate` 与设置板步进器**同源**）；它是**产品下限**
+/// （不是技术硬顶），前端经 `ui/types.ts` 镜像（跨进程不能 import）。
+pub const AUTO_OUT_MIN_HOURS: u32 = 4;
+
 /// 工作日状态机错误：非法转移严格报错（AGENTS 错误策略主线），不静默忽略。
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum WorkdayError {

@@ -3,7 +3,7 @@
 
 use tauri::{AppHandle, Manager, State};
 
-use super::{poison, AppContext, CommandError};
+use super::{clamp_side, poison, AppContext, CommandError, SIDE_MAX, SIDE_MIN};
 use crate::hover;
 use crate::hover::HoverSummary;
 use crate::reminder::ReminderConfig;
@@ -73,11 +73,12 @@ pub fn tray_hover_resize(
     width: Option<f64>,
     height: f64,
 ) -> Result<(), CommandError> {
-    let w = width.unwrap_or(hover::WINDOW_WIDTH);
+    let w = clamp_side(width.unwrap_or(hover::WINDOW_WIDTH), SIDE_MIN, SIDE_MAX);
+    let h = clamp_side(height, SIDE_MIN, SIDE_MAX);
     let Some(window) = app.get_webview_window("tray-hover") else {
         return Ok(()); // 窗不存在（退出收尾）：跳过
     };
-    if let Err(err) = window.set_size(tauri::LogicalSize::new(w, height)) {
+    if let Err(err) = window.set_size(tauri::LogicalSize::new(w, h)) {
         crate::warn_diag(&format!("悬浮窗尺寸设置失败：{err}"));
         return Ok(());
     }

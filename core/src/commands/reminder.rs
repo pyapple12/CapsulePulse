@@ -53,8 +53,11 @@ fn send_notification(app: &AppHandle, body: &str) {
     }
 }
 
-/// 提醒评估节拍（秒，FIX006.5）：阈值以分钟计，1 秒节拍把"响铃晚于沙子流完"控制在 ≤1 秒。
-const REMINDER_TICK_SECS: u64 = 1;
+/// 提醒评估节拍（毫秒，FIX006.5；2026-10-17 用户定案**恢复精度**）：取 **100ms**，与前端
+/// `session_status` 轮询（TimerCard `TICK_MS = 100`）和沙漏水位粒度**同档** ⇒ 保住"沙子流完
+/// 那一刻响铃"的同步承诺（曾试 1000ms，响铃可滞后近 1 秒 ✗）。每拍只锁内存 + 算术（零查库），
+/// 10Hz 唤醒成本可忽略。
+const REMINDER_TICK_MS: u64 = 100;
 
 /// 提醒评估内核（FIX006.5：**后端唯一评估者**）：达阈值 / 到重发点即返回决策，否则 None。
 /// 会推进段内触发状态（`evaluate` 记 `last_fired`）——守候线程与单测共用同一入口；
@@ -91,7 +94,7 @@ pub(super) fn reminder_check_inner<C: Clock>(
 pub(crate) fn spawn_reminder_watcher(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(REMINDER_TICK_SECS));
+        std::thread::sleep(std::time::Duration::from_millis(REMINDER_TICK_MS));
         let ctx = app.state::<AppContext>();
         match reminder_check_inner(&ctx) {
             Ok(Some(decision)) => {
@@ -388,7 +391,17 @@ pub fn set_hotkey(
             "快捷键注册失败（已保留 {old}）：{err}"
         )));
     }
-    set_hotkey_core(&handle, action, &normalized)?;
+    // FIX006.12：落盘/内存更新失败 ⇒ **回滚注册**（此刻新键已生效、旧键已撤；不回滚会出现
+    // "运行态 = 新键、config = 旧键"的不一致——界面报失败却能用新键，重启后新键又失效）
+    if let Err(err) = set_hotkey_core(&handle, action, &normalized) {
+        if let Err(un) = app.global_shortcut().unregister(normalized.as_str()) {
+            crate::warn_diag(&format!("新热键撤销失败（回滚中）：{un}"));
+        }
+        if let Err(rollback) = register_action(&app, action, &old) {
+            crate::warn_diag(&format!("旧热键回滚注册失败：{rollback}"));
+        }
+        return Err(err);
+    }
     Ok(normalized)
 }
 

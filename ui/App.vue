@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -239,6 +239,10 @@ async function onSaveSettings(s: ReminderSettings): Promise<void> {
   } catch (err) {
     // CommandError 经 IPC 序列化为文案字符串；PATCH010.4 起板底**只显固定文案**
     // （「设置保存失败」，不换行），完整原因进 console（用户定案）
+    // FIX006.20a：**先清空、等一拍、再置文案**——同文案连续两次失败时值没变 ⇒ 面板侧
+    // `watch(() => props.error)` 不触发 ⇒ 控件"回弹"不发生（用户失败后又点了开关 ⇒ 残留假象）
+    saveError.value = "";
+    await nextTick();
     saveError.value = "设置保存失败";
     console.error("set_settings 调用失败", err);
     window.clearTimeout(saveErrorTimer);
@@ -533,10 +537,15 @@ function showAutoOutPending(dueAt: number): void {
   }
 }
 
-/** 倒计时刷新（到点即 0；到点后后端执行并回 workday-auto-out → 关框） */
+/** 倒计时刷新（到点即 0；到点后后端执行并回 workday-auto-out → 关框）。
+ * FIX006.24：框开着时顺带**每秒重刷 `day`**——`can_overtime` 的跨零点翻转由后端重算，
+ * 否则它跟 `day` 一起走（最多滞后 30 秒）；只在该框打开的 ~60 秒内生效，零新 API。 */
 function tickAutoOutLeft(): void {
   const due = autoOutDue.value;
   autoOutLeft.value = due == null ? 0 : Math.max(0, Math.ceil(due - Date.now() / 1000));
+  if (due != null) {
+    void refreshStats();
+  }
 }
 
 /** 关自动下班确认框（下班/加班/后端已执行都走这里），并清倒计时句柄 */

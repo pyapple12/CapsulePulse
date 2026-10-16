@@ -3511,3 +3511,22 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 - `generate_handler` 与定义 24 项一一对应；前端 invoke 命令全部已注册；`DRAG_INTERACTIVE` 覆盖完整；前端零 `any`
 
 > **豁免判定**：本轮无新增豁免候选；A005 两条外延建议（"sessions/events 无索引"、"session_\* 快照命令"）仍待用户定案；P3-9 死 IPC 不属静默冻结豁免，按死代码报告。
+
+## 附录 PATCH013：窗口/任务栏图标"发糊"根因修复（ICO 首帧被当作唯一窗口图标）（2026-10-17 立项并当日收口）
+
+**背景（用户目击两张截图）**：① 任务栏上 CP 图标比同款 CT 图标糊得多；② **同一应用**里控制台窗口图标清晰、应用窗口图标糊（"WTF，console 的图标比你 app 图标要清晰"）。用户要求给根因。
+
+**取证链（逐条可复核）**：
+
+1. **Tauri 只取 `icon.ico` 的目录首帧当窗口图标**：`tauri-codegen-2.6.3/src/image.rs:57` 的 `CachedIcon::new_ico` —— `let entry = &icon_dir.entries()[0];`，把**首帧**（不是最大帧，是 ICO 目录顺序第一帧）解码成**单张** RGBA，编译期嵌进 `default_window_icon`。
+2. **这张单帧只进 `ICON_SMALL` 槽、`ICON_BIG` 被显式清空**：`tao-0.35.3/src/platform_impl/windows/window.rs:882` 的 `set_window_icon` 只调 `set_for_window(…, IconType::Small)`；`:1336` 的 `set_taskbar_icon(pl_attribs.taskbar_icon)` 在 Tauri 不传 taskbar icon 时走 `icon::unset_for_window(…, IconType::Big)`（即 Big 槽置 0）；`tauri-runtime-wry-2.11.4/src/lib.rs:3565` 的 `WindowMessage::SetIcon` → `window.set_window_icon`。⇒ **窗口手上只有一张位图，尺寸 = 首帧尺寸**。
+3. **本仓首帧 = 16×16**：`.temp/mk-icons.ps1` 原按升序写帧 `@(16, 24, 32, 48, 64, 128, 256)`（脚本第 126 行还用 .NET 报过"默认帧 = 16x16"——`.NET Icon` 按自己的默认尺寸挑帧，故当时看着无害）；CT 的 `icon.ico` 首帧 = **32**×32。两仓 tauri / tao / tauri-runtime-wry / tauri-codegen 版本**完全一致**（2.11.5 / 0.35.3 / 2.11.4 / 2.6.3，`Cargo.lock` 核对）⇒ 差异只在资源本身，与版本无关。
+4. **改前实测（PID 21556，窗口枚举 + `WM_GETICON`）**：应用窗（`Tauri Window`）`ICON_BIG = NULL`、`ICON_SMALL = 16x16`；控制台窗（`ConsoleWindowClass`，标题 = exe 路径）`ICON_BIG = 32x32`、`GCLP_HICON = 32x32`。任务栏 24px（本机 125% DPI = 30px）与 Alt+Tab 32px 都只能把这张 **16px 放大** ⇒ 必糊；控制台窗**没有 WM_SETICON**，Windows 退到 exe 的 `RT_GROUP_ICON` 按需要的尺寸挑帧（原生 32）⇒ 清晰。**"同图标、两窗清晰度不同"由此解释**。
+5. **资源组号核对**：`tauri-build` 写 `RT_GROUP_ICON` 用固定组号 `32512`（`res.set_icon_with_id(…, "32512")`；`tauri-winres-0.3.6` 注释自陈"沿用了 `IDI_APPLICATION`" = `MAKEINTRESOURCE(32512)`）；本仓 exe 资源枚举实证 = `RT_GROUP_ICON` 名 `32512`、`RT_ICON` 名 `1..7`（7 帧，帧原字节在 exe 内——`.temp/exe-res-probe.ps1`）。
+
+**做法（两条腿，缺一不可）**：
+
+- **① 资产侧**：`.temp/mk-icons.ps1` 的 `$icoSizes` 改 `@(64, 48, 32, 24, 16, 128, 256)`——首帧 = 64×64（≥ 任何界面所需尺寸 ⇒ 只缩不放；Windows 走资源时按尺寸挑帧、与帧序无关，故 128/256 留尾部无碍）；同时把第 5 步校验从"`.NET Icon` 默认帧"改为**直读 ICO 目录首帧**并打印断言（≥48），免得同一个坑再被误判为无害。重跑脚本产出 `core/icons/icon.ico`；**图标是编译期嵌进 exe 的**（`tauri-build` 的 `resource.lib`），必须重建 exe 才生效。
+- **② 代码侧**：新增 `core/src/window_icon.rs` —— `pub fn apply_app_icon(window: &tauri::WebviewWindow)`：`LoadImageW(GetModuleHandleW(null), MAKEINTRESOURCE(32512), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED)` 让 Windows 自己按 `SM_CXICON`（随 DPI = 32/40/48/64）从 `RT_GROUP_ICON` 挑帧，再 `SendMessageW(WM_SETICON)` 把该 HICON **同时**写进 `ICON_BIG` 与 `ICON_SMALL`。两槽刻意同设：窗口槽是**单张**位图，给小的那张必然有界面要放大（本 bug 的成因），一律用 ≥ 目标尺寸的帧则最差只是缩小。零新依赖（`extern "system"` 直连 user32/kernel32，同 `glass_backdrop` 手法；`LR_SHARED` ⇒ **不 DestroyIcon**）。`core/src/lib.rs`：`mod window_icon;` + setup 主窗整定的第 ④ 步呼叫；失败 `warn_diag` 维持前态后返回（纯装饰层不阻断启动，容错白名单登记）。
+
+**验证（2026-10-17 已全绿）**：`cargo fmt --check` / `clippy --all-targets -- -D warnings` / `cargo check` / `cargo doc --no-deps`（0 warning）/ `cargo build`；**live 前后对比**（同一探测脚本、同一进程槽位读取）——改前 `ICON_BIG = NULL` / `ICON_SMALL = 16x16`，改后（本机 125% DPI）**`ICON_BIG = 40x40` / `ICON_SMALL = 40x40`**（= `SM_CXICON`）；两个悬浮窗 `ICON_SMALL` 由 16×16 变 **64×64**（首帧改动确实进了二进制的旁证）。任务栏 30px 与 Alt+Tab 32px 现在都取**缩小** ⇒ 清晰度与控制台窗一致（`.temp/icon-why-blurry.png` = 改前复现，`.temp/icon-after-fix.png` = 改后对照）。任务栏/Alt+Tab 目测收口由用户日常使用复核。

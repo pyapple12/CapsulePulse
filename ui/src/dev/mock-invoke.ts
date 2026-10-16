@@ -56,8 +56,6 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
     case "take_recovery_notice":
       // PL027.8：一次性崩溃恢复提示——基座恒返回 null（无缝续静默路径）
       return null;
-    case "session_stats":
-      return { today_secs: 12_600, week_secs: 54_300, all_secs: 93_600 };
     case "day_detail": {
       // 单位对齐真实后端：时间戳一律秒（SessionStatus.total_ms 例外为毫秒）
       const start = Math.floor(todayStart.getTime() / 1000);
@@ -183,24 +181,6 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
       }
       return null;
     }
-    case "session_start":
-      if (mockState === "idle") {
-        mockState = "running";
-        mockSegStart = Date.now();
-      }
-      return null;
-    case "session_pause":
-      if (mockState === "running") {
-        mockAccumMs = mockTotalMs();
-        mockState = "paused";
-      }
-      return null;
-    case "session_resume":
-      if (mockState === "paused") {
-        mockState = "running";
-        mockSegStart = Date.now();
-      }
-      return null;
     case "session_restart":
       mockAccumMs = 0;
       mockState = "paused";

@@ -1,6 +1,7 @@
 //! 贴边吸附纯逻辑（PL028.3，抄 CT PL017）：窗口位置对所在显示器四边的吸附判定。
 //! 纯函数零依赖（禁 import tauri，`cargo test` 直测）；被 `lib.rs` 的 `WindowEvent::Moved`
-//! 防抖状态机消费（松手吸附定案）。阈值与落位间距单一来源 = [`crate::settings::SNAP_*`]。
+//! 防抖状态机消费（松手吸附定案）。阈值与落位间距单一来源 = [`SNAP_THRESHOLD_PX`] 与
+//! [`SNAP_GAP_PX`]（定义在 `crate::settings`）。
 
 use crate::settings::{SNAP_GAP_PX, SNAP_THRESHOLD_PX};
 

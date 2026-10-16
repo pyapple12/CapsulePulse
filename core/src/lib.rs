@@ -24,6 +24,7 @@ mod diag;
 mod glass_backdrop;
 mod paths;
 mod single_instance;
+mod window_icon;
 
 pub mod aumid;
 
@@ -449,6 +450,22 @@ fn spawn_hover_watcher(app: &AppHandle) {
                 continue;
             };
             absent_ticks = 0;
+            // FIX006.19：**Idle 拍直接跳过全部跨线程查询**——`step_watch` 对 `Idle` 是恒等
+            // （`hover.rs`：Idle 分支忽略全部入参）⇒ 跳过**零行为差异**，却省下每拍三次
+            // "等主线程应答"的同步查询（`is_visible` / `cursor_in_window` / `menu_is_open`）。
+            // 离开 Idle 只靠事件：托盘 `Enter`（⇒ Armed）与右键（⇒ Suppressed），不依赖本循环轮询。
+            {
+                let idle = HOVER_WATCH
+                    .lock()
+                    .map(|watch| matches!(watch.phase, Phase::Idle))
+                    .unwrap_or_else(|_| {
+                        warn_diag_once(&POISON_LOGGED, "hover 守候：HOVER_WATCH 锁中毒，跳过本拍");
+                        false // 中毒：按"非 Idle"继续（下面原路径会再次命中中毒分支并只记一次）
+                    });
+                if idle {
+                    continue;
+                }
+            }
             // 窗口查询（is_visible / outer_*）与动作（show / hide / set_position）全在锁外执行
             let visible = window.is_visible().unwrap_or_else(|err| {
                 warn_diag_once(
@@ -682,6 +699,18 @@ fn toggle_window_pref(app: &AppHandle, kind: PrefKind) {
 }
 
 /// 托盘菜单动作分发（按动作 id；计时切换与退出落库复用命令层自由函数）——PATCH008 起由
+/// 自绘菜单窗动作全集（**单一来源**，FIX006.18）。
+/// ① 校验方 = `commands::tray_menu::tray_menu_action`（用它拒未知动作）；② 分发方 = 下方
+/// [`handle_action`] 的 match 分支 ⇒ **新增动作须同时改本常量与一个 match 臂**（漏改前者 = 被
+/// 当未知动作严格拒；漏改后者 = 校验放行却静默无效）。
+pub(crate) const MENU_ACTIONS: [&str; 5] = [
+    "focus_main",
+    "toggle_timer",
+    "toggle_always_on_top",
+    "toggle_snap_to_edge",
+    "quit",
+];
+
 /// 自绘菜单窗命令 [`commands::tray_menu::tray_menu_action`] 调用（原生菜单事件分发已退役）。
 pub(crate) fn handle_action(app: &AppHandle, id: &str) {
     match id {
@@ -845,13 +874,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::workday::take_recovery_notice,
             commands::workday::take_auto_out_notice,
-            commands::session::session_start,
-            commands::session::session_pause,
-            commands::session::session_resume,
             commands::session::session_restart,
             commands::session::session_set_run_mode,
             commands::session::session_status,
-            commands::stats::session_stats,
             commands::reminder::get_settings,
             commands::reminder::set_settings,
             commands::reminder::set_hotkey,
@@ -994,6 +1019,10 @@ pub fn run() {
                 }
                 glass_backdrop::hide_active_border(&window);
                 glass_backdrop::apply_round_corners(&window);
+                // ④ 应用图标（PATCH013）：Tauri 默认只把 `icon.ico` 首帧当窗口图标、且只塞
+                //    ICON_SMALL（16px 起 ⇒ 任务栏/Alt+Tab 放大必糊）——改从 exe 内嵌的
+                //    多帧图标资源按尺寸取帧，两槽同设。失败仅日志（纯装饰层不阻断启动）
+                window_icon::apply_app_icon(&window);
             }
             // 通知署名（PATCH012）：绿色单 exe 也能署名"应用名 + 正式图标"——把 `identifier` 当 AUMID
             // 注册进 HKCU（免管理员；与通知插件传给 `Toast::new` 的值同源，故必须一致）。

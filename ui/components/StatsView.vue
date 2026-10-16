@@ -6,7 +6,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DaySummary, WeekDay, WorkdayTotal } from "../types";
-import { pad, splitDuration } from "../format";
+import { hhmm, pad, splitDuration } from "../format";
 import { daySegments, type DaySegment } from "../src/day-segments";
 import { useGlassBar } from "../src/use-glass-bar";
 const props = defineProps<{
@@ -113,12 +113,6 @@ const graphSvg = ref<SVGSVGElement | null>(null);
 const axisStart = ref("");
 const axisEnd = ref("");
 
-function graphHhmm(ms: number): string {
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-/** 已删令牌无关：本表为 design graph.css 消费的纯数值换算 */
 /** 段序列类型（FIX006.4：并入共享构建器 `daySegments` 的 `DaySegment`，原本地结构重复已消除） */
 type GraphSeg = DaySegment;
 
@@ -311,9 +305,9 @@ function renderGraph(): void {
     });
   }
 
-  // 轴标
-  axisStart.value = `上班 ${graphHhmm(clockIn)}`;
-  axisEnd.value = `下班 ${graphHhmm(endTs)}`;
+  // 轴标（FIX006.18：复用 `format.hhmm`——**注意单位换算**：本处毫秒、format 收秒）
+  axisStart.value = `上班 ${hhmm(clockIn / 1000)}`;
+  axisEnd.value = `下班 ${hhmm(endTs / 1000)}`;
 
   // 彗星走廊（design 1:1）：今天 = birthX 起走廊；过去日 walk=0 静默
   const comet = cometEl.value;
@@ -417,6 +411,8 @@ function launchComet(force: boolean): void {
   }
 }
 
+/** 生成一颗彗星条纹（design 1:1）：`born` = 出生时刻、`age` = 已存活毫秒 ⇒ 由两者算出动画
+ * 起点（负 delay 对齐相位）与 `animationend` 自摘；存活期外由调用方不再生成。 */
 function spawnStripe(comet: SVGGElement, born: number, age: number): void {
   const s = document.createElementNS(SVG_NS, "rect");
   s.setAttribute("class", "comet-stripe");
@@ -583,6 +579,7 @@ interface DetailRow {
 const detailRows = ref<DetailRow[]>([]);
 const detailMax = ref(1);
 
+/** 分钟轴 → `HH:MM`（段明细时间列：分钟是**相对班起点**的偏移，故先加到班起点再格式化）。 */
 function fmtT(min: number): string {
   const d = new Date((day.value?.duty_started_at ?? 0) * 1000 + min * 60_000);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -623,10 +620,12 @@ function detailTitle(): string {
   return `${d.getMonth() + 1}月${d.getDate()}日明细`;
 }
 
+/** 秒 → 明细行的时长文本（`XhYYm` / `XXm` 两档；与三值卡的 fmtHM 同制式语义但更短）。 */
 function durText(secs: number): string {
   return `${Math.round(secs / 60)}分`;
 }
 
+/** 段条宽度百分比：以**最长已落定段**为分母（进行中段不计入分母，免整行被压扁）。 */
 function blkWidth(secs: number): string {
   return `${Math.min((secs / detailMax.value) * 100, 100).toFixed(1)}%`;
 }
@@ -644,6 +643,7 @@ const avgDuty = computed(() =>
 const avgWork = computed(() =>
   total.value.days > 0 ? total.value.work_secs / total.value.days : 0,
 );
+/** 休息的历史平均（秒；与 `avgWork` 同口径——分母 = 有数据天数） */
 const avgRest = computed(() =>
   total.value.days > 0 ? total.value.rest_secs / total.value.days : 0,
 );
@@ -744,7 +744,12 @@ watch([day, week], () => {
   renderWeek();
   renderDetail();
 });
+// FIX006.19：**板关时本拍零工作**（原实现不论板开关都每秒重建图谱节点层 / 周卡 / 明细 ⇒ 常态空转；
+// 关板复位到统计面后这些 DOM 本来也不可见）。板开后的首帧由上面的 watch 立即补齐 ✓。
 const secTimer = window.setInterval(() => {
+  if (!props.open) {
+    return;
+  }
   renderGraph();
   renderWeek();
   renderDetail();

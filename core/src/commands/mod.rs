@@ -8,7 +8,6 @@
 pub mod hover;
 pub mod reminder;
 pub mod session;
-pub mod stats;
 pub mod tray_menu;
 pub mod window;
 pub mod workday;
@@ -149,6 +148,24 @@ pub enum CommandError {
     /// 本段已触发过提醒后禁止改阈值（PATCH010.6 用户定案：只有暂停后才能改）。
     #[error("本段已触发提醒，暂停后才能修改阈值")]
     ThresholdLockedAfterFire,
+    /// 窗口级操作失败（FIX006.17：统一走 `CommandError`，不再由个别命令自拼 `String` 上抛）。
+    #[error("{0}")]
+    Window(String),
+}
+
+/// 窗口尺寸下界（逻辑 px，FIX006.17）：小于此值的请求视为前端算错（元素未渲染量到 0 等）。
+pub(crate) const SIDE_MIN: f64 = 24.0;
+/// 窗口尺寸上界（逻辑 px，FIX006.17）：纯护栏——悬浮卡/菜单窗实际尺寸远小于此（4K 屏逻辑宽 3840）。
+pub(crate) const SIDE_MAX: f64 = 4096.0;
+
+/// 窗侧尺寸夹取（FIX006.17）：**NaN / ∞ → 下界**，其余夹到 `[min, max]`。
+/// 尺寸命令的后端最后一道防线——前端是"量内容 + 读 CSS"算出来的，算错（0 / NaN / 巨值）
+/// 会让窗缩成 0 高或溢出屏外，进而带偏随后的重锚定位。
+pub(crate) fn clamp_side(value: f64, min: f64, max: f64) -> f64 {
+    if !value.is_finite() {
+        return min;
+    }
+    value.clamp(min, max)
 }
 
 impl Serialize for CommandError {

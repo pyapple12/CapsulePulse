@@ -87,14 +87,11 @@ onMounted(async () => {
     root.style.background = "transparent";
     root.style.overflow = "hidden";
   }
-  try {
-    const settings = await invoke<ReminderSettings>("get_settings");
-    topOn.value = settings.always_on_top;
-    snapOn.value = settings.snap_to_edge;
-  } catch (err) {
-    console.error("菜单勾选态拉取失败", err);
-  }
+  // FIX006.20e：**先 listen 再取值**——原顺序（先取值后 listen）在两步之间丢 `prefs-changed`，
+  // 勾选态会陈旧；取值期间若已收到事件则以事件为准（`prefsSeen` 守卫，防旧值覆盖新值）。
+  let prefsSeen = false;
   listen<PrefsSnapshot>("prefs-changed", (event) => {
+    prefsSeen = true;
     topOn.value = event.payload.always_on_top;
     snapOn.value = event.payload.snap_to_edge;
   })
@@ -102,6 +99,15 @@ onMounted(async () => {
       unlisten = un;
     })
     .catch((err) => console.error("prefs-changed 监听注册失败", err));
+  try {
+    const settings = await invoke<ReminderSettings>("get_settings");
+    if (!prefsSeen) {
+      topOn.value = settings.always_on_top;
+      snapOn.value = settings.snap_to_edge;
+    }
+  } catch (err) {
+    console.error("菜单勾选态拉取失败", err);
+  }
   await resizeToContent();
 });
 

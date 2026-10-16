@@ -29,19 +29,16 @@
   --panel-stroke: inset 0 0 0 1px var(--panel-ring);
   --panel-shadow: rgba(0, 0, 0, 0.35) 1.7px 1.7px 8px; /* 模糊须盖过偏移防贴边暗环 */
   --text-shadow: none;
-  --glass-highlight:
-    inset 0 1px rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px rgba(255, 255, 255, 0.16);
   --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.9);
   --shadow-candy: 0 16px 40px rgba(80, 60, 120, 0.25);
   --focus-blur: 14px; /* 聚焦磨砂近似（CT 同名令牌；CP 当前无 CSS 近似消费方，随令牌保留） */
   --radius-board: 8px;
-  --radius-panel: 10px;
   --danger: #e5484d;
-  --input-focus-ring: var(--accent);
+  /* 粒子辉光取色（FIX006.20 恢复：FIX006.15d 误删）——消费方是 `ui/src/title-particles.ts`，
+     经 **JS `getPropertyValue("--input-focus-glow")`** 读取（非 CSS `var()`）⇒ 查死令牌时必查该通道。 */
   --input-focus-glow: color-mix(in srgb, var(--accent) 35%, transparent);
 
   /* —— CP 组件令牌（自有，非 CT 体系）—— */
-  --ctrl-hover: rgba(0, 0, 0, 0.5); /* 设置钮悬停/开板底 = 50% 黑透（CT 定案） */
   --work: #ff6b4a; /* 工作段（时钟弧）橙红 */
   --rest: #34d399; /* 休息段（时钟弧）绿 */
   --mint-bright: #34d399;
@@ -68,11 +65,8 @@
     --panel-stroke: inset 0 0 0 1px var(--panel-ring);
     --panel-shadow: rgba(0, 0, 0, 0.566) 1.7px 1.7px 4px;
     --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --glass-highlight:
-      inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
     --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
     --shadow-candy: 0 16px 40px rgba(0, 0, 0, 0.5);
-    --input-focus-ring: var(--accent);
     --input-focus-glow: color-mix(in srgb, var(--accent) 35%, transparent);
   }
 }
@@ -91,11 +85,8 @@
   --panel-stroke: inset 0 0 0 1px var(--panel-ring);
   --panel-shadow: rgba(0, 0, 0, 0.566) 1.7px 1.7px 4px;
   --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --glass-highlight:
-    inset 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
   --rim-light: inset 0 1.5px 0 rgba(255, 255, 255, 0.32);
   --shadow-candy: 0 16px 40px rgba(0, 0, 0, 0.5);
-  --input-focus-ring: var(--accent);
   --input-focus-glow: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
