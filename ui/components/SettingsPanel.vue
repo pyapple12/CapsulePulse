@@ -25,7 +25,14 @@ const props = defineProps<{
   /** 今日已开启上班（PATCH005.3 整日锁定）：小时数**整日**禁改（含今天下班后），
    * 仅"第二天且未上班"可改——判据 = 今天有打卡（前端用 `day.duty_started_at != null`）。 */
   autoOutLocked?: boolean;
-  /** 录键失败反馈（PL028.2；带动作归属——显示在对应行下，后端已回滚旧键） */
+  /** 会话提示（PATCH010.8）：本段是否在跑——判据用会话态（休息也在岗，故不能拿 `onDuty` 当判据） */
+  sessionRunning?: boolean;
+  /** 本段已过分钟（**向上取整**，与后端下限口径同源：下限 = 本段分钟 + 1） */
+  segmentMin?: number;
+  /** 本段是否已触发过提醒（PATCH010.6）：铃响后阈值行**整行锁定**，只有暂停后才能改 */
+  reminderFired?: boolean;
+  /** 录键失败反馈（PL028.2；带动作归属）：**顶替**对应行的说明文字（PATCH010.4 起只含
+   * 「快捷键保存失败：<短标签>」，完整原因进 console；后端已回滚旧键，界面仍显旧值） */
   hotkeyError?: { action: HotkeyAction; message: string } | null;
 }>();
 
@@ -70,12 +77,84 @@ watch(
   },
 );
 
-/** 阈值 change 夹取（design 守卫原样：空/0/NaN 回落 50，1~99 封顶）后即时上抛 */
+/** 阈值下限（PATCH010.6/.8 用户定案）：计时器启动后须 ≥ 本段分钟 + 1（已过 2:30 ⇒ 最低 4）——
+ * 保证改完仍留 ≥ 1 分钟余量，沙漏才能与铃响同刻流完；未启动 / 新段 ⇒ 1（1–99 自由）。 */
+const thresholdFloor = computed(() => {
+  if (!props.sessionRunning) {
+    return 1;
+  }
+  return Math.min(99, (props.segmentMin ?? 0) + 1);
+});
+/** 阈值行是否锁定（PATCH010.6 用户定案）：本段已触发提醒 ⇒ 禁改，只有暂停后才能改 */
+const thresholdLocked = computed(() => props.reminderFired === true);
+
+/** 阈值 change 夹取（design 守卫原样：空/0/NaN 回落 50，1~99 封顶）后即时上抛；
+ * PATCH010.8：下界改由 `thresholdFloor` 动态收窄（计时器启动后） */
 function onThresholdChange(e: Event): void {
   const input = e.target as HTMLInputElement;
-  const v = Math.min(99, Math.max(1, Number(input.value) || 50));
+  const v = Math.min(99, Math.max(thresholdFloor.value, Number(input.value) || 50));
   input.value = String(v);
   emit("save", { ...props.settings, threshold_min: v });
+}
+
+/** 阈值步进 ±1（PATCH010：与「自动下班」同款 −/+ 按钮；越界静默，禁用态已挡，
+ * 此处为程序兜底）；手打 / 键盘 ↑↓ / 滚轮走 `onThresholdChange` 原路 */
+function stepThreshold(delta: number): void {
+  const v = props.settings.threshold_min + delta;
+  if (v < thresholdFloor.value || v > 99) {
+    return;
+  }
+  emit("save", { ...props.settings, threshold_min: v });
+}
+
+// —— 长按连发（PATCH010.2，仅提醒阈值 −/+；用户定案）：按下即走一步（与单击同效），
+// 400ms 后按 80ms 匀速重复；释放 / 取消即停 ——
+const REPEAT_DELAY_MS = 400;
+const REPEAT_INTERVAL_MS = 80;
+let repeatDelayTimer = 0;
+let repeatTimer = 0;
+/** 本次指针手势是否已自行步进（吞 click 用；click 落下即复位） */
+let pointerStepped = false;
+
+/** 停表（幂等）：连发结束的唯一出口；监听挂 window ⇒ 释放落在别处（甚至按钮已置灰）也能停 */
+function stopRepeat(): void {
+  window.clearTimeout(repeatDelayTimer);
+  window.clearInterval(repeatTimer);
+  window.removeEventListener("pointerup", stopRepeat);
+  window.removeEventListener("pointercancel", stopRepeat);
+}
+
+/** 指针按下：立即一步 + 挂连发（首延迟后匀速） */
+function onStepDown(delta: number): void {
+  pointerStepped = true;
+  stepThreshold(delta);
+  stopRepeat();
+  repeatDelayTimer = window.setTimeout(() => {
+    repeatTimer = window.setInterval(() => stepThreshold(delta), REPEAT_INTERVAL_MS);
+  }, REPEAT_DELAY_MS);
+  window.addEventListener("pointerup", stopRepeat, { once: true });
+  window.addEventListener("pointercancel", stopRepeat, { once: true });
+}
+
+/** 悬停即聚焦（PATCH010.3 用户定案）：↑↓ 与滚轮在 Chromium 都要求输入框**有焦点** ⇒ 悬停即可
+ * 上下 / 滚轮调节；**移出即释放焦点**（"移出不能编辑"），顺带把半途输入经 `@change` 提交并夹取。
+ * 不做视觉提示（焦点环已全局退役）。 */
+function onInputEnter(e: PointerEvent): void {
+  (e.target as HTMLInputElement).focus();
+}
+
+/** 移出释放焦点（同时触发 `@change` ⇒ 值提交 + 1–99 夹取） */
+function onInputLeave(e: PointerEvent): void {
+  (e.target as HTMLInputElement).blur();
+}
+
+/** click 分流：指针手势已步进过就吞掉（避免双跳）；键盘 Enter / Space 走单步 */
+function onStepClick(delta: number): void {
+  if (pointerStepped) {
+    pointerStepped = false;
+    return;
+  }
+  stepThreshold(delta);
 }
 
 /** 开关切换即时上抛（三路布尔字段各有后端字段；数值字段走专用守卫） */
@@ -140,7 +219,9 @@ function startRecord(action: HotkeyAction): void {
 }
 
 /** 录制态按键分流：修饰键单独按下继续等待；主键（字母 / 数字 / F1–F12）完成组合；
- * Esc 取消；无修饰键的主键忽略（与后端 `hotkey::parse` 同规，防"录了就拒"）。 */
+ * Esc 取消；无修饰键的主键忽略（与后端 `hotkey::parse` 同规，防"录了就拒"）。
+ * PATCH010.4：**修饰键数量上限（3 键）刻意不在前端拦截**——录到 4 键即交后端、由
+ * `HotkeyError::TooManyKeys` 拒并给出可见标签「按键过多」（严格抛错主线：拒绝要看得见）。 */
 function onRecordKeydown(e: KeyboardEvent): void {
   const action = recording.value;
   if (action == null) {
@@ -188,6 +269,7 @@ onMounted(() => document.addEventListener("keydown", onRecordKeydown, true));
 onUnmounted(() => {
   document.removeEventListener("keydown", onRecordKeydown, true);
   window.clearTimeout(recordTimer);
+  stopRepeat(); // PATCH010.2：连发表随卸载收干净（防重复计时器泄漏）
 });
 
 /** 收板即退出录制态（见上方"capture 残留吞按键"注记）。 */
@@ -207,15 +289,57 @@ watch(
       <div class="setting-row inline">
         <div>
           <p class="setting-name">提醒阈值（分钟）</p>
-          <p class="setting-desc">连续工作达到阈值提醒休息</p>
+          <!-- PATCH010.8：铃响后本段锁定（暂停后可改）；下限随本段时长动态收窄 -->
+          <p class="setting-desc">
+            {{ thresholdLocked ? "本段已触发提醒，暂停后可改" : "连续工作达到阈值提醒休息" }}
+          </p>
         </div>
-        <input
-          type="number"
-          :value="settings.threshold_min"
-          min="1"
-          max="99"
-          @change="onThresholdChange"
-        />
+        <!-- PATCH010：与「自动下班」同款步进器（同款 SVG 按钮 + 同款数值字号），中间换成**可手打**
+             的输入框（原生白旋钮已关；手打 / 键盘 ↑↓ / 滚轮仍是输入框原生行为） -->
+        <div class="stepper">
+          <button
+            class="stepper-btn"
+            aria-label="减少"
+            type="button"
+            :disabled="thresholdLocked || settings.threshold_min <= thresholdFloor"
+            @pointerdown="onStepDown(-1)"
+            @pointerup="stopRepeat"
+            @pointercancel="stopRepeat"
+            @click="onStepClick(-1)"
+          >
+            <svg viewBox="0 0 26 22" aria-hidden="true">
+              <rect class="st-frame" x="0.5" y="0.5" width="25" height="21" rx="6" />
+              <path class="st-glyph" d="M10 11 H16" />
+            </svg>
+          </button>
+          <input
+            class="stepper-value stepper-input"
+            type="number"
+            :min="thresholdFloor"
+            max="99"
+            :disabled="thresholdLocked"
+            :value="settings.threshold_min"
+            aria-label="提醒阈值（分钟）"
+            @pointerenter="onInputEnter"
+            @pointerleave="onInputLeave"
+            @change="onThresholdChange"
+          />
+          <button
+            class="stepper-btn"
+            aria-label="增加"
+            type="button"
+            :disabled="thresholdLocked || settings.threshold_min >= 99"
+            @pointerdown="onStepDown(1)"
+            @pointerup="stopRepeat"
+            @pointercancel="stopRepeat"
+            @click="onStepClick(1)"
+          >
+            <svg viewBox="0 0 26 22" aria-hidden="true">
+              <rect class="st-frame" x="0.5" y="0.5" width="25" height="21" rx="6" />
+              <path class="st-glyph" d="M13 8 V14 M10 11 H16" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="setting-row inline">
         <div>
@@ -302,13 +426,20 @@ watch(
       <div class="setting-row inline">
         <div>
           <p class="setting-name">显隐快捷键</p>
-          <p class="setting-desc">
+          <!-- PATCH010.4（用户定案）：录键失败**顶替**说明文字（不加行、行高不变），红色短标签；
+               优先级 = 失败 > 录制中 > 说明；10s 后由父组件清空自动换回 -->
+          <p
+            class="setting-desc"
+            :class="{ 'setting-desc-fail': hotkeyError?.action === 'toggle_visible' }"
+            :role="hotkeyError?.action === 'toggle_visible' ? 'alert' : undefined"
+          >
             {{
-              recording === "toggle_visible" ? "按下新组合键（Esc 取消）" : "全局唤起 / 收起主窗"
+              hotkeyError?.action === "toggle_visible"
+                ? hotkeyError.message
+                : recording === "toggle_visible"
+                  ? "按下新组合键（Esc 取消）"
+                  : "全局唤起 / 收起主窗"
             }}
-          </p>
-          <p v-if="hotkeyError?.action === 'toggle_visible'" class="hotkey-error" role="alert">
-            {{ hotkeyError.message }}
           </p>
         </div>
         <button
@@ -332,11 +463,18 @@ watch(
       <div class="setting-row inline">
         <div>
           <p class="setting-name">状态快捷键</p>
-          <p class="setting-desc">
-            {{ recording === "toggle_timer" ? "按下新组合键（Esc 取消）" : "全局切换工作 / 休息" }}
-          </p>
-          <p v-if="hotkeyError?.action === 'toggle_timer'" class="hotkey-error" role="alert">
-            {{ hotkeyError.message }}
+          <p
+            class="setting-desc"
+            :class="{ 'setting-desc-fail': hotkeyError?.action === 'toggle_timer' }"
+            :role="hotkeyError?.action === 'toggle_timer' ? 'alert' : undefined"
+          >
+            {{
+              hotkeyError?.action === "toggle_timer"
+                ? hotkeyError.message
+                : recording === "toggle_timer"
+                  ? "按下新组合键（Esc 取消）"
+                  : "全局切换工作 / 休息"
+            }}
           </p>
         </div>
         <button
@@ -364,7 +502,7 @@ watch(
 /* PATCH009.4（用户 2026-10-16 定案）：七行为当前版本全部设置 ⇒ 行距**回到设计值 6px**
    （九行时代的 4px 挤压退役）；**每行 `flex: 1` 等分板内可用高**（铺满、节奏均匀；行内
    `align-items: center` 垂直居中由 `boards.css` 提供）；行高由等分自动决定（不另设 `min-height`）；
-   **错误行内容超高时该行自行长高、其余行略缩**（flex 的 min-content 行为）；
+   PATCH010.4 起保存失败文案**绝对定位浮在板底**（不占文档流）⇒ 出错也不再挤动这七行；
    **设置行之间不再有任何分隔线**（`.setting-row + .setting-row` 的 border 规则已删）。 */
 #settings-board .setting-row {
   flex: 1;
@@ -384,11 +522,25 @@ watch(
   line-height: 1.1;
 }
 
-/* 保存失败可见反馈（FIX002.3 接线保留；设计无此件，功能性补口非视觉裁定） */
+/* 保存失败可见反馈（FIX002.3 接线保留；设计无此件，功能性补口非视觉裁定）
+   PATCH010.4（用户定案）：① 文案**固定为「设置保存失败」**（完整原因进 console）——永不换行；
+   ② **绝对定位浮在板底 2px 上方**（不参与文档流 ⇒ 当前七行布局零变化）、水平居中；
+   ③ 字号同说明文字（8px）、**满色**红（不继承 .setting-desc 的 0.6 透明）、
+   影 `1px 1px 3px` 黑（与文案条文字影同族）。
+   定位参照 = 本元素最近的定位祖先 `.board-glass`（其 transform 使之成为 containing block）；
+   容器 = 其 padding box（272 宽），左右各留 12px 与设置行同缩进。 */
 .save-error {
-  margin: 8px 0 0;
-  font-size: 12px;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 2px;
+  margin: 0;
+  text-align: center;
+  font-size: 8px;
+  line-height: 1.1;
   color: #b42318;
+  opacity: 1;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.75);
 }
 
 /* 录键按钮与行内错误（PL028.2；设计无此件，功能性补口——观感对齐设置板控件语言：
@@ -506,9 +658,11 @@ watch(
     animation: none;
   }
 }
-.hotkey-error {
-  margin: 2px 0 0;
-  font-size: 10px;
+/* 录键失败短标签（PATCH010.4 用户定案）：**顶替**说明文字所在行 ⇒ 字号 / 行高 / 边距全沿用
+   `.setting-desc`（行盒不撑高），只覆盖颜色与透明度 —— 满色红（说明文字是 0.6 透明，红会发虚）；
+   影继承板级 `--text-shadow`，不另加。 */
+.setting-desc-fail {
   color: #b42318;
+  opacity: 1;
 }
 </style>

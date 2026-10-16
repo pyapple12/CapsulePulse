@@ -23,6 +23,9 @@ const emit = defineEmits<{
   changed: [];
   error: [string];
   clock: [direction: "in" | "out"];
+  /** PATCH010.8：会话提示（**分钟粒度**、只在变化时发）——设置板阈值行的下限与锁定判据；
+   * 走"TimerCard 顺手上报 → App → 设置板"（用户定案：单一来源、零时差、零额外 IPC） */
+  session: [running: boolean, segmentMin: number, reminderFired: boolean];
 }>();
 
 // day = 当日明细（dial 弧段 + 电池的数据源）；thresholdMin = 沙漏周期；
@@ -46,13 +49,29 @@ let lastSec = -1;
 
 const isRunning = computed(() => state.value === "running");
 
+/** 会话提示上抛（PATCH010.8）：**分钟粒度 + 只在变化时发**——设置板阈值行据此收窄下限 / 置灰。
+ * `segmentMin` 取 `ceil(本段毫秒 / 60000)`，与后端下限口径（`ceil(本段秒 / 60) + 1`）同源。 */
+let sessionHintKey = "";
+function emitSessionHint(stateKey: string, segmentMs: number, reminderFired: boolean): void {
+  const segmentMin = Math.ceil(segmentMs / 60_000);
+  const key = `${stateKey}|${segmentMin}|${reminderFired}`;
+  if (key === sessionHintKey) {
+    return;
+  }
+  sessionHintKey = key;
+  emit("session", stateKey === "running", segmentMin, reminderFired);
+}
+
 /** 拉取会话快照（tick 定案：前端 setInterval 拉取，Rust 不推送）+ 推进时敏渲染 */
 async function refresh(): Promise<void> {
+  let segmentMs = 0;
   try {
     const snapshot = await invoke<SessionStatus>("session_status");
     state.value = snapshot.state;
     totalMs.value = snapshot.total_ms;
     onDuty.value = snapshot.on_duty;
+    segmentMs = snapshot.segment_ms;
+    emitSessionHint(snapshot.state, snapshot.segment_ms, snapshot.reminder_fired);
   } catch (err) {
     console.error("session_status 调用失败", err);
   }
@@ -63,7 +82,7 @@ async function refresh(): Promise<void> {
     lastSec = sec;
     secTs.value = now;
   }
-  tickHourglass();
+  tickHourglass(segmentMs);
   tickBattery();
 }
 
@@ -420,37 +439,44 @@ watch(totalMs, (ms) => {
 });
 
 /* ============================================================
-   ④ 沙漏（design 状态机 1:1）：--hg-dur/--hg-delay + .run/.flowing + model 翻转
+   ④ 沙漏（PATCH010.7 重做：水位 = 后端"本段时长"单一来源）
+   —— w = 0 上满下空、w = 1 沉底；**沉底是常态**（paused / idle / 下班 / 刚打开 APP）
+   —— running 时按"锚点 + 线性插值"：w = w0 + (seg − seg0) × (1 − w0) / (T − seg0)
+      ⇒ 改阈值时水位连续（w0 取当时水位）、终点精确（seg = T ⇒ w = 1，与铃响同刻）
+   —— 判据是**会话态**（不是"是否在岗"：休息也在岗但沉底），且**不可拿 segment = 0 当沉底**
+      （暂停时 segment 也是 0，按公式会误推成"上满"）
+   —— `.run` 类随本次重做退役：水位由 CSS 变量 `--hg-w` 直接驱动，其默认值即沉底
    ============================================================ */
 const hourglassEl = ref<HTMLElement | null>(null);
-const HG_FLIP = 0.6; // 秒，与 CSS --hg-flip 一致
-const HG_DRAIN = 0.8; // 暂停快速漏完时长（秒）
+const HG_FLIP = 0.6; // 秒，与 CSS --hg-flip 一致（新段翻转）
 const HG_MODEL_T = "translate(13.75px, 9.25px)";
-let hgKey = "";
+/** 水位锚点：seg0 = 本段毫秒、w0 = 该刻水位（0 上满 / 1 沉底） */
+let hgSeg0 = 0;
+let hgW0 = 1;
+/** 上一拍实际写入的水位（阈值变更时作为新锚点 w0 ⇒ 水位连续不跳变） */
+let hgWLast = 1;
+let hgInited = false;
+let hgLastRunning = false;
+let hgLastThreshold = props.thresholdMin;
 let hgFlowTimer = 0;
-let hgPrevRun = false;
-let hgThres = props.thresholdMin;
-let hgP0 = 0; // 水位记录（0 = 上满下空，1 = 上空下满）
-let hgT0 = Date.now();
-let hgDur = props.thresholdMin * 60_000;
 
-function hgMs(): number {
-  return props.thresholdMin * 60_000;
-}
-
-function hgPNow(): number {
-  return Math.min(1, hgP0 + (Date.now() - hgT0) / hgDur);
-}
-
-function hgClearRun(): void {
-  if (hgFlowTimer !== 0) {
-    window.clearTimeout(hgFlowTimer);
-    hgFlowTimer = 0;
+/** 当前水位：沉底是常态；只有 running 才按锚点线性插值到阈值（seg = T ⇒ w = 1） */
+function hgWater(segmentMs: number): number {
+  if (state.value !== "running") {
+    return 1;
   }
-  hourglassEl.value?.classList.remove("flowing", "run");
+  const total = props.thresholdMin * 60_000;
+  if (segmentMs >= total) {
+    return 1;
+  }
+  if (segmentMs <= hgSeg0 || total <= hgSeg0) {
+    return hgW0;
+  }
+  const w = hgW0 + ((segmentMs - hgSeg0) * (1 - hgW0)) / (total - hgSeg0);
+  return Math.min(1, Math.max(0, w));
 }
 
-/** 翻半圈：先无过渡钉 -180° 一帧，再清样式过渡回 0°（design 1:1） */
+/** 翻半圈：先无过渡钉 -180° 一帧，再清样式过渡回 0°（design 1:1；"沉底 → 上满"的入场） */
 function hgFlipRestart(): void {
   const model = hourglassEl.value?.querySelector<HTMLElement>(".loader__model");
   if (!model) {
@@ -459,73 +485,64 @@ function hgFlipRestart(): void {
   model.style.transition = "none";
   model.style.transform = `${HG_MODEL_T} rotate(-180deg)`;
   void model.getBoundingClientRect();
-  hourglassEl.value?.classList.add("run");
   model.style.transition = "";
   model.style.transform = "";
 }
 
-/** 沙漏状态机（design 1:1，100ms tick 内调用，hgKey 去重） */
-function tickHourglass(): void {
+/** 沙漏状态机（100ms tick 内调用）：水位与沙流全由"本段时长 + 会话态"决定 */
+function tickHourglass(segmentMs: number): void {
   const hg = hourglassEl.value;
   if (!hg) {
     return;
   }
-  const done = hgPNow() >= 1;
-  const key = `${isRunning.value}|${props.thresholdMin}|${done}`;
-  if (key === hgKey) {
-    return;
-  }
-  hgKey = key;
-  const started = isRunning.value && !hgPrevRun;
-  const thresChanged = props.thresholdMin !== hgThres;
-  const pCur = hgPNow();
-  hgPrevRun = isRunning.value;
-  hgThres = props.thresholdMin;
+  const running = isRunning.value;
+  const threshold = props.thresholdMin;
 
-  if ((started || thresChanged) && isRunning.value) {
-    // ① 新工作段：翻正回满 + 按阈值匀速漏
-    hgClearRun();
-    hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
-    hg.style.setProperty("--hg-delay", `${HG_FLIP}s`);
-    hgP0 = 0;
-    hgDur = hgMs();
-    hgT0 = Date.now();
+  if (!hgInited) {
+    // 启动 / 崩溃恢复：running ⇒ 按本段落位（"无缝续"）；否则沉底（常态）
+    hgInited = true;
+    hgSeg0 = segmentMs;
+    hgW0 = running ? Math.min(1, segmentMs / (threshold * 60_000)) : 1;
+  } else if (running && !hgLastRunning) {
+    // 新段（打卡 / 继续）：翻半圈回满、从零开始（用户定案：只有新段才重来）
+    hgSeg0 = 0;
+    hgW0 = 0;
     hgFlipRestart();
-    hgFlowTimer = window.setTimeout(() => hg.classList.add("flowing"), HG_FLIP * 1000);
-  } else if (thresChanged) {
-    // ①b 阈值变了但暂停：只重置内部水位
-    hgP0 = 0;
-    hgDur = hgMs();
-    hgT0 = Date.now();
-  } else if (!isRunning.value && !done) {
-    // ② 暂停且还有沙：翻半圈 + 从当前水位快漏
-    hgClearRun();
-    hg.style.setProperty("--hg-dur", `${HG_DRAIN}s`);
-    hg.style.setProperty("--hg-delay", `${-(1 - pCur) * HG_DRAIN}s`);
-    hgP0 = 1 - pCur;
-    hgDur = HG_DRAIN * 1000;
-    hgT0 = Date.now();
-    hgFlipRestart();
-  } else if (isRunning.value && done) {
-    // ③ 工作漏完：不翻转，负一周期停在终态
-    hgClearRun();
-    hg.style.setProperty("--hg-dur", `${hgMs() / 1000}s`);
-    hg.style.setProperty("--hg-delay", `${-hgMs() / 1000}s`);
-    hgP0 = 1;
-    hgDur = 1;
-    hgT0 = Date.now();
-    void hg.getBoundingClientRect();
-    hg.classList.add("run");
+    window.clearTimeout(hgFlowTimer);
+    hgFlowTimer = window.setTimeout(() => {
+      hgFlowTimer = 0;
+      hourglassEl.value?.classList.add("flowing");
+    }, HG_FLIP * 1000);
+  } else if (running && threshold !== hgLastThreshold) {
+    // 阈值变更（用户定案）：**不翻**、水位连续，只重锚定流速 ⇒ 终点仍落在 seg = T 那刻
+    hgSeg0 = segmentMs;
+    hgW0 = hgWLast;
+  } else if (!running) {
+    // 沉底（常态）：休息 / 未在岗 / 下班 —— 由 CSS 过渡平滑走完
+    hgSeg0 = segmentMs;
+    hgW0 = 1;
   }
+
+  const w = hgWater(segmentMs);
+  hg.style.setProperty("--hg-w", String(w));
+  // 沙粒下移周期随阈值（只在阈值变更时写入，避免每拍重算动画时间轴）
+  if (threshold !== hgLastThreshold) {
+    hg.style.setProperty("--hg-dur", `${threshold * 60}s`);
+  }
+  // 沙流：工作中且未漏完才落沙；新段等翻转完（定时器）再落
+  if (running && w < 1) {
+    if (hgFlowTimer === 0 && !hg.classList.contains("flowing")) {
+      hg.classList.add("flowing");
+    }
+  } else {
+    window.clearTimeout(hgFlowTimer);
+    hgFlowTimer = 0;
+    hg.classList.remove("flowing");
+  }
+  hgWLast = w;
+  hgLastRunning = running;
+  hgLastThreshold = threshold;
 }
-
-// 阈值变更强制重置（design：hgKey = ""）
-watch(
-  () => props.thresholdMin,
-  () => {
-    hgKey = "";
-  },
-);
 
 /* ============================================================
    ⑤ 电池（PATCH006.4 定案）：**今日 12h 总量**进度——电量 = 1 − 今日在岗累计 ÷ 12h；

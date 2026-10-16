@@ -11,6 +11,11 @@ export interface SessionStatus {
   /** 当前数据日偏移（PATCH005.4）：在岗 → 该班打卡日相对日历今日的天数偏移（0 / −1）；未在岗 → 0。
    * 时钟与统计据此锚定"进行中的数据日"（跨零点夜班没下班就不切换）。 */
   data_day_offset: number;
+  /** 本段连续工作毫秒（PATCH010.6）：`segment_secs` 语义——**仅 Running 非零**，Paused/Idle 恒 0。
+   * 沙漏水位与设置板阈值下限的**单一事实源**。 */
+  segment_ms: number;
+  /** 本段是否已触发过提醒（PATCH010.6）：设置板据此**锁定阈值行**（铃响后只有暂停才能改）。 */
+  reminder_fired: boolean;
 }
 
 /** 加班硬顶小时数（镜像 core/src/workday.rs `OVERTIME_CAP_HOURS`，单一来源在后端）：

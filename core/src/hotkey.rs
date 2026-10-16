@@ -25,10 +25,14 @@ pub enum HotkeyError {
     /// 重复段（同一修饰键两次，或两个主键）
     #[error("重复的按键段：{0}")]
     Duplicate(String),
+    /// 段数超上限（PATCH010.4 用户定案：最高 3 键 = 最多 2 修饰键 + 1 主键）
+    #[error("按键过多（最多 3 键）")]
+    TooManyKeys,
 }
 
 /// 解析并规范化组合串：修饰键顺序无关、大小写无关（`ctrl+alt+c` / `Alt+Shift+P` / `Win+Q` 皆可）；
-/// 主键 = 单个 A–Z / 0–9 或 F1–F12，且必须恰有一个。
+/// 主键 = 单个 A–Z / 0–9 或 F1–F12，且必须恰有一个；**段数 2–3**（PATCH010.4 用户定案：
+/// 至少 1 修饰键 + 1 主键，最多 2 修饰键 + 1 主键）。
 ///
 /// # 返回
 /// 规范化显示串（修饰键固定序 `Ctrl+Alt+Shift+Super` + 主键）——可直接交插件注册，
@@ -37,7 +41,7 @@ pub enum HotkeyError {
 /// # Errors
 /// 空串 / 空段 → [`HotkeyError::Empty`]；无修饰键 → [`HotkeyError::NoModifier`]；
 /// 无主键 → [`HotkeyError::MissingMainKey`]；主键非法 → [`HotkeyError::UnknownKey`]；
-/// 重复段 → [`HotkeyError::Duplicate`]。
+/// 重复段 → [`HotkeyError::Duplicate`]；段数 > 3 → [`HotkeyError::TooManyKeys`]。
 pub fn parse(combo: &str) -> Result<String, HotkeyError> {
     let trimmed = combo.trim();
     if trimmed.is_empty() {
@@ -77,6 +81,10 @@ pub fn parse(combo: &str) -> Result<String, HotkeyError> {
         return Err(HotkeyError::NoModifier);
     }
     let main = main.ok_or(HotkeyError::MissingMainKey)?;
+    // PATCH010.4：段数上限 3（= 最多 2 修饰键 + 1 主键）——修饰键已按位去重，此处按位计数
+    if flags.iter().filter(|&&flag| flag).count() + 1 > 3 {
+        return Err(HotkeyError::TooManyKeys);
+    }
     let mut parts: Vec<&str> = ["Ctrl", "Alt", "Shift", "Super"]
         .iter()
         .enumerate()
@@ -179,6 +187,16 @@ mod tests {
             parse("Ctrl+C+A"),
             Err(HotkeyError::Duplicate("A".to_string()))
         );
+    }
+
+    /// 段数上限（PATCH010.4 用户定案）：最高 3 键 = 最多 2 修饰键 + 1 主键；
+    /// 2 键（1 修饰 + 1 主键）与 3 键合法，4 键及以上被拒。
+    #[test]
+    fn parse_rejects_more_than_three_keys() {
+        assert_eq!(parse("Ctrl+A").unwrap(), "Ctrl+A");
+        assert_eq!(parse("Ctrl+Alt+A").unwrap(), "Ctrl+Alt+A");
+        assert_eq!(parse("Ctrl+Alt+Shift+A"), Err(HotkeyError::TooManyKeys));
+        assert_eq!(parse("Ctrl+Alt+Shift+Win+A"), Err(HotkeyError::TooManyKeys));
     }
 
     /// 往返恒等：规范化输出可再解析且不变（落库值稳定，重注册幂等的前提）。

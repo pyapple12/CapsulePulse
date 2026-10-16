@@ -29,26 +29,28 @@ const total = ref<WorkdayTotal>({
   days: 0,
   first_offset: null,
 });
-const loadError = ref("");
+/** 拉取失败标记（PATCH010.5 用户定案）：统计板**不出现任何报错**（失败只进 console）；
+ * 本标记仅用于**抑制"本日无打卡记录"空态**——拉失败时不能谎报"无记录"。 */
+const loadFailed = ref(false);
 
 async function refresh(): Promise<void> {
   try {
     day.value = await invoke<DaySummary>("day_detail", { offset: offset.value });
-    loadError.value = "";
+    loadFailed.value = false;
   } catch (err) {
-    loadError.value = String(err);
+    loadFailed.value = true;
     console.error("day_detail 调用失败", err);
   }
   try {
     total.value = await invoke<WorkdayTotal>("workday_total");
   } catch (err) {
-    loadError.value = String(err);
+    loadFailed.value = true;
     console.error("workday_total 调用失败", err);
   }
   try {
     week.value = await invoke<WeekDay[]>("week_detail", { offset: offset.value });
   } catch (err) {
-    loadError.value = String(err);
+    loadFailed.value = true;
     console.error("week_detail 调用失败", err);
   }
 }
@@ -763,9 +765,9 @@ function stopDutyTick(): void {
 async function refreshDayOnly(): Promise<void> {
   try {
     day.value = await invoke<DaySummary>("day_detail", { offset: offset.value });
-    loadError.value = "";
+    loadFailed.value = false;
   } catch (err) {
-    loadError.value = String(err);
+    loadFailed.value = true;
     console.error("day_detail 调用失败", err);
   }
 }
@@ -852,8 +854,6 @@ onUnmounted(() => {
               </svg>
             </button>
           </div>
-
-          <p v-if="loadError" class="load-error" role="alert">统计加载失败：{{ loadError }}</p>
 
           <div class="graph-block">
             <div class="graph">
@@ -1094,7 +1094,7 @@ onUnmounted(() => {
               <span class="dur">{{ durText(r.secs) }}</span>
               <span v-if="r.ongoing" class="ongoing">至今</span>
             </div>
-            <p v-if="detailRows.length === 0 && !loadError" class="empty">本日无打卡记录</p>
+            <p v-if="detailRows.length === 0 && !loadFailed" class="empty">本日无打卡记录</p>
           </div>
           <button class="flip-back" type="button" @click="flipped = false">返回统计</button>
         </section>

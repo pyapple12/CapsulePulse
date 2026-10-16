@@ -6,7 +6,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 use super::session::ReminderDecision;
-use super::{poison, AppContext, CommandError};
+use super::{lock, poison, AppContext, CommandError};
 use crate::session::Clock;
 use crate::settings::ReminderSettings;
 
@@ -49,15 +49,28 @@ fn get_settings_inner<C: Clock>(ctx: &AppContext<C>) -> Result<ReminderSettings,
 /// 设置板提交的陈旧副本会把用户刚挪的窗口位置抹回旧值（前端不参与位置读写）。
 /// **在岗禁改自动下班小时**（PL025.5）：本班基准不可中途改（账目口径唯一）；**整日锁定**
 /// （PATCH005.3）：今天一旦开启上班 → 基准今天内（含今天下班后）不可改，仅"第二天未上班"可改；
+/// **阈值受限**（PATCH010.6，用户定案）：本段已触发过提醒 ⇒ 禁改（只有暂停后才能改）；
+/// 未触发 ⇒ 须 ≥ ceil(本段分钟) + 1（改完仍留 ≥ 1 分钟余量，沙漏才能与铃响同刻流完）；
 /// **热键归热键写路径管辖**（PL028.2）：本结构提交的热键字段从内存态继承，防陈旧副本抹掉刚录的新键。
-/// 锁序 workday → settings 单向合法（见 AppContext 注释）。
+/// 锁序 workday → session → settings → fire 单向合法（见 AppContext 注释）。
 fn set_settings_inner<C: Clock>(
     ctx: &AppContext<C>,
     settings: &ReminderSettings,
 ) -> Result<(), CommandError> {
-    let (inherited_pos, inherited_hotkeys, current_hours, on_duty) = {
+    let (
+        inherited_pos,
+        inherited_hotkeys,
+        current_hours,
+        current_threshold,
+        on_duty,
+        segment,
+        fired,
+    ) = {
         let workday = poison("工作日", ctx.workday.lock())?;
+        // 锁序 workday → session → settings → fire：session 必须先于 settings 取用
+        let segment = lock(ctx)?.segment_secs();
         let current = poison("设置", ctx.settings.lock())?;
+        let fired = poison("提醒", ctx.fire.lock())?.last_fired().is_some();
         (
             current.window_pos,
             (
@@ -65,7 +78,10 @@ fn set_settings_inner<C: Clock>(
                 current.hotkey_toggle_timer.clone(),
             ),
             current.workday_auto_out_hours,
+            current.threshold_min,
             workday.is_on_duty(),
+            segment,
+            fired,
         )
     };
     // PATCH005.3 整日锁定：今天**一旦开启上班**（今天日历日内有打卡）→ 基准整日不可改（含今天
@@ -85,6 +101,21 @@ fn set_settings_inner<C: Clock>(
         }
         if today_has_clock_in {
             return Err(CommandError::AutoOutLockedToday(current_hours));
+        }
+    }
+    // PATCH010.6（用户定案）：提醒阈值在"计时器启动后"受限——① 本段**已触发过** ⇒ 禁改
+    // （只有暂停后才能改）；② 未触发 ⇒ 须 ≥ ceil(本段分钟) + 1（保证改完仍留 ≥ 1 分钟余量，
+    // 沙漏才能与铃响同刻流完）。仅当阈值**真的变了**才拦（在岗时改开关 / 其它字段照常）。
+    if settings.threshold_min != current_threshold {
+        if fired {
+            return Err(CommandError::ThresholdLockedAfterFire);
+        }
+        if !segment.is_zero() {
+            let segment_min = segment.as_secs().div_ceil(60) as u32;
+            let min = segment_min + 1;
+            if settings.threshold_min < min {
+                return Err(CommandError::ThresholdBelowElapsed { min, segment_min });
+            }
         }
     }
     let mut merged = settings.clone();
@@ -314,7 +345,7 @@ fn set_hotkey_core<C: Clock>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::{begin_duty, ctx, FakeClock};
+    use crate::commands::test_support::{begin_duty, ctx, secs, FakeClock};
     use crate::settings::WindowPos;
 
     /// T4a：set_settings 校验 + 持久化 + 内存态更新；非法阈值被拒。
@@ -386,6 +417,84 @@ mod tests {
             ),
             "今天下班后仍整日锁定（非在岗但今日已有打卡）"
         );
+    }
+
+    /// PATCH010.6：计时器启动后阈值下限 = ceil(本段分钟) + 1（已过 2:30 ⇒ 最低 4）。
+    #[test]
+    fn set_settings_rejects_threshold_below_elapsed() {
+        let clock = FakeClock::new();
+        let mut ctx = ctx(clock.clone());
+        ctx.settings_path = crate::commands::test_support::temp_settings_path("threshold-floor");
+        begin_duty(&ctx); // 打卡即工作 → Running
+        clock.advance(secs(150)); // 本段 2:30
+        let base = get_settings_inner(&ctx).unwrap();
+        let too_low = ReminderSettings {
+            threshold_min: 3, // < ceil(2.5) + 1 = 4
+            ..base.clone()
+        };
+        assert!(matches!(
+            set_settings_inner(&ctx, &too_low),
+            Err(CommandError::ThresholdBelowElapsed {
+                min: 4,
+                segment_min: 3
+            })
+        ));
+        let at_floor = ReminderSettings {
+            threshold_min: 4,
+            ..base
+        };
+        set_settings_inner(&ctx, &at_floor).unwrap();
+        assert_eq!(get_settings_inner(&ctx).unwrap().threshold_min, 4);
+    }
+
+    /// PATCH010.6：本段已触发过提醒 ⇒ 禁改阈值（只有暂停后才能改）。
+    #[test]
+    fn set_settings_rejects_threshold_after_fire() {
+        let clock = FakeClock::new();
+        let mut ctx = ctx(clock.clone());
+        ctx.settings_path = crate::commands::test_support::temp_settings_path("threshold-lock");
+        begin_duty(&ctx);
+        clock.advance(secs(3_000)); // 满 50 分钟（默认阈值）⇒ 触发并写入 last_fired
+        let (_, decision) = crate::commands::session::status_snapshot(&ctx).unwrap();
+        assert!(decision.fire, "恰达阈值应触发");
+
+        let changed = ReminderSettings {
+            threshold_min: 60,
+            ..get_settings_inner(&ctx).unwrap()
+        };
+        assert!(matches!(
+            set_settings_inner(&ctx, &changed),
+            Err(CommandError::ThresholdLockedAfterFire)
+        ));
+
+        // 暂停（clear）后恢复可改：下限 = ceil(50) + 1 = 51 ⇒ 60 放行
+        poison("提醒", ctx.fire.lock()).unwrap().clear();
+        set_settings_inner(&ctx, &changed).unwrap();
+        assert_eq!(get_settings_inner(&ctx).unwrap().threshold_min, 60);
+    }
+
+    /// PATCH010.6：已触发时只改**其它字段**（阈值不变）照常通过——校验只在阈值真的变了时生效。
+    #[test]
+    fn set_settings_allows_other_fields_while_locked() {
+        let clock = FakeClock::new();
+        let mut ctx = ctx(clock.clone());
+        ctx.settings_path = crate::commands::test_support::temp_settings_path("threshold-others");
+        begin_duty(&ctx);
+        clock.advance(secs(3_000));
+        let (_, decision) = crate::commands::session::status_snapshot(&ctx).unwrap();
+        assert!(decision.fire);
+
+        let base = get_settings_inner(&ctx).unwrap();
+        let toggled = !base.notify_enabled;
+        let other = ReminderSettings {
+            notify_enabled: toggled,
+            snap_to_edge: !base.snap_to_edge,
+            ..base
+        };
+        set_settings_inner(&ctx, &other).unwrap();
+        let after = get_settings_inner(&ctx).unwrap();
+        assert_eq!(after.notify_enabled, toggled, "其它字段照常生效");
+        assert_eq!(after.threshold_min, 50, "阈值未被改动");
     }
 
     /// PATCH001.4：整结构覆盖不抹窗口位置（位置归 Rust 管辖，命令层从内存态继承）。

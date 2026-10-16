@@ -143,6 +143,12 @@ pub enum CommandError {
     /// 菜单动作非法（PATCH008.5：自绘菜单窗只发已知动作，未知即前端契约违规——严格报错不静默）。
     #[error("未知菜单动作：{0}")]
     UnknownMenuAction(String),
+    /// 提醒阈值低于本段已工作时长允许的下限（PATCH010.6 用户定案：计时器启动后须留 ≥ 1 分钟余量）。
+    #[error("提醒阈值最低 {min} 分钟（本段已工作 {segment_min} 分钟，需留 1 分钟余量）")]
+    ThresholdBelowElapsed { min: u32, segment_min: u32 },
+    /// 本段已触发过提醒后禁止改阈值（PATCH010.6 用户定案：只有暂停后才能改）。
+    #[error("本段已触发提醒，暂停后才能修改阈值")]
+    ThresholdLockedAfterFire,
 }
 
 impl Serialize for CommandError {

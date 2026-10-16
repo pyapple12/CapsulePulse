@@ -5,8 +5,10 @@
    工作 = 匀速漏沙至阈值；漏完即停不翻转；暂停 = 翻转 + 从当前水位快漏
    ============================================================ */
 .hourglass {
-  --hg-dur: 3000s; /* 50 分钟 */
+  --hg-dur: 3000s; /* 沙粒缓慢下移的周期（随提醒阈值；JS 在阈值变更时写入） */
   --hg-flip: 0.6s; /* 翻转时长；落沙等翻转完再开始 */
+  --hg-w: 1; /* 水位（PATCH010.7）：0 = 上满下空、1 = 沉底；**默认 1 = 沉底**（不依赖任何状态类） */
+  --hg-drain: 0.6s; /* 水位过渡时长（暂停沉底 / 新段回满的平滑） */
   flex: none;
   width: 42.5px; /* 34 × 125%（用户定案；行距与 START/电量不变） */
   height: 42.5px;
@@ -36,8 +38,7 @@
   stroke: rgba(255, 255, 255, 0.62);
   stroke-width: 1.25;
 }
-/* 落沙流：独立短循环（不受 50 分钟拖慢），仅工作态流动；点阵 = 一串"沙粒"。
-   出现时机由 JS 在翻转结束后挂 .flowing 控制（翻转期间不出现） */
+/* 落沙流：独立短循环（不受阈值拖慢），仅工作态流动；点阵 = 一串"沙粒" */
 .hourglass .loader__sand-drop {
   stroke-dasharray: 0.7 2.6;
   opacity: 0;
@@ -46,34 +47,39 @@
   opacity: 1;
   animation: hg-fall 0.45s linear infinite;
 }
-.hourglass.run .loader__sand-fill {
-  opacity: 0; /* 旧的"落沙柱"实线与水位重叠，隐藏之（只留点状沙流） */
+/* —— 水位（PATCH010.7 重做）：**由 `--hg-w` 直接驱动**（0 = 上满下空，1 = 沉底），
+   不再依赖任何状态类与动画时间轴 ⇒ ① 默认值即"沉底"，根治"启动未挂类时两端满"；
+   ② 每 tick 由 JS 按"本段时长 / 阈值"写入 ⇒ 与后端本段时长同源、水位连续不跳变
+   （改阈值只重锚定流速）；③ `--hg-drain` 过渡让"暂停沉底 / 新段回满"平滑走完。 */
+.hourglass .loader__sand-mound-top {
+  transform: translate(0, calc(13px * var(--hg-w, 1)));
+  transition: transform var(--hg-drain, 0.6s) ease;
 }
-.hourglass.run .loader__sand-grain-left {
-  animation: hg-sand-grain-left var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
-}
-.hourglass.run .loader__sand-grain-right {
-  animation: hg-sand-grain-right var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
-}
-.hourglass.run .loader__sand-line-left {
-  opacity: 0; /* 旧"落沙柱"的细线之一：隐藏，避免与点状沙流叠成一根柱子 */
-}
-.hourglass.run .loader__sand-line-right {
-  opacity: 0; /* 旧"落沙柱"的主角（12 单位长实线）：隐藏 */
-}
-.hourglass.run .loader__sand-mound-top {
-  animation: hg-mound-top var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
-}
-.hourglass.run .loader__sand-mound-bottom {
-  animation: hg-mound-bottom var(--hg-dur) linear var(--hg-delay, var(--hg-flip)) both;
+.hourglass .loader__sand-mound-bottom {
+  transform: scale(1, var(--hg-w, 1));
   transform-origin: 12.25px 31.5px;
+  transition: transform var(--hg-drain, 0.6s) ease;
 }
-/* 装饰弧与高光不再随 50 分钟周期缓慢淡入（否则看似"加载中"）；环直接隐藏，高光保持静态反光 */
-.hourglass.run .loader__motion-thick,
-.hourglass.run .loader__motion-medium,
-.hourglass.run .loader__motion-thin {
-  animation: none;
+/* 旧"落沙柱"三条线（与水位置重叠、早已弃用）恒隐藏 */
+.hourglass .loader__sand-fill,
+.hourglass .loader__sand-line-left,
+.hourglass .loader__sand-line-right {
+  opacity: 0;
 }
+/* 腰部两条虚线沙粒：仅工作态（.flowing）可见，随阈值周期缓慢下移 */
+.hourglass .loader__sand-grain-left,
+.hourglass .loader__sand-grain-right {
+  opacity: 0;
+}
+.hourglass.flowing .loader__sand-grain-left {
+  opacity: 1;
+  animation: hg-sand-grain-left var(--hg-dur, 3000s) linear var(--hg-delay, 0.6s) both;
+}
+.hourglass.flowing .loader__sand-grain-right {
+  opacity: 1;
+  animation: hg-sand-grain-right var(--hg-dur, 3000s) linear var(--hg-delay, 0.6s) both;
+}
+/* 装饰弧与高光不随周期缓慢淡入（否则看似"加载中"）：环直接隐藏，高光保持静态反光 */
 .hourglass .loader__motion-thick,
 .hourglass .loader__motion-medium,
 .hourglass .loader__motion-thin {
@@ -105,24 +111,6 @@
 
   to {
     stroke-dashoffset: -24;
-  }
-}
-@keyframes hg-mound-top {
-  from {
-    transform: translate(0, 0);
-  }
-
-  to {
-    transform: translate(0, 13px);
-  }
-}
-@keyframes hg-mound-bottom {
-  from {
-    transform: scale(1, 0);
-  }
-
-  to {
-    transform: scale(1, 1);
   }
 }
 

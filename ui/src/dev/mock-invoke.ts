@@ -13,6 +13,8 @@ function mmdd(d: Date): string {
 /** DEV 会话状态机（PATCH002.2）：打卡与各会话命令都改这份状态——让"打卡即工作 / 三段切换 /
  * 重置回休息"这类链路在 DEV 基座可复现、可验证（此前 session_status 写死 running，验不了）。
  * 初值 = 在岗计时中（段起点取今日 09:00，对齐 day_detail 的演示态）。 */
+/** 基座提醒阈值（分钟）——与 `get_settings` 返回值同源，供 `reminder_fired` 推导（PATCH010.6） */
+const MOCK_THRESHOLD_MIN = 50;
 let mockState: "idle" | "running" | "paused" = "running";
 let mockOnDuty = true;
 let mockAccumMs = 0; // 已完成段累计（毫秒）
@@ -45,6 +47,11 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         on_duty: mockOnDuty,
         // PATCH005.4：当前数据日偏移（基座恒当日；跨零点夜班场景由自查时临时置 −1）
         data_day_offset: 0,
+        // PATCH010.6：本段连续工作毫秒（仅 running 非零；paused/idle 归零 ⇒ 沙漏沉底）
+        segment_ms: mockState === "running" ? Math.max(0, Date.now() - mockSegStart) : 0,
+        // PATCH010.6：本段是否已触发过提醒（基座阈值恒 50 分钟 ⇒ 达阈值即真，用于验阈值行锁定）
+        reminder_fired:
+          mockState === "running" && Date.now() - mockSegStart >= MOCK_THRESHOLD_MIN * 60_000,
       };
     case "take_recovery_notice":
       // PL027.8：一次性崩溃恢复提示——基座恒返回 null（无缝续静默路径）

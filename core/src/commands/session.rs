@@ -25,6 +25,11 @@ pub struct SessionStatus {
     /// 当前数据日偏移（PATCH005.4）：在岗 → 该班打卡日相对日历今日的天数偏移（正常 0 / −1）；
     /// 未在岗 → 0。时钟与统计据此锚定"进行中的数据日"（跨零点夜班没下班就不切换）。
     pub data_day_offset: i64,
+    /// 本段连续工作毫秒（PATCH010.6）：`segment_secs` 语义——**仅 Running 非零**，
+    /// Paused/Idle 恒为 0。沙漏水位与设置板阈值下限的**单一事实源**。
+    pub segment_ms: u64,
+    /// 本段是否已触发过提醒（PATCH010.6）：设置板据此**锁定阈值行**（铃响后只有暂停才能改）。
+    pub reminder_fired: bool,
 }
 
 /// 提醒决策（评估纯逻辑的输出载体；副作用由提醒子模块执行）。
@@ -216,33 +221,45 @@ fn state_key(state: &SessionState) -> &'static str {
 
 /// 会话快照 + 提醒决策（评估纯逻辑；副作用由命令包装层执行）。
 /// 注意：session 与 workday 两锁不嵌套持有（各自独立作用域顺序取用，规避反向锁序）。
+/// PATCH010.6：快照增 `segment_ms`（本段时长）与 `reminder_fired`（本段是否已触发过提醒）——
+/// 前端沙漏水位与设置板阈值行的**单一事实源**；锁序仍守 workday → session → settings → fire。
 pub(super) fn status_snapshot<C: Clock>(
     ctx: &AppContext<C>,
 ) -> Result<(SessionStatus, ReminderDecision), CommandError> {
-    let (state, total_ms) = {
+    let (state, total_ms, segment) = {
         let session = lock(ctx)?;
         (
             state_key(session.state()),
             session.total().as_millis() as u64,
+            session.segment_secs(),
         )
     };
     let on_duty_now = poison("工作日", ctx.workday.lock())?.is_on_duty();
+    let (threshold_min, notify_enabled, reminder_fired, fire_now) = {
+        let settings = poison("设置", ctx.settings.lock())?;
+        let config = ReminderConfig::from_minutes(settings.threshold_min);
+        let mut fire = poison("提醒", ctx.fire.lock())?;
+        let should = fire.evaluate(segment, &config);
+        // 取值在 evaluate 之后：本拍刚触发的这一帧也如实报告"已触发过"（与 reminder-due 事件同拍）
+        (
+            settings.threshold_min,
+            settings.notify_enabled,
+            fire.last_fired().is_some(),
+            should,
+        )
+    };
     let status = SessionStatus {
         state,
         total_ms,
         on_duty: on_duty_now,
         data_day_offset: super::workday::data_day_offset(ctx, now_secs(ctx)?)?,
+        segment_ms: segment.as_millis() as u64,
+        reminder_fired,
     };
-    let segment = lock(ctx)?.segment_secs();
-    let decision = {
-        let settings = poison("设置", ctx.settings.lock())?;
-        let config = ReminderConfig::from_minutes(settings.threshold_min);
-        let should = poison("提醒", ctx.fire.lock())?.evaluate(segment, &config);
-        ReminderDecision {
-            fire: should,
-            threshold_min: settings.threshold_min,
-            notify_enabled: settings.notify_enabled,
-        }
+    let decision = ReminderDecision {
+        fire: fire_now,
+        threshold_min,
+        notify_enabled,
     };
     Ok((status, decision))
 }
@@ -722,5 +739,35 @@ mod tests {
         lock(&ctx).unwrap().reset(); // 复位回 Idle（PATCH002 后仅在未上班出现）
         set_run_mode_inner(&ctx, RunMode::Work).unwrap();
         assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+    }
+
+    /// PATCH010.6：快照暴露"本段时长"与"本段是否已触发过提醒"——沙漏水位与设置板阈值行的
+    /// 单一事实源（Running 有值 / Paused 归零；触发当拍即如实上报）。
+    #[test]
+    fn session_status_exposes_segment_and_fired() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx); // 打卡即工作 → Running
+
+        // Running：本段实时；未达阈值（默认 50 分钟）⇒ 未触发
+        clock.advance(secs(150));
+        let s = status_snapshot(&ctx).unwrap().0;
+        assert_eq!(s.state, "running");
+        assert_eq!(s.segment_ms, 150_000);
+        assert!(!s.reminder_fired, "未达阈值不得报已触发");
+
+        // 恰达阈值：同一拍 fire = true 且 reminder_fired = true（与 reminder-due 事件同拍）
+        clock.advance(secs(2_850)); // 累计 3 000s = 50 分钟
+        let (s, d) = status_snapshot(&ctx).unwrap();
+        assert!(d.fire);
+        assert!(s.reminder_fired);
+        assert_eq!(s.segment_ms, 3_000_000);
+
+        // Paused：本段归零（沙漏据此沉底）且触发态被 clear（阈值随之解锁）
+        set_run_mode_inner(&ctx, RunMode::Rest).unwrap();
+        let s = status_snapshot(&ctx).unwrap().0;
+        assert_eq!(s.state, "paused");
+        assert_eq!(s.segment_ms, 0);
+        assert!(!s.reminder_fired, "暂停即 clear（PATCH002 语义）");
     }
 }

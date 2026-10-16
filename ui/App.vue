@@ -36,6 +36,8 @@ const STATS_TICK_MS = 30_000;
 const day = ref<DaySummary | null>(null);
 /** 当前数据日偏移（PATCH005.4）：时钟与统计的取数锚点（`session_status.data_day_offset`） */
 const dataDayOffset = ref(0);
+/** 会话提示（PATCH010.8）：TimerCard 每分钟/变化时上报——设置板阈值行下限与锁定判据 */
+const sessionHint = ref({ running: false, segmentMin: 0, reminderFired: false });
 const settings = ref<ReminderSettings | null>(null);
 const panelVisible = ref(false);
 const reminderVisible = ref(false);
@@ -67,9 +69,15 @@ let statsTimer: number | undefined;
 // —— 文案条浮层（PATCH005.11）——
 // 四条条带（提醒 / 自动下班 / 恢复 / 错误）不参与文档流：以「日期卡 + 表盘」行（TimerCard
 // .timer-top）为中心双向居中覆盖，被盖行自雾化；自隐 = 错误条 10s、其余 5s，任意点击亦立即隐藏
-const BANNER_HIDE_MS = 5_000;
-const BANNER_ERROR_HIDE_MS = 10_000;
+/** UI 提示时长（PATCH010.5 用户定案，**全应用统一**）：错误提示（红字）**10s** 自动消失、
+ * 非红字提示 **5s** 自动消失——文案条与板内红字（板底保存失败 / 行内录键失败）共用同一口径。 */
+const HINT_HIDE_MS = 5_000;
+const ERROR_HIDE_MS = 10_000;
 let bannerHideTimer: number | undefined;
+/** 录键失败短标签的自动恢复计时（PATCH010.4 用户定案：10s 后该行换回正常说明文字） */
+let hotkeyErrorTimer: number | undefined;
+/** 板底保存失败文案的自动消失计时（PATCH010.5 用户定案：10s） */
+let saveErrorTimer: number | undefined;
 /** 是否有任一条文案条可见（浮层 open 类 = 自雾化开关） */
 const anyBannerVisible = computed(
   () =>
@@ -217,21 +225,50 @@ function playChime(): void {
 }
 
 /** 保存设置（Rust 侧校验 + 持久化 + 即时生效）：设计模型 = 即时生效且板保持常开
- * （PL014 定案，点板外收板），成功仅清错误；失败错误态传入面板可见反馈 */
+ * （PL014 定案，点板外收板），成功仅清错误；失败错误态传入面板可见反馈。
+ * PATCH010.5：板底错误文案 **10s 自动消失**（用户定案：UI 所有错误提示一律 10s）。 */
 async function onSaveSettings(s: ReminderSettings): Promise<void> {
   try {
     await invoke("set_settings", { settings: s });
     settings.value = s;
-    saveError.value = "";
+    clearSaveError();
   } catch (err) {
-    // CommandError 经 IPC 序列化为文案字符串；面板内展示 + console 留痕
-    saveError.value = `设置保存失败：${String(err)}`;
+    // CommandError 经 IPC 序列化为文案字符串；PATCH010.4 起板底**只显固定文案**
+    // （「设置保存失败」，不换行），完整原因进 console（用户定案）
+    saveError.value = "设置保存失败";
     console.error("set_settings 调用失败", err);
+    window.clearTimeout(saveErrorTimer);
+    saveErrorTimer = window.setTimeout(clearSaveError, ERROR_HIDE_MS);
   }
 }
 
+/** 清板底保存失败态（成功 / 10s 到点 / 开板 / 卸载共用） */
+function clearSaveError(): void {
+  window.clearTimeout(saveErrorTimer);
+  saveError.value = "";
+}
+
+/** 录键失败**短标签**（PATCH010.4 用户定案）：设置板那一行只显示**分类**，完整后端文案进 console——
+ * 该行宽仅 ~140px（= 板内容 248 − 录键钮 ≤98 − 行 gap 10），长文案必换行。
+ * 分类靠**子串匹配**后端文案（`CommandError::Hotkey` / `Poisoned` / `HotkeyRegister` 的既有措辞）——
+ * **后端改这几条文案时必须同步本表**，未命中一律落兜底「保存失败」（不会崩，只是标签变粗）。 */
+function hotkeyFailLabel(raw: string): string {
+  const table: Array<[string, string]> = [
+    ["热键组合为空", "热键组合为空"],
+    ["缺少修饰键", "缺少修饰键"],
+    ["缺少主键", "缺少主键"],
+    ["不支持的按键", "不支持的按键"],
+    ["重复的按键段", "重复的按键段"],
+    ["按键过多", "按键过多"],
+    ["锁已中毒", "设置锁已中毒"],
+    ["注册失败", "快捷键注册失败"],
+  ];
+  return table.find(([needle]) => raw.includes(needle))?.[1] ?? "保存失败";
+}
+
 /** 录键完成（PL028.2）：交后端校验 + 重注册（冲突/非法后端已回滚旧键并上抛 ⇒ 行内红字；
- * 成功则回填规范化串，界面与落库同源） */
+ * 成功则回填规范化串，界面与落库同源）。PATCH010.4：行内只显**短标签**（10s 后自动换回说明文字），
+ * 完整文案进 console。 */
 async function onSetHotkey(action: HotkeyAction, combo: string): Promise<void> {
   try {
     const normalized = await invoke<string>("set_hotkey", { action, combo });
@@ -241,11 +278,23 @@ async function onSetHotkey(action: HotkeyAction, combo: string): Promise<void> {
           ? { ...settings.value, hotkey_toggle_visible: normalized }
           : { ...settings.value, hotkey_toggle_timer: normalized };
     }
-    hotkeyError.value = null;
+    clearHotkeyError();
   } catch (err) {
-    hotkeyError.value = { action, message: `快捷键保存失败：${String(err)}` };
+    hotkeyError.value = {
+      action,
+      message: `快捷键保存失败：${hotkeyFailLabel(String(err))}`,
+    };
     console.error("set_hotkey 调用失败", err);
+    // 10s 后自动换回正常说明文字（用户定案）；开板 / 卸载亦清除
+    window.clearTimeout(hotkeyErrorTimer);
+    hotkeyErrorTimer = window.setTimeout(clearHotkeyError, ERROR_HIDE_MS);
   }
+}
+
+/** 清录键失败态（成功 / 10s 到点 / 开板 / 卸载共用） */
+function clearHotkeyError(): void {
+  window.clearTimeout(hotkeyErrorTimer);
+  hotkeyError.value = null;
 }
 
 /** ⚙ 开合设置板（与统计板互斥）：开板自齿轮中心飞出（flyBoard）；settings 未就绪时可见反馈不静默（FIX002.3） */
@@ -257,7 +306,9 @@ function togglePanel(): void {
   panelVisible.value = !panelVisible.value;
   if (panelVisible.value) {
     statsOpen.value = false;
-    saveError.value = "";
+    clearSaveError();
+    // PATCH010.4：开板即清录键失败态（10s 内关板再开板 ⇒ 立刻换回正常说明文字，用户定案）
+    clearHotkeyError();
     const board = settingsPanelEl.value?.$el as HTMLElement | undefined;
     flyBoard(board ?? null, gearBtnEl.value);
   }
@@ -279,6 +330,12 @@ function onTimerChanged(): void {
   statsRefreshKey.value++;
   reminderVisible.value = false;
   actionError.value = "";
+}
+
+/** 会话提示（PATCH010.8）：TimerCard 顺手上报（分钟粒度、变化才发）⇒ 设置板阈值行的
+ * 下限与锁定判据。**不另开 App 侧轮询**（用户定案：单一来源、零时差、零额外 IPC）。 */
+function onSessionHint(running: boolean, segmentMin: number, reminderFired: boolean): void {
+  sessionHint.value = { running, segmentMin, reminderFired };
 }
 
 /** 打卡 pill（TimerCard 上抛方向）→ 弹对应方向确认框（双向确认，不直接执行） */
@@ -319,7 +376,7 @@ function armBannerAutoHide(): void {
   }
   bannerHideTimer = window.setTimeout(
     hideAllBanners,
-    actionError.value !== "" ? BANNER_ERROR_HIDE_MS : BANNER_HIDE_MS,
+    actionError.value !== "" ? ERROR_HIDE_MS : HINT_HIDE_MS,
   );
 }
 
@@ -543,6 +600,8 @@ onUnmounted(() => {
   if (bannerHideTimer !== undefined) {
     window.clearTimeout(bannerHideTimer);
   }
+  window.clearTimeout(hotkeyErrorTimer);
+  window.clearTimeout(saveErrorTimer);
   if (autoOutCountdown !== undefined) {
     window.clearInterval(autoOutCountdown);
   }
@@ -574,6 +633,7 @@ onUnmounted(() => {
           :auto-out-hours="settings?.workday_auto_out_hours ?? 8"
           @changed="onTimerChanged"
           @error="actionError = $event"
+          @session="onSessionHint"
           @clock="onPillClick"
         >
           <!-- 文案条浮层（PATCH005.11）：插进 TimerCard 的「日期卡 + 表盘」行，以该行为定位锚
@@ -679,6 +739,9 @@ onUnmounted(() => {
       :error="saveError"
       :on-duty="day != null && day.duty_started_at != null && day.duty_ended_at == null"
       :auto-out-locked="day != null && day.duty_started_at != null"
+      :session-running="sessionHint.running"
+      :segment-min="sessionHint.segmentMin"
+      :reminder-fired="sessionHint.reminderFired"
       :hotkey-error="hotkeyError"
       @save="onSaveSettings"
       @hotkey="onSetHotkey"

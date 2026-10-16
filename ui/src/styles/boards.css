@@ -69,23 +69,24 @@
   font-size: 8px; /* CT 同款直排（字号钳制行为与 CT 实机一致，不用 scale hack） */
   opacity: 0.6;
 }
-.setting-row input[type="number"] {
-  width: 60px;
-  height: 30px;
-  border-radius: 9px;
+/* 阈值输入框（PATCH010）：形态与「自动下班」的 `.stepper-value` **完全一致**（靠共用该类保证同宽
+   同字号同字重），但可**手打** —— 原生白旋钮关掉（`appearance: none`）；手打 / 键盘 ↑↓ / 滚轮
+   仍是输入框原生行为。原 `.setting-row input[type="number"]` 的 panel 配方与 `padding-left: 14px`
+   配平（当年为原生旋钮预留）随旋钮一并退役。 */
+.stepper-input {
+  width: 24px; /* 与 `.stepper-value` 的 min-width 同值（阈值 ≤ 2 位） */
   border: none;
-  /* 左侧等宽 padding 配平右侧原生上下旋钮预留（Chromium 实测 ~14px）——
-     编辑区对称后 text-align center 即真居中；旋钮保留（用户定案） */
-  padding-left: 14px;
-  text-align: center;
+  background: none;
+  padding: 0;
   font-family: inherit;
-  font-size: 13px;
-  background: var(--panel-bg); /* CT panel 配方（暗适配） */
-  box-shadow: var(--panel-stroke), var(--panel-shadow);
   color: var(--ink);
+  cursor: text;
 }
-/* 提醒阈值输入框的焦点环已随"焦点环全局退役"（PATCH009.6，glass.css）一并撤除 ——
-   原 `.setting-row input[type="number"]:focus { outline: 1.5px solid var(--accent) }` 删除 */
+.stepper-input::-webkit-inner-spin-button,
+.stepper-input::-webkit-outer-spin-button {
+  appearance: none;
+  -webkit-appearance: none;
+}
 
 /* 步进器（CT 移植 + 整体 SVG 化）：− 数值 +，范围 4~12（自动下班小时，用户定案）；
    按钮视觉（圆角框 + 符号）全部由内联 SVG 矢量承担，HTML 按钮只剩透明点击外壳 */

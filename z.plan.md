@@ -3183,3 +3183,107 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 **行为**：标题拖动（>5px）⇒ 拖窗、不收板（click 被系统拖拽吞掉）；标题单击（≤5px）⇒ 收两板；标题双击 ⇒ 第一次单击收板 + 双击缩回托盘；板内 / 遮罩 / 侧角钮 ⇒ 不收；内容区 / dock / 空白 ⇒ 仍是按下即收（沿用 PATCH009.7）。
 
 **验证**：`vue-tsc` 0 + build + live（用户实测：板开着标题拖动 ⇒ 窗口动、板不关；标题单击 ⇒ 两板收；双击 ⇒ 收板 + 缩回托盘）。
+
+## 附录 PATCH010：提醒阈值行改步进器（−/+ 可手打）（2026-10-16 立项）
+
+### 一、PATCH010.1 提醒阈值行：原生旋钮 → 步进器 + 可手打输入框（2026-10-16 已落）
+
+**背景（用户目测）**：提醒阈值那行的原生上下旋钮（`::-webkit-inner-spin-button`）是**一张整块位图**（白底 + 深色箭头一体）⇒ 暗色玻璃上白块突兀（design 稿底色是 `rgba(255, 255, 255, 0.8)` 浅底，白旋钮当年融进去了，暗色化后才跳出来）。
+
+**用户定案（2026-10-16）**：**换成与「自动下班」完全同款的步进器**（同款 SVG 按钮 + 同款数值字号 / 宽度），中间**保留可手打**的输入框；**键盘 ↑↓ 与滚轮调节都要在**。
+
+**做法**（`ui/components/SettingsPanel.vue` + `ui/src/styles/boards.css`）：
+
+- **模板**：阈值行右侧的 `<input type="number">` 换成与「自动下班」**逐字同款**的结构 —— `<div class="stepper">` 内 `−` 按钮（字形 `M10 11 H16`）/ 输入框 / `+` 按钮（字形 `M13 8 V14 M10 11 H16`），两侧按钮复用同款 `<svg viewBox="0 0 26 22">`（`st-frame` + `st-glyph`）与 `aria-label="减少/增加"`；边界置灰判据 = `threshold_min <= 1` / `>= 99`。
+- **输入框**：`class="stepper-value stepper-input"` —— **共用 `.stepper-value`** 保证"内容大小和自动下班一样"（同 `min-width: 24px` / `font-size: 14px` / `font-weight: 700` / `text-align: center`）；`.stepper-input` 只做输入框专属重置（`width: 24px` / `border: none` / `background: none` / `padding: 0` / `font-family: inherit` / `color: var(--ink)` / `cursor: text`）+ **`::-webkit-inner-spin-button` 与 `::-webkit-outer-spin-button` 一律 `appearance: none`**（原生白旋钮退役）。
+- **行为**：`type="number"` 保留 ⇒ **手打 / 键盘 ↑↓ / 滚轮**全是输入框原生行为 ✓；手打仍走既有 `onThresholdChange`（1–99 夹取 + 空 / NaN 回落 50 ✓）；新增 `stepThreshold(delta)`（±1、边界外静默，照 `stepAutoOut` 守卫）供 −/+ 按钮。
+- **退役**：原 `.setting-row input[type="number"]` 的 panel 配方（底色 / 描边 / 投影）与 `padding-left: 14px` 配平（当年为原生旋钮预留）**一并删除**。
+
+**验证**：`vue-tsc` 0 + build + live（白旋钮消失；−/+ 与「自动下班」同款同尺寸；手打 1–99 夹取；键盘 ↑↓ 与滚轮可用；到边界对应钮置灰）。
+
+### 二、PATCH010.2 提醒阈值 −/+ 长按连发（2026-10-16 已落）
+
+**用户定案（2026-10-16）**：**提醒阈值**的 −/+ 要**长按连发**（自动下班那组不动）。
+
+**做法**（`ui/components/SettingsPanel.vue`，纯前端）：
+
+- 常量：`REPEAT_DELAY_MS = 400`（首延迟）+ `REPEAT_INTERVAL_MS = 80`（匀速间隔）。
+- `onStepDown(delta)`（`@pointerdown`）：**立即一步**（与单击同效）+ 挂连发（首延迟后 `setInterval`）；同时把 `pointerup` / `pointercancel` 监听**挂到 window**（`{ once: true }`）⇒ 释放落在别处、甚至按钮中途置灰（到边界）也能停表。
+- `stopRepeat()`（`@pointerup` / `@pointercancel` / `onUnmounted`）：清两表 + 摘监听，幂等。
+- `onStepClick(delta)`（`@click`）：**指针手势已自行步进过就吞掉**（`pointerStepped` 标记，避免按下+释放双跳）；键盘 Enter / Space 仍走 click 单步（未走指针 ⇒ 不吞）。
+- 步进仍走 `stepThreshold`（1–99 边界静默）⇒ 连发到边界自然停住、对应钮置灰。
+
+**验证**：`vue-tsc` 0 + build + live（按住 −/+ ⇒ 约 0.4s 后开始连发、匀速；松手即停；单击仍只走一步；到 1 / 99 停住且钮置灰；键盘 Enter / Space 单步可用）。
+
+### 三、PATCH010.3 阈值输入框悬停即聚焦（移出即释放）（2026-10-16 已落）
+
+**背景**：↑↓ 与滚轮在 Chromium 都要求输入框**有焦点** ⇒ 原来必须先点一下才能用（AI 曾误称"滚轮悬停即生效"，此处更正）。
+
+**用户定案（2026-10-16）**：**悬停到数字上就能上下 / 滚轮调节**；**移出不能编辑**（即移出释放焦点）；**不做视觉提示**。
+
+**做法**（`ui/components/SettingsPanel.vue`）：输入框挂 `@pointerenter="onInputEnter"`（`focus()`）+ `@pointerleave="onInputLeave"`（`blur()`）；移出时的 `blur` 顺带触发既有 `@change` ⇒ 半途输入提交 + 1–99 夹取。不加任何 hover 视觉提示（焦点环已全局退役）。
+
+**验证**：`vue-tsc` 0 + build + live（悬停即可 ↑↓ / 滚轮 / −/+；移出后 ↑↓ 与滚轮失效；移出时半途输入被夹取提交）。
+
+### 四、PATCH010.4 设置板两处错误文案收口 + 快捷键 3 键上限（2026-10-16 已落）
+
+**背景（用户日常目测）**：设置板两处报错都会**长文案换行 / 撑高行**——① 板底 `save-error` 是流内元素，出现即挤动七行；② 录键失败是在说明文字**下面加一行**，行盒被撑高。实测（Chromium，`ui` 同一字体栈）：板内可用宽 **248px**（窗 300 − 板左右 14×2 − 卡 padding 12×2），`save-error` 最长那条「设置保存失败：今日已开启上班，自动下班小时整日不可改（当前 8 小时）」自然宽 **264.1px** ⇒ 8px 下也 **2 行**；录键行说明文字列仅 **~140px**（= 248 − 录键钮 ≤98 − 行 gap 10），7 条错误里只有 2 条是 1 行。
+
+**用户定案（2026-10-16）**：① 板底**只显固定「设置保存失败」**，完整原因进**前端 console**；② 录键失败**顶替**说明文字（不加行、行高不变），只显「快捷键保存失败：<短标签>」，完整原因进 console，**10s 后自动换回**说明文字，**10s 内关板再开板亦立即换回**；③ 板底文案**完全不动当前布局**——绝对定位浮在板底 2px 上方、**居中**、字号同说明文字（8px）、**满色**红、影 `1px 1px 3px`（黑，与文案条文字影同族）；④ 快捷键**只接受 2–3 键**（最高 3 键 = 最多 2 修饰键 + 1 主键），这是"录键行永不 2 行"的前提（实测 3 键上限下按钮最宽 98px ⇒ 列宽 ≥ 140px > 最长标签 120px）。
+
+**做法**：
+
+- **后端**（`core/src/hotkey.rs`）：新增 `HotkeyError::TooManyKeys`（文案「按键过多（最多 3 键）」）；`parse` 在解析出主键后按**修饰位计数**判上限（`flags.count(true) + 1 > 3`）；文档 `# Errors` 补一条；新增用例 `parse_rejects_more_than_three_keys`（2 键 / 3 键通过，4 键、5 键被拒）。"最低 2 键"由既有 `NoModifier` / `MissingMainKey` 覆盖，无需新变体。
+- **前端短标签映射**（`ui/App.vue` 新增 `hotkeyFailLabel(raw)`）：按**子串匹配**后端文案归类（热键组合为空 / 缺少修饰键 / 缺少主键 / 不支持的按键 / 重复的按键段 / 按键过多 / 锁已中毒→设置锁已中毒 / 注册失败→快捷键注册失败），未命中落兜底**「保存失败」**；注释约束"后端改这几条文案时必须同步本表"。`onSetHotkey` 失败时 `message` 只存短标签、`console.error(err)` 记完整文案；新增 `clearHotkeyError()` 与 10s 计时器（成功 / 到点 / 开板 / 卸载均清）。`onSaveSettings` 失败时 `saveError` 写死「设置保存失败」。
+- **前端展示**（`ui/components/SettingsPanel.vue`）：两行录键的说明文字与错误行**合并为一个 `<p>`**，取值优先级 = 失败 > 录制中 > 说明，失败时挂 `.setting-desc-fail`（满色红，字号 / 行高 / 边距全沿用说明文字 ⇒ 行盒不撑高）；`.save-error` 改**绝对定位**（`left/right: 12px` + `bottom: 2px`，定位参照 = `.board-glass`——其 `transform` 使之成为 containing block）+ 居中 + 8px + 满色红 + `1px 1px 3px rgba(0,0,0,0.75)`；原 `.hotkey-error` 规则删除（不再有独立错误行）。
+- **前端录键不拦 3 键上限**（刻意）：录到 4 键即交后端、由 `TooManyKeys` 拒并显示「按键过多」——严格抛错主线"拒绝要看得见"（既有"与后端同规防录了就拒"仅适用于无修饰键 / 非法主键）。
+
+**验证**：`cargo fmt` / `clippy -D warnings` / `cargo test`（**208 lib** + 1 探针）全绿；`vue-tsc` 0 + `npm run build` + `cargo build` 通过；live 待目测（板底固定文案浮在板底 2px 上方且不挤动七行；录键失败顶替说明文字为红色短标签、10s 自动换回、10s 内关板开板立即换回；录 4 键被拒显示「按键过多」；console 记完整文案）。
+
+### 五、PATCH010.5 提示时长全应用统一（错误 10s / 非红字 5s）+ 统计板报错撤除（2026-10-16 已落）
+
+**背景（用户目测 PATCH010.4 后定案）**：① 板底「设置保存失败」当时**常驻**（只在保存成功 / 重开板时清），用户要求**也 10s 自动消失**；② 用户同时给出**通用规则**：**UI 界面所有错误提示一律 10s 自动消失、非红字提示 5s 自动消失**；③ 落点③（此前已对齐未落）：**统计板不出现任何报错**，`day_detail` / `week_detail` / `workday_total` 失败只进 console。
+
+**做法**：
+
+- **时长常量收敛**（`ui/App.vue`）：原 `BANNER_HIDE_MS` / `BANNER_ERROR_HIDE_MS` 改名为**全应用口径常量** `HINT_HIDE_MS = 5_000` / `ERROR_HIDE_MS = 10_000`，注释写明"错误（红字）10s / 非红字 5s"；文案条自隐计时、行内录键失败计时、板底保存失败计时**三处共用**同一常量。
+- **板底 10s 自动消失**：新增 `clearSaveError()` 与 `saveErrorTimer`（成功 / 10s 到点 / **开板** / 卸载均清）——开板清除保留旧行为（重开板即无残留）。
+- **统计板报错撤除**（`ui/components/StatsView.vue`）：`loadError: string` 改为 `loadFailed: boolean`（**只用于抑制"本日无打卡记录"空态**——拉取失败时不能谎报"无记录"），三处 `catch` 只 `console.error`；模板里 `统计加载失败：…` 那行整段删除。
+
+**验证**：`vue-tsc` 0 + `npm run build` + `cargo build` 通过（纯前端改动，Rust 侧零改动 ⇒ 不跑 cargo test）；live 待目测（板底文案 10s 自己消失；录键红字 10s；提醒 / 自动下班 / 恢复三条非红字提示 5s；统计板加载失败时板内无任何报错）。
+
+### 六、PATCH010.6–.9 沙漏与提醒统一（水位单一来源 / 沉底常态 / 阈值下限与锁定）（2026-10-16 立项）
+
+**背景（用户目测 + 逐轮对齐）**：用户发现**重启 APP 后沙漏"两端满"**（上腔满 + 下腔满），打卡上班后才"恢复正常"。取证（真机截图 + 把真 SVG/真 CSS 在 Chromium 跑四态对照 + DEV 基座对照）确认：**"两端满"= 状态机从未挂上 `.run` 的静态帧**（两个 clipPath 都停在作者态：上腔 0% = 满、下腔无变换 = 满）。**根因**：`TimerCard.vue` setup 时把 `props.thresholdMin` 快照成基准（`hgThres`），而设置尚未从 Rust 读回 ⇒ 快照到 App 侧兜底 **50**；用户阈值是 **55** ⇒ 首个 tick `thresChanged = true` ⇒ 命中分支①b（**只重置内部水位、不挂 `.run`**）⇒ 此后 `hgKey` 不再变化 ⇒ 永久停在静态帧。另发现结构缺口：`未在岗 且 水位已满` 这条组合**没有 else 兜底**，同样什么都不做。
+
+**用户定案（口径，2026-10-16）**：
+
+1. **水位单一来源 = 后端本段时长**（前端不再自攒墙钟）；改阈值时**水位连续不跳变、不翻半圈，只改流速**，保证"本段时长到达阈值（= 铃响）那一刻沙子刚好流完"。
+2. **沉底（上腔空 / 下腔满）是常态**：`paused`（休息，仍在岗）、`idle`（未在岗 / 下班 / 刚打开 APP）一律**沉底**；只有 `running`（在岗**工作**）才按公式落位。**判据是会话态，不是"是否在岗"**（休息也在岗但沉底）。
+3. **启动恢复**：`state = running`（含崩溃恢复"无缝续"）⇒ 按 `segment / 阈值` 落位（不沉底）；否则沉底。
+4. **阈值可改性**：未在岗 / 暂停 ⇒ 1–99 自由；运行中**未触发** ⇒ **≥ ceil(本段分钟) + 1**（已过 2:30 ⇒ 最低 4）；运行中**已触发过**（铃已响）⇒ **禁改，只有暂停后才能改**。
+5. 铃响后沙漏**沉底停终态**（本身即一种提醒）；**只有"暂停/休息 → 再启动"（新段）才回满重来**。
+6. 托盘 hover「距下次提醒」照旧正常表达（不改）。
+
+**水位公式**（锚点 + 线性插值，`w = 1` 即沉底）：
+
+```
+事件点（新段 / 启动恢复 / 阈值变更）记录：seg0（本段毫秒）、w0（当时水位）、T（当前阈值毫秒）
+每 tick：  w = w0 + (segment_ms − seg0) × (1 − w0) / (T − seg0)
+非 running ⇒ w = 1（沉底，不走公式）
+```
+
+起点连续（改阈值取当时 `w0`）、终点精确（`segment_ms = T` ⇒ `w = 1`）⇒ 与铃声同刻。换算到现有 CSS 机制：`--hg-dur = 剩余时间 / (1 − w)`、`--hg-delay = −w × --hg-dur`（不需新机制）。
+
+**做法（文件 / 函数级）**：
+
+- **后端字段**（`core/src/commands/session.rs`）：`SessionStatus`（第 18–28 行）增 `segment_ms: u64`、`reminder_fired: bool`；取值复用既有 `let segment = lock(ctx)?.segment_secs();`（第 236 行，**注意锁序 workday → session → storage/settings/fire**，取 segment 须在取 settings 之前）与 `poison("提醒", ctx.fire.lock())?.last_fired().is_some()`（`last_fired()` 是既有只读方法，hover 已在用）。
+- **后端校验**（`core/src/commands/mod.rs` + `core/src/commands/reminder.rs::set_settings_inner`）：`CommandError` 新增两个变体（如 `ThresholdBelowElapsed { min: u32, segment_min: u32 }` 文案「提醒阈值最低 {min} 分钟（本段已工作 {segment_min} 分钟，需留 1 分钟余量）」、`ThresholdLockedAfterFire` 文案「本段已触发提醒，暂停后才能修改阈值」）；校验**只在 `settings.threshold_min != 当前阈值` 时生效**（改开关不拦），位置接在既有"自动下班小时数"校验之后：`fired` ⇒ 直接拒；`!segment.is_zero()` 且 `threshold_min < segment.as_secs().div_ceil(60) as u32 + 1` ⇒ 拒。
+- **前端沙漏**（`ui/components/TimerCard.vue`）：删 `hgP0/hgDur/hgT0/hgMs/hgPNow` 自攒墙钟；改为锚定状态（`hgSeg0 / hgW0`）+ 每 tick 用 `session_status.segment_ms` 走上面公式；**先判 `state`**（非 `running` ⇒ `w = 1`，**不能拿 `segment = 0` 当沉底**——暂停时 segment 也是 0，会误推成"上满"）；事件点重锚定：① `state` 非 running → running（新段）⇒ `seg0 = 0, w0 = 0`；② 首次拿到快照（启动/恢复）⇒ `seg0 = segment_ms, w0 = segment_ms / T`；③ 阈值变更 ⇒ `seg0 = segment_ms, w0 = 当前水位`（**不得调 `hgFlipRestart`**）；**`.run` 幂等挂载**——任何 tick 都保证两态下 `.run` 在位（沉底/漏完用"负一周期停终态"表达），根治"启动两端满"。
+- **字段贯通**（`ui/types.ts` + `ui/App.vue` + `ui/src/dev/mock-invoke.ts`）：`types.ts` 的 `SessionStatus` 镜像同步加两字段；TimerCard 每次 `refresh` 后经 `emit` 上抛会话快照（`state / segment_ms / reminder_fired`）给 App（App 侧不另开轮询），App 转传设置板；**DEV 基座 `mock-invoke.ts` 的 `session_status` 必须同步返回两字段**（否则 DEV 验不了沙漏）。
+- **设置板阈值行**（`ui/components/SettingsPanel.vue`）：新增 props（本段毫秒 / 是否已触发）；下限 `floor = running && segment_ms > 0 ? ceil(segment_ms / 60000) + 1 : 1`（与 99 取小）；步进器 `−` 到 `floor` 置灰、`stepThreshold` 守卫加 floor、输入框 `:min="floor"` 且 `onThresholdChange` 夹到 `[floor, 99]`；**已触发 ⇒ 整行控件置灰**（复用"自动下班小时数在岗锁定"的置灰做法）+ 说明文字改「本段已触发提醒，暂停后可改」。
+- **已定案（2026-10-16 用户裁定）**：① **新段（打卡 / 继续）保留"翻半圈"** —— 沉底是常态，进入工作必须翻过来才能"上满开始漏"（不翻则沙从下腔瞬间跳回上腔，突兀）；**只有阈值变更不翻**；② **贯通只走"TimerCard 顺手上报 → App → 设置板"**（单一来源、零时差、零额外 IPC），**不另加 App 侧轮询**（两条线必有 ~1s 时差 ⇒ 设置板会慢半拍：铃响后阈值行还没灰）。
+
+**验证**：后端 TDD 用例 `set_settings_rejects_threshold_below_elapsed`（假钟推 2:30 ⇒ 改 3 被拒、改 4 通过）、`set_settings_rejects_threshold_after_fire`（触发后禁改、暂停后可改）、`set_settings_allows_other_fields_while_locked`（只改开关照常通过）、`session_status_exposes_segment_and_fired`（Running 有值 / Paused 为 0）；前端 `vue-tsc` 0 + `npm run build`；live 目测 8 项（见 x.progress `.9`）并入 `.temp/pl027-visual-standards.md` 附录 E 待用户签认。
+
+**落地补记（2026-10-16，`.6`–`.8` 已落）**：① 沙漏实现比原方案更彻底——水位改由 CSS 变量 `--hg-w` **直接驱动**（`translate(0, calc(13px × var(--hg-w)))` / `scale(1, var(--hg-w))`，默认值即 1 = 沉底），**`.run` 类整类退役**、`hg-mound-top/bottom` 关键帧删除 ⇒ "启动未挂类即两端满"从根上消失（不再需要"幂等挂载"）；水位过渡由 `--hg-drain`（0.6s）承担。② 探针实证（真 SVG + 真 CSS，Chromium）：`--hg-w` = 0 / 0.25 / 0.6 / 1 四档水位全部正确；真机启动未在岗 = **沉底**（修前为"两端满"）。③ 踩坑登记：**浏览器缓存会骗人**——探针改 CSS 后必须带 `?v=` 版本号，否则读到旧样式表（曾据此误判"`var()` 驱动不生效"，实际是缓存）。④ 会话提示贯通取 **`ceil(segment_ms / 60000)`**（与后端下限口径同源），且**分钟粒度 + 变化才发**（避免 10 次/秒的无效重渲染）。
