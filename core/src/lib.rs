@@ -834,6 +834,12 @@ pub fn run() {
                         }
                         DRAG_SNAP_PENDING.store(false, Ordering::Relaxed);
                         if DRAG_ACTIVE.swap(false, Ordering::Relaxed) {
+                            // PATCH011：真拖动过 ⇒ 通知前端"拖拽结束"（前端据此解除焦点抖动屏蔽；
+                            // 原生拖拽循环会给出成对 Focused(false/true) 抖动，见 z.plan 附录 PATCH011）。
+                            // 发送失败仅日志——装饰层纪律，下次拖拽自愈。
+                            if let Err(err) = win.emit("drag-end", ()) {
+                                diag::log(&format!("drag-end 事件发送失败：{err}"));
+                            }
                             snap_if_needed(&win);
                         }
                         break;

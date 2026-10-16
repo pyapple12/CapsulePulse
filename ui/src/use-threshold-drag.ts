@@ -10,8 +10,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 /** 拖拽启动阈值（px）：位移低于此视为点击，不启动拖拽 */
 const DRAG_THRESHOLD = 5;
 
-/** 给把手元素装上阈值拖拽（左键限定；`preventDefault` 仅抑制文本选择，不拦 click） */
-export function useThresholdDrag(handle: HTMLElement): () => void {
+/** 给把手元素装上阈值拖拽（左键限定；`preventDefault` 仅抑制文本选择，不拦 click）。
+ * `onDragStart`（PATCH011）：在 `startDragging()` **前**触发——原生拖拽循环会给出成对的
+ * `Focused(false/true)` 抖动，调用方据此在抖动发生前置"拖拽中"标记、屏蔽背板误摘。 */
+export function useThresholdDrag(
+  handle: HTMLElement,
+  options?: { onDragStart?: () => void },
+): () => void {
   let startX = 0;
   let startY = 0;
   let tracking = false;
@@ -26,6 +31,7 @@ export function useThresholdDrag(handle: HTMLElement): () => void {
     }
     tracking = false;
     detach();
+    options?.onDragStart?.();
     void getCurrentWindow()
       .startDragging()
       .catch((err) => console.error("窗口拖拽启动失败", err));

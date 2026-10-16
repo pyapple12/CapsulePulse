@@ -167,6 +167,7 @@ function onWindowDown(e: MouseEvent): void {
   if (target?.closest(DRAG_INTERACTIVE)) {
     return;
   }
+  markWindowDragStart(); // PATCH011：拖拽期间屏蔽焦点抖动（原生拖拽循环会成对抖 false/true）
   void getCurrentWindow().startDragging();
 }
 
@@ -373,9 +374,35 @@ function turnBackdropOff(): void {
   );
 }
 
-/** 板开合 / 焦点变化 ⇒ 同步系统背板（PL029）：开板延时 300ms 挂、收板延时 200ms 摘、失焦立即摘 */
+/** 拖拽中标记（PATCH011）：原生拖拽循环会给出成对 `Focused(false/true)` 抖动，
+ * 拖拽期间把它视作"仍聚焦"，避免背板被误摘（修"板开着拖标题 ⇒ 磨砂摘了又挂上"）。 */
+const windowDragging = ref(false);
+/** 安全阀（ms）：`drag-end` 若因故未到（事件丢失 / 异常路径），最多忽略焦点这么久，防永久屏蔽 */
+const DRAG_SAFETY_MS = 10_000;
+let dragSafetyTimer: number | undefined;
+
+/** 标记"开始拖拽"（两处拖拽入口共用：标题阈值把手 + 全局 mousedown 路径） */
+function markWindowDragStart(): void {
+  windowDragging.value = true;
+  window.clearTimeout(dragSafetyTimer);
+  dragSafetyTimer = window.setTimeout(() => {
+    dragSafetyTimer = undefined;
+    windowDragging.value = false;
+  }, DRAG_SAFETY_MS);
+}
+
+/** 解除"拖拽中"（Rust `drag-end` 事件；watch 随之按真实焦点重算一次） */
+function clearWindowDragging(): void {
+  window.clearTimeout(dragSafetyTimer);
+  dragSafetyTimer = undefined;
+  windowDragging.value = false;
+}
+
+/** 板开合 / 焦点 / 拖拽变化 ⇒ 同步系统背板（PL029）：开板延时 200ms 挂、收板延时 200ms 摘、
+ * 失焦立即摘（**拖拽期间视作聚焦**，见 PATCH011） */
 function syncBoardBackdrop(): void {
-  const want = (panelVisible.value || statsOpen.value) && windowFocused.value;
+  const want =
+    (panelVisible.value || statsOpen.value) && (windowFocused.value || windowDragging.value);
   if (want) {
     window.clearTimeout(backdropOffTimer);
     backdropOffTimer = undefined;
@@ -397,7 +424,7 @@ function syncBoardBackdrop(): void {
   backdropOffTimer = window.setTimeout(turnBackdropOff, BACKDROP_OFF_DELAY_MS);
 }
 
-watch([panelVisible, statsOpen, windowFocused], syncBoardBackdrop);
+watch([panelVisible, statsOpen, windowFocused, windowDragging], syncBoardBackdrop);
 
 // —— PL029 失焦自动收板（2026-10-16 用户定案）：板开着 + 窗口失焦**持续满 15s** ⇒ 自动收两板 ——
 // 语义 = "失焦相当于 app 没操作"（失焦期间收不到用户操作，故"没操作"实现为"失焦持续"）。
@@ -580,7 +607,7 @@ onMounted(() => {
   }
   // 标题阈值拖拽把手（PATCH001.2）：按下不立即拖，位移超 5px 才拖窗——单击/双击照常派发
   if (topbarEl.value != null) {
-    destroyThresholdDrag = useThresholdDrag(topbarEl.value);
+    destroyThresholdDrag = useThresholdDrag(topbarEl.value, { onDragStart: markWindowDragStart });
   }
   // 焦点态初值兜底：错过启动期事件也不至于滞留错误纱态（查询失败仅记录，退回常纱）
   getCurrentWindow()
@@ -603,6 +630,10 @@ onMounted(() => {
       unlistenFocus = un;
     })
     .catch((err) => console.error("window-focus 监听注册失败", err));
+  // drag-end（PATCH011）：Rust 在"真拖动过 + 左键已松 + 静默满阈值"时发出 ⇒ 解除拖拽中标记
+  listen("drag-end", () => {
+    clearWindowDragging();
+  }).catch((err) => console.error("drag-end 监听注册失败", err));
   // prefs-changed（PL028.3）：托盘右键菜单改了窗口偏好 → 设置面板开关回显同步。
   // 面板自改那一路已即时写入本地态（onSaveSettings），此处只补"另一入口"的回显
   listen<PrefsSnapshot>("prefs-changed", (event) => {
@@ -687,6 +718,7 @@ onUnmounted(() => {
   window.clearTimeout(backdropOnTimer);
   window.clearTimeout(backdropOffTimer);
   window.clearTimeout(boardAutocloseTimer);
+  window.clearTimeout(dragSafetyTimer);
   if (autoOutCountdown !== undefined) {
     window.clearInterval(autoOutCountdown);
   }

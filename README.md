@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#english)
 
-[![Version](https://img.shields.io/badge/Version-0.1.6.1-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.1.6.2-blue.svg)](core/Cargo.toml)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6.svg)](#下载)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org)
@@ -42,14 +42,14 @@
 
 ### 🧱 技术栈
 
-| 层      | 选型                                       | 说明                                                                                |
-| ------- | ------------------------------------------ | ----------------------------------------------------------------------------------- |
-| 📦 壳   | Tauri 2（Rust + 系统 WebView）             | 包体小、系统能力原生接入                                                            |
-| 🦀 核心 | 纯 Rust——状态机 / SQLite / 业务规则        | 全部业务逻辑在 Rust 侧，`cargo test` 直测                                           |
-| 🖼️ 前端 | Vue 3 + TypeScript + Vite                  | 只做展示，零业务逻辑                                                                |
-| 🗄️ 存储 | SQLite（rusqlite）                         | 零配置本地库 `data/pulse.db`（设置 `configs/config.json`，便携布局）                |
-| 🫧 玻璃 | CT 分态纱（纯 CSS）                        | 恒纯 alpha 透明窗 + `::before` 纱层（失焦 30% / 聚焦 0%），三端同构、无 OS 材质依赖 |
-| 🔔 通知 | tauri-plugin-notification + 前端 `<audio>` | 通知与声音降级互不依赖                                                              |
+| 层      | 选型                                       | 说明                                                                                                                                                        |
+| ------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📦 壳   | Tauri 2（Rust + 系统 WebView）             | 包体小、系统能力原生接入                                                                                                                                    |
+| 🦀 核心 | 纯 Rust——状态机 / SQLite / 业务规则        | 全部业务逻辑在 Rust 侧，`cargo test` 直测                                                                                                                   |
+| 🖼️ 前端 | Vue 3 + TypeScript + Vite                  | 只做展示，零业务逻辑                                                                                                                                        |
+| 🗄️ 存储 | SQLite（rusqlite）                         | 零配置本地库 `data/pulse.db`（设置 `configs/config.json`，便携布局）                                                                                        |
+| 🫧 玻璃 | CT 分态纱（纯 CSS）+ 按需系统背板          | 恒纯 alpha 透明窗 + `::before` 纱层（失焦 30% / 聚焦 0%）；**打开统计板 / 设置板且窗口聚焦时**才挂系统背板（Windows DWM 亚克力，PL029），平时不依赖 OS 材质 |
+| 🔔 通知 | tauri-plugin-notification + 前端 `<audio>` | 通知与声音降级互不依赖                                                                                                                                      |
 
 ### 🛠️ 开发
 
@@ -82,7 +82,7 @@ CapsulePulse/
 │   │   ├── main.rs            # 薄入口
 │   │   ├── session.rs         # 计时状态机（纯逻辑，可单测）
 │   │   ├── workday.rs         # 工作日状态机 + 事件归约（打卡 / 图谱纯逻辑，可单测）
-│   │   ├── storage.rs         # SQLite 仓储（sessions / workdays / events 三表，参数化 SQL）
+│   │   ├── storage.rs         # SQLite 仓储（PL027 起 events 单表为唯一事实源 + runtime 运行态缓存 + days 按天汇总）
 │   │   ├── period.rs          # 统计周期边界纯函数（本地零点 / 周一零点）
 │   │   ├── reminder.rs        # 提醒评估器（阈值触发 + 5 分钟重发）
 │   │   ├── settings.rs        # 设置持久化（JSON 原子写）
@@ -114,7 +114,7 @@ CapsulePulse/
 
 ### 🗺️ 路线图
 
-- ✅ Phase 0–5 —— 玻璃计时闭环 → 存储统计 → 提醒设置 → 托盘常驻与全局快捷键 → 工作日/打卡模型与统计视图 → UI 与材质迭代（`design/` 原型 → APP 化映射）
+- ✅ Phase 0–5 —— 玻璃计时闭环 → 存储统计 → 提醒设置 → 托盘常驻与全局快捷键 → 工作日/打卡模型与统计视图 → UI 与材质迭代（`design/` 原型 → APP 化映射 → 托盘悬浮卡 / 自绘菜单 / 快捷键自定义 / 贴边置顶 / 沙漏与提醒统一 / 按需毛玻璃背板）
 - ⏳ Phase 6 —— 打包分发（绿色版 zip / 安装包）
 - ⏳ Phase 7 —— macOS / Linux 三端适配
 
@@ -152,14 +152,14 @@ A glassmorphic work-time board — clock in to open a day, in-session time count
 
 ### 🧱 Built With
 
-| Layer      | Choice                                      | Why                                                                               |
-| ---------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
-| 📦 Shell   | Tauri 2 (Rust + system WebView)             | small footprint, native OS capabilities                                           |
-| 🦀 Core    | Pure Rust — state machines / SQLite / rules | all logic lives in Rust, directly unit-tested (`cargo test`)                      |
-| 🖼️ UI      | Vue 3 + TypeScript + Vite                   | presentation only, zero business logic                                            |
-| 🗄️ Storage | SQLite via rusqlite                         | zero-config local database `data/pulse.db` (settings `configs/config.json`)       |
-| 🫧 Glass   | CT dual-state veil (pure CSS)               | alpha-transparent window + `::before` veil (30 % idle / 0 % focused), OS-agnostic |
-| 🔔 Notify  | tauri-plugin-notification + `<audio>`       | notification and sound degrade independently                                      |
+| Layer      | Choice                                             | Why                                                                                                                                                          |
+| ---------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 📦 Shell   | Tauri 2 (Rust + system WebView)                    | small footprint, native OS capabilities                                                                                                                      |
+| 🦀 Core    | Pure Rust — state machines / SQLite / rules        | all logic lives in Rust, directly unit-tested (`cargo test`)                                                                                                 |
+| 🖼️ UI      | Vue 3 + TypeScript + Vite                          | presentation only, zero business logic                                                                                                                       |
+| 🗄️ Storage | SQLite via rusqlite                                | zero-config local database `data/pulse.db` (settings `configs/config.json`)                                                                                  |
+| 🫧 Glass   | CT dual-state veil (pure CSS) + on-demand backdrop | alpha-transparent window + `::before` veil (30 % idle / 0 % focused); OS backdrop (Windows DWM acrylic) only while a board is open and the window is focused |
+| 🔔 Notify  | tauri-plugin-notification + `<audio>`              | notification and sound degrade independently                                                                                                                 |
 
 ### 🛠️ Develop
 
@@ -192,7 +192,7 @@ CapsulePulse/
 │   │   ├── main.rs            # thin entry point
 │   │   ├── session.rs         # timer state machine (pure logic, unit-tested)
 │   │   ├── workday.rs         # workday state machine + event reduction (clock-in/graph pure logic)
-│   │   ├── storage.rs         # SQLite repository (sessions / workdays / events, parameterized SQL)
+│   │   ├── storage.rs         # SQLite repository (since PL027: single `events` table as source of truth + `runtime` cache + per-day rollups)
 │   │   ├── period.rs          # period boundary pure functions (local midnight / Monday midnight)
 │   │   ├── reminder.rs        # reminder evaluator (threshold trigger + 5-minute re-fire)
 │   │   ├── settings.rs        # settings persistence (atomic JSON write)
@@ -224,7 +224,7 @@ CapsulePulse/
 
 ### 🗺️ Roadmap
 
-- ✅ Phase 0–5 — glass timer loop → storage & stats → reminder settings → tray & global hotkeys → workday/clock-in model & stats board → UI and material iterations (`design/` prototype → APP mapping)
+- ✅ Phase 0–5 — glass timer loop → storage & stats → reminder settings → tray & global hotkeys → workday/clock-in model & stats board → UI and material iterations (`design/` prototype → APP mapping; then tray hover card, custom tray menu, custom hotkeys, snap & always-on-top, hourglass–reminder unification, on-demand frosted backdrop)
 - ⏳ Phase 6 — packaging & distribution (portable zip / installer)
 - ⏳ Phase 7 — macOS / Linux adaptors
 

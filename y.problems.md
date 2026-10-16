@@ -124,3 +124,13 @@
     已知欠账：见上一条（步进器内环硬编码暗值）；其余需切到浅色实机逐视图走查（主页表盘 / 统计板 / 设置板 / 浮板 / 托盘悬浮卡 / 菜单窗 / 确认框）后逐条记录。
 
     未来方案：单独立一个"浅色主题复核"批次（PL 级或 PATCH 级）：切 `data-theme="light"` 走查 + 逐条整定（含上一条）；浅色观感只能由用户目测判定（AI 不代判）。
+
+12. **主题三态持久化（跟随系统 / 浅 / 暗）**（2026-10-16 记录，待实现；来源 = 原 `future-plan-001.md` §1，该候选池文件已删除，条目并入本条）：
+
+    当前问题：`ui/index.html` 硬锁 `data-theme="dark"` 恒暗运行；`ui/src/styles/glass.css` 的三块令牌（浅色默认块 / `prefers-color-scheme` 跟随块 / `data-theme` 手动块）**机制就位但从未走查**（与 #11 同源）。
+
+    未来方案：
+
+    - `ReminderSettings` 加 `theme: u8`（0 跟随 / 1 浅 / 2 暗，serde default 0）→ 启动回读写 `documentElement.dataset.theme`；设置板加双控件（跟随系统 switch + 日夜切换）；切档即落库 + 写 dataset
+    - 连带：粒子引擎需补 `refresh()` 口（CP 现返回裸清理函数）；`apply_frame_style` 的 `dark` 参数改读实际主题
+    - **与 #11（浅色主题整体复核）捆绑做**：切 `data-theme="light"` 走查 + 逐条整定（含 #10 步进器内环硬编码暗值）
