@@ -7,12 +7,13 @@ import {
   BATTERY_RED_RATIO,
   BATTERY_TOTAL_HOURS,
   BATTERY_YELLOW_FLOOR,
-  OVERTIME_CAP_HOURS,
   type DaySummary,
   type SessionStatus,
 } from "../types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { pad } from "../format";
+// 段序列共享构建（FIX006.4：表盘 / 电池 / 图谱单一实现）
+import { daySegments } from "../src/day-segments";
 
 // 轮询周期 100ms：十分秒位（HH:MM:SS.d）每 0.1s 跳动需要 ≤100ms 拉取
 const TICK_MS = 100;
@@ -30,10 +31,12 @@ const emit = defineEmits<{
 
 // day = 当日明细（dial 弧段 + 电池的数据源）；thresholdMin = 沙漏周期；
 // autoOutHours = 今日基准（PATCH006.4：电池黄阈值 `max(30%, 1 − 基准/12)` 需要它）
+// FIX006.3：二者随 `settings` 而来，**未就绪 / 读取失败时为 undefined**（前端不造默认值）——
+// 沙漏不画水位、电池不判加班区；可见错误由 App 侧统一弹（文案条）
 const props = defineProps<{
   day: DaySummary | null;
-  thresholdMin: number;
-  autoOutHours: number;
+  thresholdMin?: number;
+  autoOutHours?: number;
 }>();
 
 const state = ref<"idle" | "running" | "paused">("idle");
@@ -205,42 +208,18 @@ function arcPath(r: number, a0: number, a1: number): string {
   return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-/** 段序列（真实块 + 班间空档；秒 → 毫秒）：dial 弧段与电池共用同一份（PATCH005.3 抽函数消重）。
- * 块序列的空洞 = 班间空档（blocks 只覆盖在岗窗口）。 */
-function buildSegs(day: DaySummary): { t0: number; t1: number; kind: string }[] {
-  const segs: { t0: number; t1: number; kind: string }[] = [];
-  let lastEnd: number | null = null;
-  for (const b of day.blocks) {
-    const t0 = b.start * 1000;
-    const t1 = b.end * 1000;
-    if (lastEnd != null && t0 > lastEnd) {
-      segs.push({ t0: lastEnd, t1: t0, kind: "gap" });
-    }
-    segs.push({ t0, t1, kind: b.kind });
-    lastEnd = t1;
-  }
-  return segs;
-}
-
-/** 当前班起点（毫秒，PATCH005.3）：末个班间空档之后的第一块起点；无空档则当天首块起点。
- * dial 底轨与电池同源，杜绝两套"当前班"推法漂移。 */
-const shiftStartMs = computed(() => {
-  const d = props.day;
-  if (!d?.duty_started_at) {
-    return 0;
-  }
-  const segs = buildSegs(d);
-  const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
-  return lastGap ? lastGap.t1 : (segs[0]?.t0 ?? 0);
-});
+/** 当前班起点（毫秒）：**后端派生** `shift_start`（FIX006.4——原前端按段序列自推一份、
+ * 与 StatsView 各算一次；现两处共用后端同一字段）；未在岗为 0（那时不画底轨）。 */
+const shiftStartMs = computed(() => (props.day?.shift_start ?? 0) * 1000);
 
 /** 本班预算（毫秒，PATCH005.3）：后端 `remaining_secs` = 今日上限 − 本班前已累计，**班内恒定**
  * （跨班累计扣减、加班步进即时生效）——表盘底轨跨度与电池分母同一口径。 */
 const shiftBudgetMs = computed(() => (props.day?.remaining_secs ?? 0) * 1000);
 
 /** 到顶置灰（PATCH005.3）：今日已累计到 12h 硬顶 → 上班钮点不开（后端同样拒打卡）。
+ * FIX006.4：判定下沉后端（`cap_reached`），前端不再自算、也不重复硬顶常量。
  * 仅未上班时才可能点"上班"，在岗时按钮是"下班"，故置灰条件含 `!onDuty`。 */
-const capReached = computed(() => (props.day?.used_secs ?? 0) >= OVERTIME_CAP_HOURS * 3_600);
+const capReached = computed(() => props.day?.cap_reached ?? false);
 
 const hourStyle = computed(() => {
   const d = new Date(secTs.value);
@@ -263,7 +242,7 @@ const dialArcsSvg = computed(() => {
     return "";
   }
   const nowMs = Date.now();
-  const segs = buildSegs(d);
+  const segs = daySegments(d.blocks);
   if (segs.length === 0) {
     return "";
   }
@@ -462,10 +441,12 @@ let hgFlowTimer = 0;
 
 /** 当前水位：沉底是常态；只有 running 才按锚点线性插值到阈值（seg = T ⇒ w = 1） */
 function hgWater(segmentMs: number): number {
-  if (state.value !== "running") {
+  const threshold = props.thresholdMin;
+  // FIX006.3：阈值未就绪（settings 未取到 / 读取失败）⇒ 恒沉底，不造假水位
+  if (state.value !== "running" || threshold == null) {
     return 1;
   }
-  const total = props.thresholdMin * 60_000;
+  const total = threshold * 60_000;
   if (segmentMs >= total) {
     return 1;
   }
@@ -497,6 +478,10 @@ function tickHourglass(segmentMs: number): void {
   }
   const running = isRunning.value;
   const threshold = props.thresholdMin;
+  // FIX006.3：阈值未就绪（settings 未取到 / 读取失败）⇒ 不写水位与动画轴（不造假值）
+  if (threshold == null) {
+    return;
+  }
 
   if (!hgInited) {
     // 启动 / 崩溃恢复：running ⇒ 按本段落位（"无缝续"）；否则沉底（常态）
@@ -582,16 +567,22 @@ function batteryRatio(): number {
   return clamp01(1 - dayUsedMs() / (BATTERY_TOTAL_HOURS * 3_600_000));
 }
 
-/** 黄阈值：进入加班区（今日累计 > 基准）即亮，但**不早于 30%**（基准 ≥9h 时固定 30%） */
-function yellowThreshold(): number {
-  return Math.max(BATTERY_YELLOW_FLOOR, 1 - props.autoOutHours / BATTERY_TOTAL_HOURS);
+/** 黄阈值：进入加班区（今日累计 > 基准）即亮，但**不早于 30%**（基准 ≥9h 时固定 30%）。
+ * FIX006.3：基准未就绪（settings 未取到 / 读取失败）⇒ 返回 null，**不判加班区**（不造假阈值）。 */
+function yellowThreshold(): number | null {
+  const basis = props.autoOutHours;
+  if (basis == null) {
+    return null;
+  }
+  return Math.max(BATTERY_YELLOW_FLOOR, 1 - basis / BATTERY_TOTAL_HOURS);
 }
 
 function tickBattery(): void {
   const ratio = batteryRatio();
   batPct.value = Math.round(ratio * 100);
   batLow.value = ratio <= BATTERY_RED_RATIO;
-  batMid.value = !batLow.value && ratio <= yellowThreshold();
+  const yellow = yellowThreshold();
+  batMid.value = !batLow.value && yellow != null && ratio <= yellow;
 }
 
 // 下班瞬间冻结电量（design：confirmOk 同口径）；上班/新班解冻

@@ -13,11 +13,15 @@ if (import.meta.env.DEV) {
   installMockIpc();
 }
 
-/** 当前窗口 label（无 Tauri runtime 的纯浏览器回 "main"）。 */
+/** 当前窗口 label（无 Tauri runtime 的纯浏览器回 "main"）。FIX006.7：DEV 基座（浏览器直开 ui/）
+ * 必然走 catch ⇒ 仅**生产**记日志，避免每次开发都刷控制台。 */
 function currentWindowLabel(): string {
   try {
     return getCurrentWindow().label;
-  } catch {
+  } catch (err) {
+    if (!import.meta.env.DEV) {
+      console.warn("非 Tauri 环境，窗口 label 回退 main", err);
+    }
     return "main";
   }
 }

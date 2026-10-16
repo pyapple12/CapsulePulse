@@ -1,5 +1,5 @@
-//! 会话命令：开始/暂停/继续/重开/快照——转发状态机 + 落库 + 提醒评估快照。
-//! 快照与提醒决策在此产出（纯逻辑可测），提醒副作用（emit/通知）交提醒子模块执行。
+//! 会话命令：开始/暂停/继续/重开/快照——转发状态机 + 落库 + 会话快照。
+//! 快照在此产出（纯逻辑可测）；**提醒评估归提醒子模块的守候线程**（FIX006.5），副作用（emit/通知）同在该模块。
 //! PL005：计时门禁（未上班严格拒绝）+ 段起止事件留痕（按下时间点，图谱数据源）。
 
 use std::time::Duration;
@@ -9,7 +9,6 @@ use tauri::{AppHandle, Emitter, State};
 
 use super::workday::require_on_duty;
 use super::{lock, now_secs, poison, AppContext, CommandError};
-use crate::reminder::ReminderConfig;
 use crate::session::{Clock, SessionState, TimerAction};
 use crate::workday::EventKind;
 
@@ -222,13 +221,13 @@ fn state_key(state: &SessionState) -> &'static str {
     }
 }
 
-/// 会话快照 + 提醒决策（评估纯逻辑；副作用由命令包装层执行）。
+/// 会话快照（纯读取；提醒评估已移入后端守候线程——见 `reminder::spawn_reminder_watcher`，FIX006.5）。
 /// 注意：session 与 workday 两锁不嵌套持有（各自独立作用域顺序取用，规避反向锁序）。
-/// PATCH010.6：快照增 `segment_ms`（本段时长）与 `reminder_fired`（本段是否已触发过提醒）——
-/// 前端沙漏水位与设置板阈值行的**单一事实源**；锁序仍守 workday → session → settings → fire。
+/// PATCH010.6：快照含 `segment_ms`（本段时长）与 `reminder_fired`（本段是否已触发过提醒）——
+/// 前端沙漏水位与设置板阈值行的**单一事实源**；锁序仍守 workday → session → fire。
 pub(super) fn status_snapshot<C: Clock>(
     ctx: &AppContext<C>,
-) -> Result<(SessionStatus, ReminderDecision), CommandError> {
+) -> Result<SessionStatus, CommandError> {
     let (state, total_ms, segment) = {
         let session = lock(ctx)?;
         (
@@ -238,37 +237,16 @@ pub(super) fn status_snapshot<C: Clock>(
         )
     };
     let on_duty_now = poison("工作日", ctx.workday.lock())?.is_on_duty();
-    let (threshold_min, notify_enabled, reminder_fired, fire_now, refire) = {
-        let settings = poison("设置", ctx.settings.lock())?;
-        let config = ReminderConfig::from_minutes(settings.threshold_min);
-        let mut fire = poison("提醒", ctx.fire.lock())?;
-        // PATCH012.8：`evaluate` **之前**读 `last_fired` —— 有值即"本段此前已响过" ⇒ 本次是重发
-        let was_fired = fire.last_fired().is_some();
-        let should = fire.evaluate(segment, &config);
-        // 取值在 evaluate 之后：本拍刚触发的这一帧也如实报告"已触发过"（与 reminder-due 事件同拍）
-        (
-            settings.threshold_min,
-            settings.notify_enabled,
-            fire.last_fired().is_some(),
-            should,
-            was_fired,
-        )
-    };
-    let status = SessionStatus {
+    // 只读触发态（评估不在此处：本函数被前端 100ms 轮询，评估归守候线程）
+    let reminder_fired = poison("提醒", ctx.fire.lock())?.last_fired().is_some();
+    Ok(SessionStatus {
         state,
         total_ms,
         on_duty: on_duty_now,
         data_day_offset: super::workday::data_day_offset(ctx, now_secs(ctx)?)?,
         segment_ms: segment.as_millis() as u64,
         reminder_fired,
-    };
-    let decision = ReminderDecision {
-        fire: fire_now,
-        threshold_min,
-        refire,
-        notify_enabled,
-    };
-    Ok((status, decision))
+    })
 }
 
 /// 开始新会话（仅 Idle 合法）。
@@ -311,8 +289,7 @@ pub async fn session_status(
     handle: State<'_, AppContext>,
     app: AppHandle,
 ) -> Result<SessionStatus, CommandError> {
-    let (status, decision) = status_snapshot(&handle)?;
-    super::reminder::deliver_reminder(&app, decision)?;
+    let status = status_snapshot(&handle)?;
     // 自动下班待决（PL025.8）：到点前 60s 提示一次——发事件（前端弹倒计时框）+ 把窗口拉到前台
     if let Some(due_at) = super::workday::auto_out_pending_inner(&handle, now_secs(&handle)?)? {
         app.emit("workday-auto-out-pending", due_at)
@@ -380,9 +357,9 @@ mod tests {
     #[test]
     fn status_reports_on_duty_flag() {
         let ctx = ctx(FakeClock::new());
-        assert!(!status_snapshot(&ctx).unwrap().0.on_duty);
+        assert!(!status_snapshot(&ctx).unwrap().on_duty);
         begin_duty(&ctx);
-        assert!(status_snapshot(&ctx).unwrap().0.on_duty);
+        assert!(status_snapshot(&ctx).unwrap().on_duty);
     }
 
     /// PL005 段事件留痕：start/resume 记 segment_start、pause 记 segment_end，零秒段仍留痕。
@@ -426,7 +403,7 @@ mod tests {
 
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 1);
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 100);
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "paused");
     }
 
     /// 零秒段跳过落库（不写噪音行）。
@@ -480,7 +457,7 @@ mod tests {
 
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 1);
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 100);
-        let s = status_snapshot(&ctx).unwrap().0;
+        let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "paused", "重置后停在休息态（PATCH002）");
         assert_eq!(s.total_ms, 0, "大计时器归零");
     }
@@ -497,7 +474,7 @@ mod tests {
 
         assert_eq!(ctx.storage.lock().unwrap().session_count().unwrap(), 1);
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 50);
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "paused");
     }
 
     /// PATCH004.2：重置必须落一条 `session_reset` 标记（PL027 定案 B5）。归约忽略它，但它是
@@ -529,32 +506,40 @@ mod tests {
         assert!(kinds.contains(&EventKind::SegmentEnd), "收段落库照旧");
     }
 
-    /// T3+N1：提醒决策随 status 评估——49 分钟不发、50 分钟发、5 分钟内不重发；动作清零触发点。
+    /// T3+N1：提醒评估（FIX006.5 起由后端守候线程承担，内核即 `reminder_check_inner`）——
+    /// 49 分钟不发、50 分钟发、5 分钟内不重发；动作清零触发点。
     #[test]
     fn reminder_decision_fires_and_resets() {
         let clock = FakeClock::new();
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
         clock.advance(secs(49 * 60));
-        let (_, d) = status_snapshot(&ctx).unwrap();
-        assert!(!d.fire);
+        assert!(crate::commands::reminder::reminder_check_inner(&ctx)
+            .unwrap()
+            .is_none());
 
         clock.advance(secs(60));
-        let (_, d) = status_snapshot(&ctx).unwrap();
+        let d = crate::commands::reminder::reminder_check_inner(&ctx)
+            .unwrap()
+            .expect("恰达阈值应触发");
         assert!(d.fire);
 
         // 5 分钟间隔内不重发
-        let (_, d) = status_snapshot(&ctx).unwrap();
-        assert!(!d.fire);
+        assert!(crate::commands::reminder::reminder_check_inner(&ctx)
+            .unwrap()
+            .is_none());
 
         // 暂停（暂停即重置）→ 继续 → 未达新阈值不触发
         pause_session(&ctx).unwrap();
         resume_session(&ctx).unwrap();
-        let (_, d) = status_snapshot(&ctx).unwrap();
-        assert!(!d.fire);
+        assert!(crate::commands::reminder::reminder_check_inner(&ctx)
+            .unwrap()
+            .is_none());
 
         clock.advance(secs(50 * 60));
-        let (_, d) = status_snapshot(&ctx).unwrap();
+        let d = crate::commands::reminder::reminder_check_inner(&ctx)
+            .unwrap()
+            .expect("新段再次达阈值应触发");
         assert!(d.fire);
         assert_eq!(d.threshold_min, 50);
     }
@@ -574,7 +559,7 @@ mod tests {
             pause_session(&ctx),
             Err(CommandError::Poisoned("存储"))
         ));
-        let s = status_snapshot(&ctx).unwrap().0;
+        let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "running", "落库失败回滚：计时继续而非停在 Paused");
     }
 
@@ -594,7 +579,7 @@ mod tests {
             start_session(&ctx),
             Err(CommandError::Poisoned("存储"))
         ));
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "idle");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "idle");
     }
 
     /// FIX002.1：resume 留痕失败回滚回 Paused——累计保持、仍在暂停态。
@@ -613,7 +598,7 @@ mod tests {
             resume_session(&ctx),
             Err(CommandError::Poisoned("存储"))
         ));
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "paused");
     }
 
     /// PATCH002：Running 态重开在落库步失败——收段经 pause 的回滚链保持 **Running**（段未落库、
@@ -635,7 +620,7 @@ mod tests {
             Err(CommandError::Poisoned("存储"))
         ));
         assert_eq!(
-            status_snapshot(&ctx).unwrap().0.state,
+            status_snapshot(&ctx).unwrap().state,
             "running",
             "收段落库失败回滚：计时继续（段未丢）"
         );
@@ -665,15 +650,15 @@ mod tests {
         let ctx = ctx(clock.clone());
         begin_duty(&ctx);
         assert_eq!(
-            status_snapshot(&ctx).unwrap().0.state,
+            status_snapshot(&ctx).unwrap().state,
             "running",
             "打卡即工作"
         );
         clock.advance(secs(10));
         assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Pause);
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "paused");
         assert_eq!(toggle_session(&ctx).unwrap(), TimerAction::Resume);
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "running");
     }
 
     /// 退出收尾：Running 态先落库（数据不丢）；Paused 段已在 pause 落库、二次收尾幂等；Idle 无事。
@@ -707,23 +692,23 @@ mod tests {
         // Running + Work → 幂等（不报错、不动累计）
         clock.advance(secs(10));
         set_run_mode_inner(&ctx, RunMode::Work).unwrap();
-        let s = status_snapshot(&ctx).unwrap().0;
+        let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "running");
         assert_eq!(s.total_ms, 10_000, "幂等不重置累计");
 
         // Running + Rest → Paused（收段落库）
         set_run_mode_inner(&ctx, RunMode::Rest).unwrap();
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "paused");
         assert_eq!(ctx.storage.lock().unwrap().all_total().unwrap(), 10);
 
         // Paused + Rest → 幂等
         set_run_mode_inner(&ctx, RunMode::Rest).unwrap();
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "paused");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "paused");
 
         // Paused + Work → resume（累计继承；暂停期间不累计，故推进假钟放在 resume 之后）
         set_run_mode_inner(&ctx, RunMode::Work).unwrap();
         clock.advance(secs(5));
-        let s = status_snapshot(&ctx).unwrap().0;
+        let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "running");
         assert_eq!(s.total_ms, 15_000, "累计继承（10 + 5）");
 
@@ -745,7 +730,7 @@ mod tests {
         begin_duty(&ctx);
         lock(&ctx).unwrap().reset(); // 复位回 Idle（PATCH002 后仅在未上班出现）
         set_run_mode_inner(&ctx, RunMode::Work).unwrap();
-        assert_eq!(status_snapshot(&ctx).unwrap().0.state, "running");
+        assert_eq!(status_snapshot(&ctx).unwrap().state, "running");
     }
 
     /// PATCH010.6：快照暴露"本段时长"与"本段是否已触发过提醒"——沙漏水位与设置板阈值行的
@@ -758,21 +743,26 @@ mod tests {
 
         // Running：本段实时；未达阈值（默认 50 分钟）⇒ 未触发
         clock.advance(secs(150));
-        let s = status_snapshot(&ctx).unwrap().0;
+        let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "running");
         assert_eq!(s.segment_ms, 150_000);
         assert!(!s.reminder_fired, "未达阈值不得报已触发");
 
-        // 恰达阈值：同一拍 fire = true 且 reminder_fired = true（与 reminder-due 事件同拍）
+        // 恰达阈值：后端评估触发（FIX006.5：评估与快照解耦），快照如实报告已触发
         clock.advance(secs(2_850)); // 累计 3 000s = 50 分钟
-        let (s, d) = status_snapshot(&ctx).unwrap();
-        assert!(d.fire);
+        assert!(
+            crate::commands::reminder::reminder_check_inner(&ctx)
+                .unwrap()
+                .is_some(),
+            "恰达阈值应触发"
+        );
+        let s = status_snapshot(&ctx).unwrap();
         assert!(s.reminder_fired);
         assert_eq!(s.segment_ms, 3_000_000);
 
         // Paused：本段归零（沙漏据此沉底）且触发态被 clear（阈值随之解锁）
         set_run_mode_inner(&ctx, RunMode::Rest).unwrap();
-        let s = status_snapshot(&ctx).unwrap().0;
+        let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "paused");
         assert_eq!(s.segment_ms, 0);
         assert!(!s.reminder_fired, "暂停即 clear（PATCH002 语义）");

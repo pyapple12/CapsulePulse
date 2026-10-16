@@ -1,4 +1,6 @@
-//! SQLite 存储层：会话记录写入与今日/本周/累计聚合（计划书 §2.2 定案 schema）。
+//! SQLite 存储层（PL027 重做）：**`events` 单表为唯一事实源**（打卡 / 下班 / 段起止 / 加班 / 重置 /
+//! 崩溃补下班，只追加）+ `runtime` 运行态缓存 + `days` 按天汇总（加速层、可随时重建）；旧
+//! `workdays`/`sessions` 两表已退役（老库由 [`Storage::migrate_events_only`] 一次性迁移）。
 //! 全程参数化查询（禁拼接）；聚合边界经 period 纯函数（泛型时区，测试固定时区）；
 //! 测试一律内存库/临时目录，零真实用户数据写入（AGENTS 红线）。
 
@@ -490,9 +492,10 @@ impl Storage {
     // —— PL027.1b：把旧模型（workdays + sessions）一次性迁到 events 单表 ——
 
     /// 一次性迁移（PL027.1b）：把旧模型迁到 events 单表——**幂等**（`model_version = 2` 即跳过）、
-    /// **先备份后动手**（`VACUUM INTO` 一致快照，路径由调用方给）、**校验不过即中止**（旧表原样）。
-    /// 步骤：① 已迁过 → 直接返回；② 备份；③ 校验"每条 `workdays` 行都有同刻 `clock_in` 事件"；
-    /// ④ `DROP` 旧两表（内容 100% 可由流水推出：班 = 打卡配对、段 = 段事件配对）。
+    /// **先校验后备份再动手**（FIX006.8 调序：校验是只读的，放在备份前 ⇒ 中止路径不产生残留备份；
+    /// 备份仍严格先于任何改动——`VACUUM INTO` 一致快照，路径由调用方给）、**校验不过即中止**（旧表原样）。
+    /// 步骤：① 已迁过 → 直接返回；② 校验"每条 `workdays` 行都有同刻 `clock_in` 事件"（无 `workdays`
+    /// 表视作 0 行）；③ 备份；④ `DROP` 旧两表（内容 100% 可由流水推出：班 = 打卡配对、段 = 段事件配对）。
     /// `model_version` 由命令层在**回填汇总并写对账日志之后**再置 2（避免"半迁移"被当已完成）。
     /// # 错误
     /// 校验不通过返回 [`StorageError::MigrationValidationFailed`]（此时旧表未被删）。
@@ -522,24 +525,34 @@ impl Storage {
         } else {
             None
         };
-        // ② 一致快照备份（VACUUM INTO：库打开状态下安全导出）
-        self.conn
-            .execute("VACUUM INTO ?1", [backup_path.to_string_lossy().as_ref()])?;
-        // ③ 校验：旧班行必须能对应同刻 clock_in 事件
-        let bad: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM workdays w
-             WHERE NOT EXISTS (
-                SELECT 1 FROM events e WHERE e.kind = 'clock_in' AND e.at = w.clock_in_at
-             )",
-            [],
-            |row| row.get(0),
-        )?;
+        // ② 校验（**只读**，先于备份）：旧班行必须能对应同刻 clock_in 事件。
+        // FIX006.8：原实现无条件查 `workdays` ⇒ "只剩 sessions" 的残留库在此 no such table 卡死
+        // （每次启动重试并堆备份）；无 `workdays` 表一律视作 0 行。
+        let bad: i64 = if has_workdays {
+            self.conn.query_row(
+                "SELECT COUNT(*) FROM workdays w
+                 WHERE NOT EXISTS (
+                    SELECT 1 FROM events e WHERE e.kind = 'clock_in' AND e.at = w.clock_in_at
+                 )",
+                [],
+                |row| row.get(0),
+            )?
+        } else {
+            0
+        };
         if bad > 0 {
             return Err(StorageError::MigrationValidationFailed(bad));
         }
-        let workdays_rows: i64 =
+        let workdays_rows: i64 = if has_workdays {
             self.conn
-                .query_row("SELECT COUNT(*) FROM workdays", [], |row| row.get(0))?;
+                .query_row("SELECT COUNT(*) FROM workdays", [], |row| row.get(0))?
+        } else {
+            0
+        };
+        // ③ 一致快照备份（VACUUM INTO：库打开状态下安全导出）——**校验通过后才建**，
+        // 中止路径不留残件（FIX006.8：原顺序备份在前，校验/查询失败时每次启动都堆一份备份）
+        self.conn
+            .execute("VACUUM INTO ?1", [backup_path.to_string_lossy().as_ref()])?;
         // ④ 删旧两表（单事务）
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DROP TABLE IF EXISTS workdays", [])?;
@@ -856,6 +869,45 @@ mod tests {
         assert!(s.table_exists("workdays").unwrap(), "中止后旧表原样");
         assert!(s.table_exists("sessions").unwrap());
         assert_eq!(s.schema_get("model_version").unwrap(), None, "不置版本");
+        assert!(
+            !backup.exists(),
+            "FIX006.8：校验不过 ⇒ 不产生备份残留（备份已调到校验之后）"
+        );
+        let _ = std::fs::remove_file(&db);
+        let _ = std::fs::remove_file(&backup);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// FIX006.8：**只剩 `sessions`、没有 `workdays`** 的残留库也能迁移——原实现无条件查 `workdays`
+    /// ⇒ no such table 卡死、迁移永不完成且每次启动堆一份备份。
+    #[test]
+    fn migrate_events_only_tolerates_sessions_only_legacy_db() {
+        let dir =
+            std::env::temp_dir().join(format!("capsule-pulse-mig-sess-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("migsess.db");
+        let backup = dir.join("legacy-model-v1-sess.db");
+        let _ = std::fs::remove_file(&db);
+        let _ = std::fs::remove_file(&backup);
+
+        let s = Storage::open(&db).unwrap();
+        s.create_legacy_tables_for_test().unwrap();
+        s.conn.execute("DROP TABLE workdays", []).unwrap(); // 残留形态：只留 sessions
+        s.conn
+            .execute(
+                "INSERT INTO sessions (started_at, seconds) VALUES (?1, ?2)",
+                rusqlite::params![1_000, 3_600],
+            )
+            .unwrap();
+        s.insert_events(&[(1_000, EventKind::ClockIn)]).unwrap();
+
+        let report = s.migrate_events_only(&backup).unwrap();
+        assert!(report.migrated, "sessions-only 残留库应能正常迁移");
+        assert_eq!(report.workdays_rows, 0, "无 workdays 表 ⇒ 0 行");
+        assert_eq!(report.sessions_secs_before, Some(3_600));
+        assert!(!s.table_exists("sessions").unwrap(), "旧表已删");
+        assert!(backup.exists(), "迁移成功照旧留下一致快照备份");
+
         let _ = std::fs::remove_file(&db);
         let _ = std::fs::remove_file(&backup);
         let _ = std::fs::remove_dir(&dir);

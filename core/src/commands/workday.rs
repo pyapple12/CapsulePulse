@@ -2,6 +2,7 @@
 //! 事务次序定案：库写入先行、状态转移殿后（中途失败不污染内存态，可安全重试）；
 //! 自动下班以"上班 + N"回填时刻关班（发现可迟到、账目准时）。锁序见 AppContext 注释。
 
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use chrono::{Datelike, Local, TimeZone};
@@ -154,6 +155,8 @@ pub(super) fn day_summary_inner<C: Clock>(
     let mut summary = reduce_day(&windows, &seg_events, open_tail);
     if offset == 0 || open_tail {
         summary.used_secs = crate::workday::day_used_secs(&windows);
+        // FIX006.4：12h 硬顶判定下沉后端（前端只读结果，不再自算）
+        summary.cap_reached = summary.used_secs >= i64::from(OVERTIME_CAP_HOURS) * 3_600;
         if open_tail {
             if let Some(&(shift_start, _)) = windows.last() {
                 let bc = day_budget_context(ctx, shift_start, now_secs)?;
@@ -161,6 +164,12 @@ pub(super) fn day_summary_inner<C: Clock>(
                 summary.budget_hours = budget;
                 summary.remaining_secs =
                     crate::workday::shift_remaining_secs(budget, bc.used_before_shift_secs);
+                // FIX006.4：可加班 = 未到 12h 硬顶 && 未跨日（now 与打卡同一日历日）——前端不再自算
+                let crossed = match summary.duty_started_at {
+                    Some(start) => local_day_start(start)? != local_day_start(now_secs)?,
+                    None => false,
+                };
+                summary.can_overtime = budget < OVERTIME_CAP_HOURS && !crossed;
             }
         }
     }
@@ -894,8 +903,14 @@ pub(super) fn deliver_auto_out<C: Clock>(
     ctx: &AppContext<C>,
     at: i64,
 ) -> Result<(), CommandError> {
-    if let Ok(mut slot) = ctx.auto_out_notice.lock() {
-        *slot = Some(at);
+    // FIX006.7：通知槽写入失败不再静默（只记一次）
+    static NOTICE_POISON_LOGGED: AtomicBool = AtomicBool::new(false);
+    match ctx.auto_out_notice.lock() {
+        Ok(mut slot) => *slot = Some(at),
+        Err(_) => crate::warn_diag_once(
+            &NOTICE_POISON_LOGGED,
+            "自动下班通知槽锁中毒，前端可能取不到补拉提示",
+        ),
     }
     app.emit("workday-auto-out", at)
         .map_err(|e| CommandError::Event(e.to_string()))
@@ -1033,10 +1048,7 @@ mod tests {
         );
         // 打卡即工作（PATCH002）：会话直接处于 Running，无需再 start
         assert_eq!(
-            super::super::session::status_snapshot(&ctx)
-                .unwrap()
-                .0
-                .state,
+            super::super::session::status_snapshot(&ctx).unwrap().state,
             "running",
             "打卡即工作"
         );
@@ -1089,10 +1101,7 @@ mod tests {
         assert!(kinds.contains(&EventKind::ClockOut));
         assert_eq!(*ctx.workday.lock().unwrap(), WorkdayState::Off);
         assert_eq!(
-            super::super::session::status_snapshot(&ctx)
-                .unwrap()
-                .0
-                .state,
+            super::super::session::status_snapshot(&ctx).unwrap().state,
             "idle"
         );
     }
@@ -1306,7 +1315,7 @@ mod tests {
             "读数 = 段起 1_000 → now（停机计入）"
         );
         assert!(ctx.workday.lock().unwrap().is_on_duty(), "恢复在岗");
-        let status = super::super::session::status_snapshot(&ctx).unwrap().0;
+        let status = super::super::session::status_snapshot(&ctx).unwrap();
         assert_eq!(status.state, "running", "恢复运行态（无缝续）");
         assert_eq!(status.total_ms, 400_000, "大计时器含停机时长");
         assert_eq!(
@@ -1356,10 +1365,7 @@ mod tests {
         );
         assert!(rows2.contains(&(beat2, EventKind::CrashClockOut)));
         assert_eq!(
-            super::super::session::status_snapshot(&ctx2)
-                .unwrap()
-                .0
-                .state,
+            super::super::session::status_snapshot(&ctx2).unwrap().state,
             "idle"
         );
 
@@ -1528,7 +1534,7 @@ mod tests {
     }
 
     /// W4：day_detail 装配——种子归约为三值与区块（在岗 8h/工作 3h/休息 5h）。
-    /// PL025.6：在岗窗口来自 workdays 行（数据日 = 打卡日），事件只补段末。
+    /// PL025.6/PL027.6：在岗窗口由 `duty_windows_for_day` **从流水推出**（数据日 = 打卡日），事件只补段末。
     #[test]
     fn day_detail_reduces_seeded_events() {
         let ctx = ctx(FakeClock::new());
@@ -1816,7 +1822,7 @@ mod tests {
     }
 
     /// 在"今日零点 + day_shift 日"种一个完整班：上班 09:00、工作 [09:00, +work)、下班 09:00+duty。
-    /// PL025.6：在岗窗口来自 workdays 行（数据日 = 打卡日），事件补段起止与打卡留痕。
+    /// PL025.6/PL027.6：在岗窗口由 `duty_windows_for_day` **从流水推出**（数据日 = 打卡日），事件补段起止与打卡留痕。
     fn seed_day<C: Clock>(ctx: &AppContext<C>, day_shift: i64, work: i64, duty: i64) {
         let base = period::day_start_secs(&Local::now()) + day_shift * 86_400 + 9 * 3_600;
         let storage = ctx.storage.lock().unwrap();
@@ -2188,10 +2194,52 @@ mod tests {
         );
         assert_eq!(night.used_secs, 4 * 3_600, "已用 = 22:00 → 02:00");
         assert_eq!(night.duty_ended_at, None, "末窗未关 = 在岗");
+        assert_eq!(
+            night.shift_start,
+            Some(in_at),
+            "FIX006.4：当前班起点 = 末窗起点"
+        );
+        assert!(!night.can_overtime, "FIX006.4：跨日 ⇒ 不给加班");
+        assert!(!night.cap_reached, "FIX006.4：4h 未到 12h 硬顶");
 
         let today = day_summary_inner(&ctx, 0, now).unwrap();
         assert_eq!(today.budget_hours, 0, "日历今日不是数据日 → 字段保持 0");
         assert_eq!(today.remaining_secs, 0);
         assert_eq!(today.used_secs, 0);
+        assert_eq!(
+            today.shift_start, None,
+            "FIX006.4：非数据日无在岗窗 ⇒ 无当前班起点"
+        );
+        assert!(!today.can_overtime);
+        assert!(!today.cap_reached);
+    }
+
+    /// FIX006.4：两枚派生标志的边界——同日未跨零点且基准未到 12h ⇒ 可加班；
+    /// 基准已到 12h（budget == 硬顶）⇒ 不可加班；在岗累计 ≥12h ⇒ 到顶。
+    #[test]
+    fn day_summary_derives_overtime_flags() {
+        let ctx = ctx(FakeClock::new());
+        let day_start = period::day_start_secs(&Local::now());
+        let in_at = day_start + 3_600; // 今日 01:00
+        let now = day_start + 4 * 3_600; // 今日 04:00
+        clock_in_inner(&ctx, in_at).unwrap();
+
+        // 基准 8h、同日、在岗 3h ⇒ 可加班且未到顶
+        let sum = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(sum.shift_start, Some(in_at));
+        assert_eq!(sum.budget_hours, 8);
+        assert!(sum.can_overtime, "同日未跨零点、基准未到 12h ⇒ 可加班");
+        assert!(!sum.cap_reached, "3h < 12h");
+
+        // 基准 = 12h 硬顶 ⇒ 不可加班
+        ctx.settings.lock().unwrap().workday_auto_out_hours = 12;
+        let at_cap = day_summary_inner(&ctx, 0, now).unwrap();
+        assert_eq!(at_cap.budget_hours, 12);
+        assert!(!at_cap.can_overtime, "基准已到 12h 硬顶 ⇒ 不给加班");
+
+        // 在岗累计 ≥12h ⇒ 到顶
+        let long = day_summary_inner(&ctx, 0, day_start + 13 * 3_600).unwrap();
+        assert!(long.used_secs >= 12 * 3_600);
+        assert!(long.cap_reached, "FIX006.4：≥12h ⇒ 到顶");
     }
 }

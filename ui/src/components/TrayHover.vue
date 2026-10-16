@@ -3,7 +3,8 @@
  * 3 行（在岗 / 暂下班）。**几何归 Rust**：宽固定 `hover::WINDOW_WIDTH`、高由本组件量内容后
  * 经 `tray_hover_resize` 命令重设（JS `setSize` 需 ACL 会静默拒绝）；本组件只渲染 + 量高。
  * 数据：挂载拉一次 + 后端每次显示与每秒节拍推 `hover-update`（PATCH007.1/.6）。
- * 格式：一律 `XX小时XX分钟`（PATCH007.8，展示层统一口径）。布局：**全部左对齐**。 */
+ * 格式：行①②数字为 `X小时Y分钟`（数字列右对齐）；行③「离休息提醒」为 `X.X 分钟`（一位小数）。
+ * 布局：**全部左对齐**。 */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";

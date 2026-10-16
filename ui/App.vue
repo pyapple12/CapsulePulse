@@ -17,7 +17,6 @@ import type {
   ReminderSettings,
   SessionStatus,
 } from "./types";
-import { OVERTIME_CAP_HOURS } from "./types";
 // 展示格式化共享助手（FIX002.13 收敛）
 import { hhmm } from "./format";
 // 标题粒子化视觉件（design initTitleParticles 1:1，reduced-motion 内部退避静态文字）
@@ -212,7 +211,10 @@ async function refreshSettings(): Promise<void> {
   try {
     settings.value = await invoke<ReminderSettings>("get_settings");
   } catch (err) {
+    // FIX006.3（方案 C）：读取失败**主动可见报错**（不再静默）；前端也不再造 50/8 默认值，
+    // 未就绪期间沙漏不画水位、电池不判加班区（TimerCard 见 undefined 即按"未知"处理）
     console.error("get_settings 调用失败", err);
+    actionError.value = "设置加载失败，请重启应用重试";
   }
 }
 
@@ -547,23 +549,12 @@ function closeAutoOutPending(): void {
   }
 }
 
-/** 加班钮可见性（PATCH005.3）：**到顶**（今日上限已 12h，+4 无意义）或**跨日**（零点后本数据日
- * 不再给加班，只给下班）→ 隐藏。依赖 autoOutLeft（框开着时每秒刷新）保证到点与跨零点判定随之更新。 */
+/** 加班钮可见性：**后端派生** `can_overtime`（FIX006.4——"到顶"与"跨日"两条业务规则下沉后端，
+ * 前端不再自算日历日比较；后端 `overtime` 命令仍是权威门禁，跨日再点会得到明确错误）。
+ * 依赖 autoOutLeft（框开着时每秒刷新）保证到点与跨零点判定随之更新。 */
 const canOvertime = computed(() => {
   void autoOutLeft.value;
-  const d = day.value;
-  if (d == null || d.duty_started_at == null) {
-    return false;
-  }
-  if (d.budget_hours >= OVERTIME_CAP_HOURS) {
-    return false; // 到顶
-  }
-  // 跨日：now 的日历日 ≠ 今日首次打卡的日历日（数据日 = 打卡日 ⇒ 与"当前班打卡日"等价）
-  const startDay = new Date(d.duty_started_at * 1000);
-  startDay.setHours(0, 0, 0, 0);
-  const nowDay = new Date();
-  nowDay.setHours(0, 0, 0, 0);
-  return startDay.getTime() === nowDay.getTime();
+  return day.value?.can_overtime ?? false;
 });
 
 /** 自动下班框「下班」：立即打卡下班（后端按基准时刻记账） */
@@ -747,8 +738,8 @@ onUnmounted(() => {
       <section class="stage" id="page-timer">
         <TimerCard
           :day="day"
-          :threshold-min="settings?.threshold_min ?? 50"
-          :auto-out-hours="settings?.workday_auto_out_hours ?? 8"
+          :threshold-min="settings?.threshold_min"
+          :auto-out-hours="settings?.workday_auto_out_hours"
           @changed="onTimerChanged"
           @error="actionError = $event"
           @session="onSessionHint"
@@ -832,11 +823,13 @@ onUnmounted(() => {
       @cancel="onConfirmCancel"
     />
 
-    <!-- PL025.8 自动下班确认框（到点前 60s 弹出，复用同一形态）：倒计时 + 下班/加班 -->
+    <!-- PL025.8 自动下班确认框（到点前 60s 弹出，复用同一形态）：倒计时 + 下班/加班
+         FIX006.3：文案的"满 N 小时"只取后端 `budget_hours`（框仅在岗时开 ⇒ 该值必已填），
+         不再兜 `settings` / 8 -->
     <ConfirmModal
       :open="autoOutDue != null"
       title="即将自动下班"
-      :message="`今日在岗累计满 ${day?.budget_hours ?? settings?.workday_auto_out_hours ?? 8} 小时，到点将自动下班。`"
+      :message="`今日在岗累计满 ${day?.budget_hours ?? 0} 小时，到点将自动下班。`"
       :note="autoOutLeft > 0 ? `剩余 ${autoOutLeft} 秒` : '正在自动下班…'"
       ok-text="下班"
       cancel-text="加班"

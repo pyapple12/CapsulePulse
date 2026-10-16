@@ -197,7 +197,7 @@ mod tests {
         let _ = std::fs::remove_file(&p);
     }
 
-    /// 自动下班小时数越界（0 / 73）保存与载入均拒绝（合法 1–72）。
+    /// 自动下班小时数越界（0 / 73）保存与载入均拒绝（合法 **4–12**）。
     #[test]
     fn auto_hours_out_of_range_rejected() {
         let p = temp_path("auto-range");

@@ -23,6 +23,7 @@ pub mod workday;
 mod diag;
 mod glass_backdrop;
 mod paths;
+mod single_instance;
 
 pub mod aumid;
 
@@ -48,6 +49,15 @@ use tauri::{
 pub(crate) fn warn_diag(msg: &str) {
     eprintln!("{msg}");
     diag::log(msg);
+}
+
+/// 运行期警告双写**只记一次**（FIX006.7）：面向热路径（100ms 守候循环）与终态失败（锁中毒
+/// 不可恢复、窗口查询失败多为持续态）——每拍落档会把 `pulse.log` 刷爆，而事件本身只发生一次。
+/// 全项目失败分支**统一走本助手**（含低频路径，写法一致）；各调用点自带 `AtomicBool` 闩。
+pub(crate) fn warn_diag_once(flag: &AtomicBool, msg: &str) {
+    if !flag.swap(true, Ordering::Relaxed) {
+        warn_diag(msg);
+    }
 }
 
 // —— 贴边吸附状态机（PL028.3，抄 CT PL017.4「A 案松手吸附」）——
@@ -251,9 +261,21 @@ pub(crate) fn cursor_in_window(window: &tauri::WebviewWindow) -> bool {
 /// 菜单窗此刻是否开着（PATCH008.6）：hover 守候的 `Suppressed` 锁死事实源。
 /// **只允许锁外调用**：`is_visible` 走事件循环同步等待主线程应答，锁内调用 = 互挂死锁。
 fn menu_is_open(app: &AppHandle) -> bool {
-    app.get_webview_window("tray-menu")
-        .map(|window| window.is_visible().unwrap_or(false))
-        .unwrap_or(false)
+    // FIX006.7：热路径（100ms 守候每拍调）——查询失败只记一次（当"未开"处理，方向安全）
+    static VISIBLE_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
+    match app.get_webview_window("tray-menu") {
+        Some(window) => match window.is_visible() {
+            Ok(visible) => visible,
+            Err(err) => {
+                warn_diag_once(
+                    &VISIBLE_QUERY_LOGGED,
+                    &format!("菜单窗可见性查询失败（按未开处理）：{err}"),
+                );
+                false
+            }
+        },
+        None => false,
+    }
 }
 
 /// 悬浮窗锚定（PATCH007.2，抄 CT 预览窗几何）：右缘对齐托盘图标右缘；默认图标上方，屏上缘
@@ -278,9 +300,14 @@ fn anchor_tray_hover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32, i3
 /// 重锚悬浮窗（PATCH007.8）：窗高变化后重算位置（**下缘保持"托盘顶 − 间距"、顶缘移动** ——
 /// CT `reanchor_to_tray` 同款，用户定案的收缩方向）。锚点从锁内拷出（窗口调用锁外）。
 pub(crate) fn reanchor_tray_hover(window: &tauri::WebviewWindow) {
+    // FIX006.7：锚点读取失败只记一次（锁中毒为终态）
+    static POISON_LOGGED: AtomicBool = AtomicBool::new(false);
     let anchor = match HOVER_WATCH.lock() {
         Ok(watch) => watch.anchor,
-        Err(_) => None,
+        Err(_) => {
+            warn_diag_once(&POISON_LOGGED, "悬浮窗重锚：HOVER_WATCH 锁中毒，退默认落位");
+            None
+        }
     };
     anchor_tray_hover(window, anchor);
 }
@@ -322,8 +349,15 @@ fn hide_tray_hover(app: &AppHandle) {
 /// 托盘右键（PATCH008.6）：先收悬浮窗 + **转 `Suppressed` 锁死**（菜单窗即将弹出，照 CT）——
 /// 守候线程据菜单窗可见性维持锁死，菜单收起后回 `Idle`（需新 `Enter` 重新移入图标才再出卡）。
 fn dismiss_tray_hover(app: &AppHandle) {
+    // FIX006.7：相位写入失败只记一次（隐藏动作照做）
+    static POISON_LOGGED: AtomicBool = AtomicBool::new(false);
     if let Ok(mut watch) = HOVER_WATCH.lock() {
         watch.phase = Phase::Suppressed;
+    } else {
+        warn_diag_once(
+            &POISON_LOGGED,
+            "托盘右键：HOVER_WATCH 锁中毒，相位未转 Suppressed",
+        );
     }
     hide_tray_hover(app);
 }
@@ -339,7 +373,19 @@ fn on_tray_right_button(app: &AppHandle, rect: tauri::Rect) {
     let Some(menu_win) = app.get_webview_window("tray-menu") else {
         return;
     };
-    if menu_win.is_visible().unwrap_or(false) {
+    // FIX006.7：可见性查询失败不再静默（只记一次；按"菜单未开"继续）
+    static VISIBLE_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
+    let menu_visible = match menu_win.is_visible() {
+        Ok(visible) => visible,
+        Err(err) => {
+            warn_diag_once(
+                &VISIBLE_QUERY_LOGGED,
+                &format!("托盘右键：菜单窗可见性查询失败（按未开处理）：{err}"),
+            );
+            false
+        }
+    };
+    if menu_visible {
         if let Err(err) = menu_win.hide() {
             warn_diag(&format!("菜单窗收起失败：{err}"));
         }
@@ -360,11 +406,17 @@ fn on_tray_right_button(app: &AppHandle, rect: tauri::Rect) {
 /// **显隐动作由守候线程执行**，本函数只写状态（`Leave` 不再参与判定——CT PL019.1 实证其慢速
 /// 移出会丢失）。
 fn on_tray_hover_enter(rect: tauri::Rect) {
+    // FIX006.7：锚点/相位写入失败只记一次（锁中毒为终态）
+    static POISON_LOGGED: AtomicBool = AtomicBool::new(false);
     let (tauri::Position::Physical(pos), tauri::Size::Physical(size)) = (rect.position, rect.size)
     else {
         return;
     };
     let Ok(mut watch) = HOVER_WATCH.lock() else {
+        warn_diag_once(
+            &POISON_LOGGED,
+            "托盘悬停进入：HOVER_WATCH 锁中毒，锚点与相位未更新",
+        );
         return;
     };
     watch.anchor = Some((pos.x, pos.y, size.width as i32, size.height as i32));
@@ -382,6 +434,9 @@ fn on_tray_hover_enter(rect: tauri::Rect) {
 fn spawn_hover_watcher(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
+        // FIX006.7：本线程是 100ms 热循环 ⇒ 失败只记一次（可见性查询失败为持续态、锁中毒为终态）
+        static VISIBLE_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
+        static POISON_LOGGED: AtomicBool = AtomicBool::new(false);
         let mut absent_ticks: u32 = 0;
         let mut push_ticks: u32 = 0;
         loop {
@@ -395,7 +450,13 @@ fn spawn_hover_watcher(app: &AppHandle) {
             };
             absent_ticks = 0;
             // 窗口查询（is_visible / outer_*）与动作（show / hide / set_position）全在锁外执行
-            let visible = window.is_visible().unwrap_or(false);
+            let visible = window.is_visible().unwrap_or_else(|err| {
+                warn_diag_once(
+                    &VISIBLE_QUERY_LOGGED,
+                    &format!("hover 守候：可见性查询失败（按不可见处理）：{err}"),
+                );
+                false
+            });
             let in_window = visible && cursor_in_window(&window);
             // **窗口调用一律锁外**：`menu_is_open` 与 `cursor_in_window` 同属"等主线程应答"的
             // 查询——放进下面的锁块内会与主线程（`on_tray_hover_enter` / `dismiss_tray_hover`
@@ -404,8 +465,13 @@ fn spawn_hover_watcher(app: &AppHandle) {
             let (action, anchor, phase_after) = {
                 let mut watch = match HOVER_WATCH.lock() {
                     Ok(guard) => guard,
-                    Err(_) => continue, // 锁中毒：跳过本拍（守候是装饰层，不阻断主流程）
+                    Err(_) => {
+                        // FIX006.7：锁中毒不再静默（只记一次；守候是装饰层，跳过本拍不阻断主流程）
+                        warn_diag_once(&POISON_LOGGED, "hover 守候：HOVER_WATCH 锁中毒，跳过本拍");
+                        continue;
+                    }
                 };
+                // `cursor_in_tray` 返 `Option<bool>`：None 是"无锚点"的正常语义（非错误）⇒ 不落日志
                 let in_tray = cursor_in_tray(watch.anchor).unwrap_or(false);
                 let (next, action) = hover::step_watch(
                     watch.phase.clone(),
@@ -425,7 +491,13 @@ fn spawn_hover_watcher(app: &AppHandle) {
                     let still_shown = HOVER_WATCH
                         .lock()
                         .map(|watch| matches!(watch.phase, Phase::Shown { .. }))
-                        .unwrap_or(false);
+                        .unwrap_or_else(|_| {
+                            warn_diag_once(
+                                &POISON_LOGGED,
+                                "hover 守候：HOVER_WATCH 锁中毒，跳过本轮显示",
+                            );
+                            false
+                        });
                     if !still_shown {
                         continue;
                     }
@@ -706,6 +778,13 @@ fn register_global_shortcuts(app: &tauri::App) -> Result<(), Box<dyn std::error:
 /// 玻璃观感走前端 CT 分态纱方案（失焦 30% 纱、聚焦 0% 纱桌面直透；PL021.4 定案——
 /// DWM 系统背板材质随 CT 化退役，磨砂观感不再由系统层提供）。
 pub fn run() {
+    // 单实例闸门（FIX006.10 定案）：**进程第一行**——第二个实例在此直接退场，**不碰库、不写日志、
+    // 不建窗**（旧插件判定在 setup、晚于开库与留痕，且有"两实例并存"的启动竞态，见 single_instance.rs）。
+    // 命名对象取 `Global\` ⇒ 全机器级判重（跨用户会话）；句柄由内核持有，进程退出自动回收（零残留）
+    let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+    if single_instance::enforce(&context.config().identifier) == single_instance::Gate::Second {
+        std::process::exit(single_instance::SECOND_INSTANCE_EXIT);
+    }
     // 存储 + 设置：默认运行时路径（configs/ + data/，双落址见 paths）；失败严格报错退出（错误策略主线）
     let storage = match Storage::open_default() {
         Ok(storage) => storage,
@@ -749,10 +828,6 @@ pub fn run() {
         }
     };
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 二次启动：唤起已有主窗口（单实例，防双开写同一 data/pulse.db）
-            show_main_window(app);
-        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppContext {
@@ -864,6 +939,9 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // FIX006.7：setup 内失败分支的"只记一次"闩（与热路径同一写法）
+            static SETTINGS_POISON_LOGGED: AtomicBool = AtomicBool::new(false);
+            static RECOVERY_POISON_LOGGED: AtomicBool = AtomicBool::new(false);
             // PANIC 取证（y.problems#5①）：默认 hook 只把 panic 打到 stderr（GUI 进程无人看见），
             // 持锁线程 panic 后只剩"锁中毒"连锁日志、真凶无痕——这里链式挂一个 diag 落 logger，
             // 消息 + 位置 + 线程名进 data/pulse.log，复现即可定位根因
@@ -874,6 +952,21 @@ pub fn run() {
                 crate::diag::log(&format!("PANIC（线程 {name}）：{info}"));
                 default_hook(info);
             }));
+            // 单实例唤起守候（FIX006.10）：第二实例发的 `Global\…-show` 脉冲 ⇒ 把主窗唤到前台
+            // （等价旧插件的二次启动回调）。**必须 run_on_main_thread**：窗口动作不能在守候线程
+            // 直接调（实测：直接调 show/unminimize/set_focus 三连失败 "failed to send message to
+            // the webview"；旧插件的回调本就跑在主线程上，故无此问题）
+            {
+                let identifier = app.config().identifier.clone();
+                let handle = app.handle().clone();
+                single_instance::spawn_show_listener(&identifier, move || {
+                    let for_main = handle.clone();
+                    if let Err(err) = handle.run_on_main_thread(move || show_main_window(&for_main))
+                    {
+                        warn_diag(&format!("单实例唤起：切主线程失败：{err}"));
+                    }
+                });
+            }
             // 玻璃效果不在此挂载（CT 定案）：恒纯 alpha 透明（tauri.conf transparent），
             // 分态纱由前端 ::before 纱层承担（失焦 30%/聚焦 0%），Rust 仅转发 window-focus
             // 主窗口整定：① 位置记忆（PATCH001.4）——存档在屏内 → 恢复，否则默认右上落位；
@@ -885,12 +978,17 @@ pub fn run() {
                     warn_diag(&err);
                 }
                 // 置顶按 config 应用（PL028.3）：失败仅日志——设置已落库，下次启动重试即自愈
-                let on_top = app
-                    .state::<AppContext>()
-                    .settings
-                    .lock()
-                    .map(|s| s.always_on_top)
-                    .unwrap_or(false);
+                // FIX006.7：锁中毒不再静默（只记一次）
+                let on_top = match app.state::<AppContext>().settings.lock() {
+                    Ok(s) => s.always_on_top,
+                    Err(_) => {
+                        warn_diag_once(
+                            &SETTINGS_POISON_LOGGED,
+                            "启动置顶：设置锁中毒，按不置顶处理（下次启动自愈）",
+                        );
+                        false
+                    }
+                };
                 if let Err(err) = window.set_always_on_top(on_top) {
                     warn_diag(&format!("启动置顶应用失败：{err}"));
                 }
@@ -1014,8 +1112,13 @@ pub fn run() {
                         if let Some(at) = outcome.closed_at {
                             warn_diag(&format!("启动恢复：已按 {at} 补下班记账"));
                             // 一次性提示（PL027.8）：仅"判下班"分支留痕供前端弹条
-                            if let Ok(mut slot) = ctx.recovery.lock() {
-                                *slot = Some(outcome);
+                            // FIX006.7：留痕失败不再静默（只记一次）
+                            match ctx.recovery.lock() {
+                                Ok(mut slot) => *slot = Some(outcome),
+                                Err(_) => warn_diag_once(
+                                    &RECOVERY_POISON_LOGGED,
+                                    "启动恢复：恢复提示槽锁中毒，本次不弹提示条",
+                                ),
                             }
                         }
                     }
@@ -1032,6 +1135,8 @@ pub fn run() {
                 Ok(None) => {}
                 Err(err) => warn_diag(&format!("自动下班基准重建失败（兜底线程未武装）：{err}")),
             }
+            // 提醒评估守候线程（FIX006.5）：后端唯一评估者——主窗隐藏 / 前端崩溃也准时响铃
+            commands::reminder::spawn_reminder_watcher(&app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

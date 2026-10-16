@@ -4,7 +4,7 @@
 //! 在 cargo test 下直测，禁真实等待（AGENTS 陷阱清单）；② OnDuty 携带库行 id（下班落库
 //! 的行句柄随态流转，免二次查询——对条目"OnDuty{clock_in_at}"的实现细则扩展）；
 //! ③ reduce_day 输出结构直接 derive Serialize 作为 IPC DTO 单一来源（serde 非 tauri，纯度不破）。
-//! 关联：storage.rs workdays/events 两表（数据源），commands/workday.rs（接线）。
+//! 关联：storage.rs 的 **`events` 单表（唯一事实源；旧 `workdays`/`sessions` 两表 PL027 已退役）** + `runtime`/`days` 缓存层，commands/workday.rs（接线）。
 
 use serde::Serialize;
 use thiserror::Error;
@@ -439,11 +439,20 @@ pub struct DaySummary {
     /// 本班剩余预算秒数（PATCH005.3：上限 − 本班前已累计）——表盘底轨跨度与"轴末"同一口径；
     /// 未在岗（暂下班）与过去日为 0（那时不画蓝条、轴末取末段末尾）。
     pub remaining_secs: i64,
+    /// **当前班起点**（FIX006.4：最后一个班间空档之后的第一块起点 = 末个在岗窗口起点，Unix 秒）；
+    /// 未在岗（末窗已闭合）为 None。表盘底轨与电池共用同一事实源（原前端两处各推一份）。
+    pub shift_start: Option<i64>,
+    /// **今日可加班**（FIX006.4：在岗 && 未到 12h 硬顶 && 未跨日）；其余情形 false。
+    /// 自动下班确认框的「加班」钮可见性据此（原前端自算"到顶 + 跨日"）。
+    pub can_overtime: bool,
+    /// **今日已到 12h 硬顶**（FIX006.4：`used_secs >= OVERTIME_CAP_HOURS × 3600`）；其余情形 false。
+    /// 上班钮置灰据此（原前端自算）。
+    pub cap_reached: bool,
 }
 
 /// 事件归约纯函数（PL025.6 窗口口径）：单日数据日的在岗窗口 + 事件流 → 三值 + 图谱区块
 /// （PL005 图表与三值唯一取数逻辑）。规则：**在岗窗口由调用方给定**——数据日 = 上班打卡日，
-/// 窗口取该日 `clock_in` 的 workdays 行（`clock_out` 为窗口末，未下班行闭于 now；可多段 =
+/// 窗口由 `duty_windows_for_day` **从流水推出**（该数据日 `clock_in` 开窗、下班事件关窗；未关的末窗闭于 now；可多段 =
 /// 同日多班；跨零点尾巴随窗口天然带入，**不再按自然日切分**）；`segment_start → segment_end`
 /// 记工作块，窗口内空隙记休息块；**孤儿段末丢弃**（无起点的 segment_end 无窗口可归，不再从
 /// 窗口起点起算）；clock_in / clock_out / auto_clock_out / overtime 只作留痕，不参与窗口推导。
@@ -502,6 +511,10 @@ pub fn reduce_day(
         budget_hours: 0,
         used_secs: 0,
         remaining_secs: 0,
+        // FIX006.4：shift_start 由本函数按 open_tail 填；可加班 / 到顶由命令层按预算与"今日"填
+        shift_start: None,
+        can_overtime: false,
+        cap_reached: false,
     };
     let mut merged: Vec<(i64, i64)> = Vec::new();
     for &(ds, de) in windows {
@@ -561,6 +574,12 @@ pub fn reduce_day(
     if open_tail {
         summary.duty_ended_at = None;
     }
+    // FIX006.4：当前班起点 = 末个在岗窗口起点（= 最后一个班间空档之后的第一块起点）；未在岗为 None
+    summary.shift_start = if open_tail {
+        windows.last().map(|&(start, _)| start)
+    } else {
+        None
+    };
     summary
 }
 #[cfg(test)]

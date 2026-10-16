@@ -8,6 +8,7 @@
 //! **窗口调用一律锁外**：Tauri 非主线程窗口调用同步等待主线程应答，持锁调用 = 与主线程互等
 //! 死锁（CT PL020.3 两轮实证）——本模块锁内只做纯数据读写，窗口查询/动作全在锁外。
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -25,16 +26,27 @@ const WATCH_STEP_MS: u64 = 100;
 /// 菜单锚点（托盘图标矩形，物理坐标 x / y / 宽 / 高）——右键时记录；`None` = 本会话未右键过
 static MENU_ANCHOR: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 
-/// 记录托盘图标矩形锚点（右键事件路径调用；锁中毒静默跳过——锚点缺失只影响定位，不阻断）。
+/// 记录托盘图标矩形锚点（右键事件路径调用；锁中毒落档一次后跳过——锚点缺失只影响定位，不阻断）。
 pub fn set_anchor(icon: (i32, i32, i32, i32)) {
-    if let Ok(mut slot) = MENU_ANCHOR.lock() {
-        *slot = Some(icon);
+    // FIX006.7：锁中毒不再静默（只记一次）
+    static POISON_LOGGED: AtomicBool = AtomicBool::new(false);
+    match MENU_ANCHOR.lock() {
+        Ok(mut slot) => *slot = Some(icon),
+        Err(_) => crate::warn_diag_once(&POISON_LOGGED, "菜单锚点：MENU_ANCHOR 锁中毒，锚点未记录"),
     }
 }
 
 /// 取锚点副本（锁内只拷值；窗口调用一律锁外）。
 pub fn anchor() -> Option<(i32, i32, i32, i32)> {
-    MENU_ANCHOR.lock().ok().and_then(|slot| *slot)
+    // FIX006.7：锁中毒不再静默（只记一次）
+    static POISON_LOGGED: AtomicBool = AtomicBool::new(false);
+    match MENU_ANCHOR.lock() {
+        Ok(slot) => *slot,
+        Err(_) => {
+            crate::warn_diag_once(&POISON_LOGGED, "菜单锚点：MENU_ANCHOR 锁中毒，按无锚点处理");
+            None
+        }
+    }
 }
 
 /// 菜单窗锚定（纯函数，单测直测；照 CT 三段规则）。
@@ -68,17 +80,36 @@ pub fn anchor_menu(
 
 /// 按锚点重定位菜单窗（尺寸变化后调用；锚点未记录则跳过——此时窗也从未显示过）。
 pub fn reanchor_menu(window: &tauri::WebviewWindow) {
+    // FIX006.7：尺寸/显示器查询失败不再静默（各只记一次）
+    static SIZE_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
+    static MONITOR_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
     let Some(icon) = anchor() else {
         return;
     };
-    let Ok(size) = window.outer_size() else {
-        return;
+    let size = match window.outer_size() {
+        Ok(size) => size,
+        Err(err) => {
+            crate::warn_diag_once(
+                &SIZE_QUERY_LOGGED,
+                &format!("菜单窗重锚：尺寸读取失败，跳过重锚：{err}"),
+            );
+            return;
+        }
     };
-    let screen = window.current_monitor().ok().flatten().map(|monitor| {
-        let pos = monitor.position();
-        let sz = monitor.size();
-        (pos.x, pos.y, sz.width as i32, sz.height as i32)
-    });
+    let screen = match window.current_monitor() {
+        Ok(monitor) => monitor.map(|monitor| {
+            let pos = monitor.position();
+            let sz = monitor.size();
+            (pos.x, pos.y, sz.width as i32, sz.height as i32)
+        }),
+        Err(err) => {
+            crate::warn_diag_once(
+                &MONITOR_QUERY_LOGGED,
+                &format!("菜单窗重锚：显示器查询失败，按无边屏处理：{err}"),
+            );
+            None
+        }
+    };
     let (x, y) = anchor_menu(icon, (size.width, size.height), screen);
     if let Err(err) = window.set_position(tauri::PhysicalPosition::new(x, y)) {
         crate::warn_diag(&format!("菜单窗定位失败：{err}"));
@@ -91,6 +122,8 @@ pub fn reanchor_menu(window: &tauri::WebviewWindow) {
 pub fn spawn_menu_watch(app: &tauri::AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
+        // FIX006.7：本线程是 100ms 热循环 ⇒ 可见性查询失败只记一次（随后按已收起退出）
+        static VISIBLE_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
         // 宽限：等弹出用的右键松开再开始点外判定（轮询松手，不抢焦点）
         while crate::win_input::right_down() {
             std::thread::sleep(Duration::from_millis(50));
@@ -100,7 +133,17 @@ pub fn spawn_menu_watch(app: &tauri::AppHandle) {
             let Some(window) = handle.get_webview_window("tray-menu") else {
                 return;
             };
-            if !window.is_visible().unwrap_or(false) {
+            let visible = match window.is_visible() {
+                Ok(visible) => visible,
+                Err(err) => {
+                    crate::warn_diag_once(
+                        &VISIBLE_QUERY_LOGGED,
+                        &format!("菜单窗守候：可见性查询失败，按已收起退出：{err}"),
+                    );
+                    return;
+                }
+            };
+            if !visible {
                 return; // 菜单项动作已收起（命令路径）
             }
             let clicked_outside = (crate::win_input::left_down() || crate::win_input::right_down())

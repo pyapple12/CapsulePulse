@@ -145,3 +145,15 @@
     - 确认后的一次性庆祝动效（打卡成功：扫光 / 粒子 / 数字跳动；下班成功：类似"下班啦"的轻量动画）
     - 与标题粒子引擎（`ui/src/title-particles.ts`）复用同一套粒子基建，避免引入新依赖
     - 目标：让"打卡 / 下班"成为有情绪反馈的仪式感动作，作为对外卖点之一
+
+14. **macOS/Linux 无单实例判重（自有闸门取代插件后的平台缺口）**（2026-10-17 记录，待 Phase 7 适配）：
+
+    当前问题：单实例闸门已由 `tauri-plugin-single-instance` 换成**自有实现**（`core/src/single_instance.rs`：命名互斥体判重 + 命名事件唤前，`Global\` 全机器级），**该插件依赖已删除**。自有实现当前只覆盖 **Windows**——非 Windows 分支直接"不判重"⇒ **macOS/Linux 上同一应用可被启动多个实例**（各实例共享同一 `data/pulse.db`），即"插件时代有判重、现在没有"的**能力回退**。
+
+    影响面：macOS/Linux **本就未实机验证**（捆绑 `problems#1` 三端适配），Windows 侧不受影响（唯一实机平台，已实测通过：第二实例进程数恒 1、零日志、能唤回首窗）。
+
+    未来方案：
+
+    - 随 **Phase 7 三端适配**一并补：Unix 用 `flock`/`fcntl` 独占 `data/pulse.lock` 判重，配 `SIGUSR1` 或本地 socket 做"唤前"信号；macOS 亦可走 `NSDistributedNotificationCenter`
+    - 或届时重新评估引入跨平台单实例库（按"不提前设计"原则，以实测收益决定）
+    - 补实现后与 Windows 分支同口径验收：第二实例零副作用 + 能唤回首窗

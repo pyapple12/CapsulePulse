@@ -6,6 +6,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 import type { DaySummary, WeekDay, WorkdayTotal } from "../types";
+import { pad, splitDuration } from "../format";
+import { daySegments, type DaySegment } from "../src/day-segments";
 import { useGlassBar } from "../src/use-glass-bar";
 const props = defineProps<{
   refreshKey: number;
@@ -117,11 +119,8 @@ function graphHhmm(ms: number): string {
 }
 
 /** 已删令牌无关：本表为 design graph.css 消费的纯数值换算 */
-interface GraphSeg {
-  t0: number;
-  t1: number;
-  kind: "work" | "rest" | "gap";
-}
+/** 段序列类型（FIX006.4：并入共享构建器 `daySegments` 的 `DaySegment`，原本地结构重复已消除） */
+type GraphSeg = DaySegment;
 
 /** graphSvg 内的子节点引用（bars 复用更新 / comet 白纹容器） */
 const barsEl = ref<SVGGElement | null>(null);
@@ -185,35 +184,18 @@ function renderGraph(): void {
   // 节点、彗星走廊**全走同一条映射**，颜色分界与节点圆心因此严丝合缝；端头节点的圆心由下面的
   // "夹进 [6, W−6]"处理（否则时刻落在画布边缘的节点会被裁成半颗）。
 
-  // 段源：真实块（秒 → ms）；同态延伸只做同 kind（异态分界由下次刷新的块数据承担）
-  const blocks: GraphSeg[] = d.blocks.map((b) => ({
-    t0: b.start * 1000,
-    t1: (b.end || Math.floor(nowMs / 1000)) * 1000,
-    kind: b.kind,
-  }));
-  // PL025.7：blocks 只覆盖在岗窗口，时间轴上的空洞 = 不在岗空档（同日两班之间等）→ 插 gap 段
-  const segs: GraphSeg[] = [];
-  let lastEnd: number | null = null;
-  for (const b of blocks) {
-    if (lastEnd != null && b.t0 > lastEnd) {
-      segs.push({ t0: lastEnd, t1: b.t0, kind: "gap" });
-    }
-    segs.push(b);
-    lastEnd = b.t1;
-  }
-  const tail = segs[segs.length - 1];
-  if (onDutyToday && tail) {
-    const wallNow = Math.floor(nowMs / 1000) * 1000;
-    if (wallNow > tail.t1) {
-      tail.t1 = wallNow;
-    }
-  }
+  // 段源（FIX006.4）：共享 `daySegments` 补班间空档（原与 TimerCard 各写一份，已收敛）；
+  // 在岗时末段延伸到"墙钟现在"（活尾巴）——异态分界由下次刷新的块数据承担
+  const segs: GraphSeg[] = daySegments(
+    d.blocks,
+    onDutyToday ? Math.floor(nowMs / 1000) * 1000 : undefined,
+  );
 
   // PL025.10 轴末口径 (a)：今日在岗 → 轴末 = **当前在岗那一班**的打卡 + 自动下班小时
   // （当前班起点 = 最后一个 gap 之后的第一块起点；无 gap 则首块起点）——修掉"再打卡后第二班
   // 超出轴末被裁断"（旧口径恒按今天第一班打卡算）；今日已下班 / 过去日 = 末块末尾（落定重画）
-  const lastGap = [...segs].reverse().find((s) => s.kind === "gap");
-  const currentShiftStart = lastGap ? lastGap.t1 : blocks[0]!.t0;
+  // FIX006.4：当前班起点改读后端 `shift_start`（与 TimerCard 底轨同一事实源；原前端自推一份）
+  const currentShiftStart = (d.shift_start ?? 0) * 1000;
   // PATCH005.3：在岗时轴末 = 本班打卡 + **今日剩余**（后端单一来源，前端零估算）；暂下班 = 末段末尾。
   // 轴末保底到 now：预算已耗尽（到点兜底尚未执行）时不把真实块弧裁掉
   const endTs = onDutyToday
@@ -487,12 +469,15 @@ function roundedTopRect(x: number, y: number, w: number, h: number, r: number): 
 }
 
 function fmtCN(min: number): string {
-  return `${Math.floor(min / 60)}小时${Math.round(min) % 60}分钟`;
+  // FIX006.1：进位口径统一走 splitDuration（原自算 `round(min) % 60` 会丢整点进位）
+  const { h, m } = splitDuration(min);
+  return `${h}小时${m}分钟`;
 }
 
 /** 分钟 → "XhYYm"（design fmtHM 1:1：三值卡数字制式，分钟两位补零；周卡日均仍用 fmtCN） */
 function fmtHM(min: number): string {
-  return `${Math.floor(min / 60)}h${String(Math.round(min) % 60).padStart(2, "0")}m`;
+  const { h, m } = splitDuration(min);
+  return `${h}h${pad(m)}m`;
 }
 
 /** 周卡整帧渲染（design renderWeekMock 1:1；数据 = 真实 week_detail，秒 → 分钟） */
@@ -611,8 +596,11 @@ function renderDetail(): void {
   }
   const nowSec = Math.floor(Date.now() / 1000);
   const rows = d.blocks.map((b, i) => {
-    const ongoing = offset.value === 0 && d.duty_ended_at == null && i === d.blocks.length - 1;
-    const endSec = offset.value === 0 ? Math.min(b.end, nowSec) : b.end;
+    // FIX006.2：判据改"是不是当前数据日"——原 `offset === 0` 是"日历今天"，跨零点夜班的数据日
+    // 为 −1 时该页判据为假 ⇒ 在岗那一页永远不显示「至今」（同文件图谱与节拍早已用 dataDayOffset）
+    const isDataDay = offset.value === props.dataDayOffset;
+    const ongoing = isDataDay && d.duty_ended_at == null && i === d.blocks.length - 1;
+    const endSec = isDataDay ? Math.min(b.end, nowSec) : b.end;
     return {
       kind: b.kind,
       startMin: (b.start - (d.duty_started_at ?? 0)) / 60,
@@ -627,7 +615,8 @@ function renderDetail(): void {
 }
 
 function detailTitle(): string {
-  if (offset.value === 0) {
+  // FIX006.2：数据日即"今日"（与周卡"今"标、在岗判据同口径）
+  if (offset.value === props.dataDayOffset) {
     return "今日明细";
   }
   const d = new Date(Date.now() + offset.value * 86_400_000);

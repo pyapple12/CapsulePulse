@@ -7,6 +7,7 @@ use tauri_plugin_notification::NotificationExt;
 
 use super::session::ReminderDecision;
 use super::{lock, poison, AppContext, CommandError};
+use crate::reminder::ReminderConfig;
 use crate::session::Clock;
 use crate::settings::ReminderSettings;
 
@@ -50,6 +51,58 @@ fn send_notification(app: &AppHandle, body: &str) {
         eprintln!("系统通知发送失败（降级仅声音）：{err}");
         crate::diag::log(&format!("系统通知发送失败（降级仅声音）：{err}"));
     }
+}
+
+/// 提醒评估节拍（秒，FIX006.5）：阈值以分钟计，1 秒节拍把"响铃晚于沙子流完"控制在 ≤1 秒。
+const REMINDER_TICK_SECS: u64 = 1;
+
+/// 提醒评估内核（FIX006.5：**后端唯一评估者**）：达阈值 / 到重发点即返回决策，否则 None。
+/// 会推进段内触发状态（`evaluate` 记 `last_fired`）——守候线程与单测共用同一入口；
+/// 前端 `session_status` 只读快照、不再评估（杜绝两处实现与重复响铃）。锁序：session → settings → fire。
+pub(super) fn reminder_check_inner<C: Clock>(
+    ctx: &AppContext<C>,
+) -> Result<Option<ReminderDecision>, CommandError> {
+    let segment = lock(ctx)?.segment_secs();
+    let (threshold_min, notify_enabled, fire_now, refire) = {
+        let settings = poison("设置", ctx.settings.lock())?;
+        let config = ReminderConfig::from_minutes(settings.threshold_min);
+        let mut fire = poison("提醒", ctx.fire.lock())?;
+        // `evaluate` 之前读 `last_fired`——有值即"本段此前已响过" ⇒ 本次是重发（PATCH012.8）
+        let was_fired = fire.last_fired().is_some();
+        let should = fire.evaluate(segment, &config);
+        (
+            settings.threshold_min,
+            settings.notify_enabled,
+            should,
+            was_fired,
+        )
+    };
+    Ok(fire_now.then_some(ReminderDecision {
+        fire: true,
+        threshold_min,
+        refire,
+        notify_enabled,
+    }))
+}
+
+/// 提醒评估守候线程（FIX006.5）：**不依赖前端轮询**——主窗收到托盘 / WebView 节流定时器 /
+/// 前端崩溃时，提醒仍按阈值准时触发（与自动下班兜底线程同一条纪律：功能本体不押在前端活着上）。
+/// 每 [`REMINDER_TICK_SECS`] 秒评估一次；评估只读内存态（零查库）。失败仅落档不阻断。
+pub(crate) fn spawn_reminder_watcher(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(REMINDER_TICK_SECS));
+        let ctx = app.state::<AppContext>();
+        match reminder_check_inner(&ctx) {
+            Ok(Some(decision)) => {
+                if let Err(err) = deliver_reminder(&app, decision) {
+                    crate::warn_diag(&format!("提醒事件发送失败：{err}"));
+                }
+            }
+            Ok(None) => {}
+            Err(err) => crate::warn_diag(&format!("提醒评估失败：{err}")),
+        }
+    });
 }
 
 /// 设置读取。
@@ -468,8 +521,10 @@ mod tests {
         ctx.settings_path = crate::commands::test_support::temp_settings_path("threshold-lock");
         begin_duty(&ctx);
         clock.advance(secs(3_000)); // 满 50 分钟（默认阈值）⇒ 触发并写入 last_fired
-        let (_, decision) = crate::commands::session::status_snapshot(&ctx).unwrap();
-        assert!(decision.fire, "恰达阈值应触发");
+        assert!(
+            reminder_check_inner(&ctx).unwrap().is_some(),
+            "恰达阈值应触发"
+        );
 
         let changed = ReminderSettings {
             threshold_min: 60,
@@ -494,8 +549,7 @@ mod tests {
         ctx.settings_path = crate::commands::test_support::temp_settings_path("threshold-others");
         begin_duty(&ctx);
         clock.advance(secs(3_000));
-        let (_, decision) = crate::commands::session::status_snapshot(&ctx).unwrap();
-        assert!(decision.fire);
+        assert!(reminder_check_inner(&ctx).unwrap().is_some());
 
         let base = get_settings_inner(&ctx).unwrap();
         let toggled = !base.notify_enabled;

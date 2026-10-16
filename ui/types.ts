@@ -40,7 +40,7 @@ export interface ReminderSettings {
   threshold_min: number;
   sound_enabled: boolean;
   notify_enabled: boolean;
-  /** 自动下班时长（小时），与 Rust 侧 1–72 校验一致 */
+  /** 自动下班时长（小时），与 Rust 侧 **4–12** 校验一致 */
   workday_auto_out_hours: number;
   /** 窗口置顶（PL028.3；缺省关）：窗口恒在最前 */
   always_on_top: boolean;
@@ -84,6 +84,12 @@ export interface DaySummary {
   used_secs: number;
   /** 本班剩余预算秒数（PATCH005.3：表盘底轨跨度与"轴末"同一口径；暂下班 / 过去日 0） */
   remaining_secs: number;
+  /** 当前班起点（Unix 秒；FIX006.4 后端派生，未在岗 null）——表盘底轨与电池共用 */
+  shift_start: number | null;
+  /** 今日可加班（FIX006.4 后端派生：在岗 && 未到 12h 硬顶 && 未跨日） */
+  can_overtime: boolean;
+  /** 今日已到 12h 硬顶（FIX006.4 后端派生） */
+  cap_reached: boolean;
 }
 
 /** week_detail 返回体中的单日行（镜像 core/src/commands/workday.rs WeekDay） */
