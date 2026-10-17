@@ -4,8 +4,10 @@
 //! 层边界：业务纯逻辑（session.rs 等）平铺于本 src 下且禁 import tauri，
 //! 装配层只在本文件——纯逻辑可脱离窗口 cargo test 直测。
 //! 玻璃效果：CT 分态纱方案（PL021.4 定案）——恒纯 alpha 透明窗（tauri.conf transparent），
-//! 观感由前端纱层承担（失焦 30% 纱、聚焦 0%），Rust 仅转发 window-focus 焦点态；
-//! DWM 系统背板材质（PL011）已随 CT 化退役，仅保留 Win11 激活描边隐藏（glass_backdrop.rs）；
+//! 观感由前端纱层承担（失焦 30% 纱、聚焦 0%），Rust 转发 window-focus 焦点态；
+//! **Rust 侧另做四件装饰整定**（`glass_backdrop.rs` / `window_icon.rs`）：① 隐藏 Win11 激活描边
+//! ② 补系统圆角 ③ **系统背板**（PL029：板开合 + 聚焦时挂 DWM 亚克力、否则摘回纯透明——PL011 的
+//! 材质曾随 CT 化退役，PL029 以"板开合驱动"的形态重新引入）④ 应用图标按 exe 内嵌多帧取尺寸；
 //! macOS/Linux 延后（y.problems.md #1）。
 
 pub mod commands;
@@ -46,7 +48,10 @@ use tauri::{
 };
 
 /// 运行期警告双写：eprintln（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
-/// 文件日志是唯一落点——FIX003.8）。仅用于失败不中断主流程的容错路径。
+/// 文件日志是唯一落点——FIX003.8）。**全项目失败双写统一走本助手**（**含启动期致命退出路径**，
+/// 见 `run()` 里四处 `exit(1)` 前的调用；热路径另配 [`warn_diag_once`] 上闩——FIX008.15 收口）；
+/// 例外只有**刻意只打 dev 控制台**的两处：`glass_backdrop::apply_round_corners`（Win10 无该
+/// 属性、失败属预期，落 diag 会每次启动写常驻噪音）与其句柄获取失败分支。
 pub(crate) fn warn_diag(msg: &str) {
     eprintln!("{msg}");
     diag::log(msg);
@@ -139,16 +144,32 @@ fn snap_if_needed(window: &tauri::Window) {
     if !snap_on {
         return;
     }
+    // FIX008.4：查询失败只记一次（Moved 事件可高频、失败多为持续态），本轮跳过吸附；
+    // 四步共用一口闩（同根：窗口/显示器不可用）⇒ 首次失败那条日志写清是哪一步。
+    static QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
     let Ok(Some(monitor)) = window.current_monitor() else {
+        warn_diag_once(&QUERY_LOGGED, "贴边吸附：显示器查询失败（本轮跳过吸附）");
         return;
     };
     let Ok(outer) = window.outer_position() else {
+        warn_diag_once(
+            &QUERY_LOGGED,
+            "贴边吸附：窗口外框位置查询失败（本轮跳过吸附）",
+        );
         return;
     };
     let Ok(inner) = window.inner_position() else {
+        warn_diag_once(
+            &QUERY_LOGGED,
+            "贴边吸附：窗口客户区位置查询失败（本轮跳过吸附）",
+        );
         return;
     };
     let Ok(vsize) = window.inner_size() else {
+        warn_diag_once(
+            &QUERY_LOGGED,
+            "贴边吸附：窗口客户区尺寸查询失败（本轮跳过吸附）",
+        );
         return;
     };
     let mp = monitor.position();
@@ -249,11 +270,18 @@ fn cursor_in_tray(anchor: Option<(i32, i32, i32, i32)>) -> Option<bool> {
 /// hide/show 切换期 webview 的 `mouseenter` 可能丢失，物理位置不依赖事件。非 Windows 恒
 /// `false`（无查询能力 ⇒ 卡片不因"光标在卡上"而保持，随 [problems#1] 一并验证）。
 pub(crate) fn cursor_in_window(window: &tauri::WebviewWindow) -> bool {
+    // FIX008.4：查询失败只记一次（本函数在 100ms 悬停守候里每拍调）；语义保持"不在窗内"
+    // （方向安全：宁可收起卡片，也不因查询失败把卡片锁在屏幕上）
+    static CURSOR_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
     let (Some((cx, cy)), Ok(pos), Ok(size)) = (
         win_cursor::cursor_pos(),
         window.outer_position(),
         window.outer_size(),
     ) else {
+        warn_diag_once(
+            &CURSOR_QUERY_LOGGED,
+            "悬浮卡光标判据：窗口/光标查询失败（按不在窗内处理）",
+        );
         return false;
     };
     cx >= pos.x && cx < pos.x + size.width as i32 && cy >= pos.y && cy < pos.y + size.height as i32
@@ -285,7 +313,13 @@ fn anchor_tray_hover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32, i3
     let Some((x, y, w, h)) = anchor else {
         return;
     };
+    // FIX008.4：查询失败只记一次（悬停显示期每拍都会走锚定），本轮停在原位
+    static SIZE_QUERY_LOGGED: AtomicBool = AtomicBool::new(false);
     let Ok(size) = window.outer_size() else {
+        warn_diag_once(
+            &SIZE_QUERY_LOGGED,
+            "悬浮卡锚定：窗口尺寸查询失败（停在原位）",
+        );
         return;
     };
     let px = x + w - size.width as i32; // 右对齐托盘图标
@@ -317,6 +351,11 @@ pub(crate) fn reanchor_tray_hover(window: &tauri::WebviewWindow) {
 /// **每次悬停首帧**与**悬停期每秒节拍**共用本函数（同一单一口径）。任一步失败落日志并返回
 /// `false`（装饰层不阻断主流程——容错白名单登记项；首帧失败则不显示空壳）。
 fn push_hover_summary(app: &AppHandle) -> bool {
+    // FIX008.11：本函数在**悬停首帧 + 悬停期每秒**都跑 ⇒ 两处失败日志各上一口闩（持续失败时
+    // 每拍落档会刷爆 `pulse.log`；与 FIX006.7 / FIX007.1 同一条纪律）。低频点（锚定落位失败、
+    // 收起失败）**不上闩**（每次离开/尺寸变化才一次，刷不起来）。
+    static SUMMARY_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
+    static EMIT_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
     let Some(window) = app.get_webview_window("tray-hover") else {
         return false;
     };
@@ -324,14 +363,20 @@ fn push_hover_summary(app: &AppHandle) -> bool {
     let summary = match commands::hover::hover_summary_inner(&ctx) {
         Ok(summary) => summary,
         Err(err) => {
-            warn_diag(&format!("hover 概览聚合失败（跳过本拍）：{err}"));
+            warn_diag_once(
+                &SUMMARY_FAIL_LOGGED,
+                &format!("hover 概览聚合失败（跳过本拍；后续同类不再重复记录）：{err}"),
+            );
             return false;
         }
     };
     // 窗尺寸**不在此设**（PATCH007.8）：宽固定于 `hover::WINDOW_WIDTH`（创建期已设）、高由
     // 前端量内容后经 `tray_hover_resize` 命令重设 —— 单一归属，避免两处打架
     if let Err(err) = window.emit_to("tray-hover", "hover-update", &summary) {
-        warn_diag(&format!("hover 概览推送失败：{err}"));
+        warn_diag_once(
+            &EMIT_FAIL_LOGGED,
+            &format!("hover 概览推送失败（后续同类不再重复记录）：{err}"),
+        );
         return false;
     }
     true
@@ -831,24 +876,21 @@ pub fn run() {
     let storage = match Storage::open_default() {
         Ok(storage) => storage,
         Err(err) => {
-            diag::log(&format!("存储初始化失败：{err}"));
-            eprintln!("存储初始化失败：{err}");
+            warn_diag(&format!("存储初始化失败：{err}"));
             std::process::exit(1);
         }
     };
     let settings_path = match paths::default_config_path() {
         Ok(path) => path,
         Err(err) => {
-            diag::log(&format!("设置路径解析失败：{err}"));
-            eprintln!("设置路径解析失败：{err}");
+            warn_diag(&format!("设置路径解析失败：{err}"));
             std::process::exit(1);
         }
     };
     let settings = match ReminderSettings::load(&settings_path) {
         Ok(settings) => settings,
         Err(err) => {
-            diag::log(&format!("设置加载失败：{err}"));
-            eprintln!("设置加载失败：{err}");
+            warn_diag(&format!("设置加载失败：{err}"));
             std::process::exit(1);
         }
     };
@@ -864,8 +906,7 @@ pub fn run() {
         }
         Ok(None) => WorkdayState::Off,
         Err(err) => {
-            diag::log(&format!("工作日状态恢复失败：{err}"));
-            eprintln!("工作日状态恢复失败：{err}");
+            warn_diag(&format!("工作日状态恢复失败：{err}"));
             std::process::exit(1);
         }
     };
@@ -991,9 +1032,13 @@ pub fn run() {
                 default_hook(info);
             }));
             // 单实例唤起守候（FIX006.10）：第二实例发的 `Global\…-show` 脉冲 ⇒ 把主窗唤到前台
-            // （等价旧插件的二次启动回调）。**必须 run_on_main_thread**：窗口动作不能在守候线程
-            // 直接调（实测：直接调 show/unminimize/set_focus 三连失败 "failed to send message to
-            // the webview"；旧插件的回调本就跑在主线程上，故无此问题）
+            // （等价旧插件的二次启动回调）。此处**包一层 `run_on_main_thread`**：当年实测直调三连
+            // 失败（"failed to send message to the webview"）。
+            // **FIX008.3 订正（2026-10-17；永久豁免 #22）**：那批失败在日志里与 `hover 守候：可见性
+            // 查询失败` **成对出现** ⇒ 更可能是 **webview 当时不可用**，而非"守候线程不能调窗口"；
+            // 反例已实测——`commands/session.rs` 的 `session_status`（async、同样非主线程）里直调
+            // 同一套三连**有效**（窗口被前置、零失败日志）。故两处写法**各自保留、不统一**：本处
+            // 包裹无害，且能在 webview 缺失期挡住无意义调用。
             {
                 let identifier = app.config().identifier.clone();
                 let handle = app.handle().clone();
@@ -1006,11 +1051,14 @@ pub fn run() {
                 });
             }
             // 玻璃效果不在此挂载（CT 定案）：恒纯 alpha 透明（tauri.conf transparent），
-            // 分态纱由前端 ::before 纱层承担（失焦 30%/聚焦 0%），Rust 仅转发 window-focus
-            // 主窗口整定：① 位置记忆（PATCH001.4）——存档在屏内 → 恢复，否则默认右上落位；
-            // ② 隐藏 Win11 激活描边——聚焦态 DWM 给活动窗口画一圈系统强调色描边，在透明无边框
-            //    窗上表现为"窗口外面一圈蓝框"（2026-10-11 用户实证）；③ 补系统圆角——tauri.conf
-            //    的 shadow:false 关掉 Tauri 投影后隐式圆角随之丢失，不补则上角露方角（CT e8d049b）
+            // 分态纱由前端 ::before 纱层承担（失焦 30%/聚焦 0%），Rust 转发 window-focus。
+            // 主窗口整定（FIX008.19 照实，五项）：① 位置记忆（PATCH001.4）——存档在屏内 → 恢复，
+            //   否则默认右上落位；② 隐藏 Win11 激活描边——聚焦态 DWM 给活动窗口画一圈系统强调色
+            //   描边，在透明无边框窗上表现为"窗口外面一圈蓝框"（2026-10-11 用户实证）；③ 补系统
+            //   圆角——tauri.conf 的 shadow:false 关掉 Tauri 投影后隐式圆角随之丢失，不补则上角露
+            //   方角（CT e8d049b）；④ 应用图标——从 exe 内嵌 `RT_GROUP_ICON` 按尺寸取帧
+            //   （`window_icon.rs`）；⑤ **系统背板**（PL029）**不在此挂**——由"板开合 + 聚焦"经
+            //   窗口事件驱动挂摘（`set_board_backdrop`）
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(err) = restore_window_position(app, &window) {
                     warn_diag(&err);
@@ -1183,7 +1231,7 @@ pub fn run() {
         })
         .run(context)
         .unwrap_or_else(|err| {
-            eprintln!("CapsulePulse 启动失败：{err}");
+            warn_diag(&format!("CapsulePulse 启动失败：{err}"));
             std::process::exit(1);
         });
 }

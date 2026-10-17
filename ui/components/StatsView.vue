@@ -620,7 +620,7 @@ function detailTitle(): string {
   return `${d.getMonth() + 1}月${d.getDate()}日明细`;
 }
 
-/** 秒 → 明细行的时长文本（`XhYYm` / `XXm` 两档；与三值卡的 fmtHM 同制式语义但更短）。 */
+/** 秒 → 明细行的时长文本（**单档**：分钟四舍五入后加「分」；与三值卡的 `fmtHM` 不同式——明细列窄）。 */
 function durText(secs: number): string {
   return `${Math.round(secs / 60)}分`;
 }
@@ -695,7 +695,9 @@ let glassBar: {
 } | null = null;
 
 onMounted(() => {
-  cometClipRect.value = document.querySelector<SVGRectElement>("#graphClipCometRect");
+  // FIX008.16：此处原有一句 `document.querySelector("#graphClipCometRect")` —— 该 id 只存在于
+  // design 原型，Vue 侧无对应 DOM ⇒ 它**确定性地把模板 ref 覆盖成 null**、令彗星走廊首帧死路；
+  // 模板 `ref="cometClipRect"` 已足够，故删除（首帧可见性留作未来目测项）。
   // PL026.3 玻璃滚动浮钮（照抄 CT）：锚在底板层（#win），落在统计板右缘与窗口右缘之间的缝里；
   // 两个翻转面都参与（隐藏原生滑杆 + 滚动同步），几何取当前活动面
   const faces = [frontFaceEl.value, backFaceEl.value].filter((el): el is HTMLElement => el != null);

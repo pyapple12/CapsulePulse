@@ -14,7 +14,7 @@ export function hhmm(secs: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** 分钟数 → 时长三段 `{h, m}`（**不做任何字符补位**）：数字列对齐由 CSS 承担 —— `.num`
+/** 分钟数 → 时长两段 `{h, m}`（**不做任何字符补位**）：数字列对齐由 CSS 承担 —— `.num`
  * `min-width: 2ch; text-align: right`（PATCH007.12 **方案 B**，用户 2026-10-16 定案：比字符补位
  * 更确定，不依赖字体是否有 U+2007 等宽空格 ✓）。 */
 export function splitDuration(minutes: number): { h: number; m: number } {

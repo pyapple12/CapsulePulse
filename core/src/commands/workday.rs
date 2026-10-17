@@ -357,8 +357,17 @@ pub(super) fn workday_total_inner<C: Clock>(
             first_offset: None,
         });
     };
-    // 先滚一轮（惰性）：保证"过去日已封口的都进了汇总"
-    seal_days_inner(ctx, now_secs)?;
+    // 先滚一轮（惰性）：保证"过去日已封口的都进了汇总"。
+    // FIX008.2：滚动失败**降级为逐日现算**（容错白名单 PL027.3/.7：`days` 只是加速层
+    // ⇒ 统计读取照常、不得把加速层故障放大成"统计整块报错"）；但必须同时把"本轮未能
+    // 封口的过去日"补进现算名单——否则那些日子既不在 `days`、也不在 `live_days`
+    // ⇒ **静默少算**（比报错更糟）。
+    let seal_err = seal_days_inner(ctx, now_secs).err();
+    if let Some(err) = &seal_err {
+        crate::warn_diag(&format!(
+            "按天汇总滚动失败（统计读取降级为逐日现算）：{err}"
+        ));
+    }
     let totals = poison("存储", ctx.storage.lock())?.days_totals()?;
     let mut total = WorkdayTotal {
         duty_secs: totals.duty_secs,
@@ -395,6 +404,15 @@ pub(super) fn workday_total_inner<C: Clock>(
             live_days.push(day);
         }
     }
+    // FIX008.2：seal 失败 ⇒ 把"未封口的过去日"补进现算名单（已封口日已计入 `days_totals`，跳过
+    // ⇒ 不会双计）
+    if seal_err.is_some() {
+        for day in unsealed_past_days(ctx, first_at, today, now_secs)? {
+            if !live_days.contains(&day) {
+                live_days.push(day);
+            }
+        }
+    }
     for day in live_days {
         let offset = (day - today) / 86_400;
         let summary = day_summary_inner(ctx, offset, now_secs)?;
@@ -406,6 +424,44 @@ pub(super) fn workday_total_inner<C: Clock>(
         }
     }
     Ok(total)
+}
+
+/// 列出"过去日里尚未进入 `days` 汇总"的数据日（返回本地日零时刻的 Unix 秒）——FIX008.2 的
+/// 降级现算名单：`seal_days_inner` 失败时由本函数补出需要逐日现算的过去日，避免"既不在
+/// 汇总、也不在现算"的静默少算。
+///
+/// # 参数
+/// - `first_at`：最早记录时刻（Unix 秒；只扫 `[first_day, today)` 区间）
+/// - `today`：今日本地日零时刻（Unix 秒）
+/// - `now_secs`：当前时刻（驱动 `day_bounds` 的本地日边界，与 `seal_days_inner` 同款）
+///
+/// # 返回
+/// 未封口的过去日列表（已封口日不在列内 ⇒ 与 `days_totals` 不重复计）。
+fn unsealed_past_days<C: Clock>(
+    ctx: &AppContext<C>,
+    first_at: i64,
+    today: i64,
+    now_secs: i64,
+) -> Result<Vec<i64>, CommandError> {
+    let first_day = local_day_start(first_at)?;
+    let span = ((today - first_day) / 86_400).max(0);
+    let mut days = Vec::new();
+    for step in 1..=span {
+        let (day_start, _) = day_bounds(-step, now_secs)?;
+        let date = Local
+            .timestamp_opt(day_start, 0)
+            .single()
+            .ok_or(CommandError::Clock)?
+            .format("%Y-%m-%d")
+            .to_string();
+        if poison("存储", ctx.storage.lock())?
+            .day_get(&date)?
+            .is_none()
+        {
+            days.push(day_start);
+        }
+    }
+    Ok(days)
 }
 
 /// 脏数据归一化（PL027.9）：把历史/异常路径遗留的"嵌套打卡"收敛为"前班在新打卡刻结束"——
@@ -471,10 +527,15 @@ pub(crate) fn migrate_inner<C: Clock>(
         ),
         None => "无旧 sessions 表".to_string(),
     };
+    // FIX008.18：只落**文件名**（原为 `backup.display()` 绝对路径 ⇒ 日志泄漏本机目录结构；
+    // 备份就在 `data/` 下，文件名足够定位）
+    let backup_name = backup
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "legacy-model-v1-<未知>.db".to_string());
     crate::warn_diag(&format!(
-        "PL027 迁移完成：备份 {}；旧班行 {} 行；{reconcile}",
-        backup.display(),
-        report.workdays_rows
+        "PL027 迁移完成：备份 {}（位于 data/）；旧班行 {} 行；{reconcile}",
+        backup_name, report.workdays_rows
     ));
     poison("存储", ctx.storage.lock())?.schema_set("model_version", "2")?;
     Ok(Some(report))
@@ -1035,6 +1096,39 @@ mod tests {
             .into_iter()
             .map(|(_, kind)| kind)
             .collect()
+    }
+
+    /// FIX008.2：降级现算名单只列**未进 `days`** 的过去日（已封口日跳过 ⇒ 不与 `days_totals` 双计）。
+    #[test]
+    fn unsealed_past_days_skips_sealed() {
+        let ctx = ctx(FakeClock::new());
+        let now = 1_700_000_000;
+        let today = local_day_start(now).unwrap();
+        let (day1, _) = day_bounds(-1, now).unwrap();
+        let (day2, _) = day_bounds(-2, now).unwrap();
+        // 只把 day1 写进汇总（模拟"部分已封口"）；day2 保持未封口
+        let date1 = Local
+            .timestamp_opt(day1, 0)
+            .single()
+            .unwrap()
+            .format("%Y-%m-%d")
+            .to_string();
+        ctx.storage
+            .lock()
+            .unwrap()
+            .day_upsert(&crate::storage::DayRollup {
+                date: date1,
+                duty_secs: 3_600,
+                work_secs: 3_600,
+                rest_secs: 0,
+                first_in_at: Some(day1),
+                last_out_at: Some(day1 + 3_600),
+                sealed_at: now,
+            })
+            .unwrap();
+
+        let days = unsealed_past_days(&ctx, day2, today, now).unwrap();
+        assert_eq!(days, vec![day2], "只有未封口的过去日进现算名单");
     }
 
     /// W4：clock_in 开行 + 事件 + 状态 OnDuty，且计时门禁随之放行。

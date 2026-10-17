@@ -30,12 +30,12 @@ pub(crate) fn hover_summary_inner<C: Clock>(
     let bands = match shift_clock_in_at {
         Some(clock_in_at) => {
             let bc = super::workday::day_budget_context(ctx, clock_in_at, now)?;
-            let d0_secs = (i64::from(base_hours) * 3_600 - bc.used_before_shift_secs).max(0);
             let due_at = poison("自动下班", ctx.auto_out.lock())?.due_at;
             Some(hover::ShiftBands {
                 clock_in_at,
-                d0_secs,
                 base_hours,
+                // FIX008.8：传**未夹零**的已用原值——带长与总账可用各自在 `shift_band` 内导出
+                used_before_secs: bc.used_before_shift_secs,
                 due_at,
             })
         }

@@ -21,7 +21,8 @@ pub struct WindowPos {
 /// **Rust 自管字段**——前端不参与，`set_settings` 整结构覆盖时由命令层继承（见 commands/reminder）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReminderSettings {
-    /// 连续工作提醒阈值（分钟，1–99；上限与设计设置板输入框 max=99 同源，PL019.4）。
+    /// 连续工作提醒阈值（分钟，[`THRESHOLD_RANGE_MIN`]–[`THRESHOLD_RANGE_MAX`]；上限与设置板
+    /// 输入框 `max` 同源，PL019.4）。
     #[serde(default = "default_threshold")]
     pub threshold_min: u32,
     /// 提示音开关。
@@ -58,8 +59,16 @@ pub const SNAP_THRESHOLD_PX: i32 = 50;
 /// 贴边落位间距（px）：吸附后窗口边缘距屏幕边缘留出的缝隙。
 pub const SNAP_GAP_PX: i32 = 5;
 
+/// 提醒阈值**下限**（分钟）——**单一来源**：校验、错误文案、默认值回落，以及前端镜像常量
+/// （`ui/types.ts` 的 `THRESHOLD_RANGE_MIN`）都以本值为准（FIX008.6）。
+pub const THRESHOLD_RANGE_MIN: u32 = 1;
+/// 提醒阈值**上限**（分钟）——同 [`THRESHOLD_RANGE_MIN`]（亦与设置板输入框 `max` 同源）。
+pub const THRESHOLD_RANGE_MAX: u32 = 99;
+/// 提醒阈值**默认值**（分钟）：首启 / 字段缺失回退 / 前端空值回落（FIX008.6）。
+pub const THRESHOLD_DEFAULT: u32 = 50;
+
 fn default_threshold() -> u32 {
-    50
+    THRESHOLD_DEFAULT
 }
 
 fn default_true() -> bool {
@@ -95,19 +104,26 @@ impl Default for ReminderSettings {
 }
 
 impl ReminderSettings {
-    /// 校验：提醒阈值 1–99 分钟；自动下班小时数取
+    /// 校验：提醒阈值 [`THRESHOLD_RANGE_MIN`]–[`THRESHOLD_RANGE_MAX`] 分钟；自动下班小时数取
     /// [`AUTO_OUT_MIN_HOURS`](crate::workday::AUTO_OUT_MIN_HOURS)–[`OVERTIME_CAP_HOURS`](crate::workday::OVERTIME_CAP_HOURS)
-    /// （FIX006.16：区间**两端都由 `workday` 常量单一来源给出**，与设置板步进器同源——原为两处裸字面量）。
+    /// （FIX006.16：区间**两端都由 `workday` 常量单一来源给出**，与设置板步进器同源——原为两处裸字面量；
+    /// FIX008.6：阈值的下限 / 上限 / 默认值同样收成常量，前端 `ui/types.ts` 有镜像）。
     pub fn validate(&self) -> Result<(), SettingsError> {
-        if !(1..=99).contains(&self.threshold_min) {
-            return Err(SettingsError::InvalidThreshold(self.threshold_min));
+        if !(THRESHOLD_RANGE_MIN..=THRESHOLD_RANGE_MAX).contains(&self.threshold_min) {
+            return Err(SettingsError::InvalidThreshold {
+                got: self.threshold_min,
+                min: THRESHOLD_RANGE_MIN,
+                max: THRESHOLD_RANGE_MAX,
+            });
         }
         if !(crate::workday::AUTO_OUT_MIN_HOURS..=crate::workday::OVERTIME_CAP_HOURS)
             .contains(&self.workday_auto_out_hours)
         {
-            return Err(SettingsError::InvalidAutoOutHours(
-                self.workday_auto_out_hours,
-            ));
+            return Err(SettingsError::InvalidAutoOutHours {
+                got: self.workday_auto_out_hours,
+                min: crate::workday::AUTO_OUT_MIN_HOURS,
+                max: crate::workday::OVERTIME_CAP_HOURS,
+            });
         }
         Ok(())
     }
@@ -134,8 +150,7 @@ impl ReminderSettings {
         if result.is_err() {
             // 清理临时文件；清理失败仅残留 .tmp（下次保存覆盖），主错误照常上抛
             if let Err(cleanup) = std::fs::remove_file(&tmp) {
-                eprintln!("设置临时文件清理失败：{cleanup}");
-                crate::diag::log(&format!("设置临时文件清理失败：{cleanup}"));
+                crate::warn_diag(&format!("设置临时文件清理失败：{cleanup}"));
             }
         }
         result?;
@@ -152,12 +167,14 @@ pub enum SettingsError {
     /// 文件读写错误。
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// 提醒阈值越界（合法范围 1–99 分钟）。
-    #[error("提醒阈值非法：{0} 分钟（应为 1–99）")]
-    InvalidThreshold(u32),
-    /// 自动下班小时数越界（合法范围 4–12 小时）。
-    #[error("自动下班小时数非法：{0}（应为 4–12）")]
-    InvalidAutoOutHours(u32),
+    /// 提醒阈值越界（合法范围由 [`THRESHOLD_RANGE_MIN`]–[`THRESHOLD_RANGE_MAX`] 给出）。
+    /// FIX008.7：区间数值**由常量带参传入**（原为写死的「应为 1–99」⇒ 改常量即文案失实）。
+    #[error("提醒阈值非法：{got} 分钟（应为 {min}–{max}）")]
+    InvalidThreshold { got: u32, min: u32, max: u32 },
+    /// 自动下班小时数越界（合法范围由 `workday` 的 `AUTO_OUT_MIN_HOURS`–`OVERTIME_CAP_HOURS` 给出）。
+    /// FIX008.7：同上，区间数值带参（原为写死的「应为 4–12」）。
+    #[error("自动下班小时数非法：{got}（应为 {min}–{max}）")]
+    InvalidAutoOutHours { got: u32, min: u32, max: u32 },
 }
 
 #[cfg(test)]
@@ -240,7 +257,7 @@ mod tests {
         };
         assert!(matches!(
             bad.save(&p),
-            Err(SettingsError::InvalidAutoOutHours(0))
+            Err(SettingsError::InvalidAutoOutHours { got: 0, .. })
         ));
         let bad = ReminderSettings {
             threshold_min: 50,
@@ -255,7 +272,7 @@ mod tests {
         };
         assert!(matches!(
             bad.save(&p),
-            Err(SettingsError::InvalidAutoOutHours(73))
+            Err(SettingsError::InvalidAutoOutHours { got: 73, .. })
         ));
         std::fs::write(
             &p,
@@ -297,7 +314,7 @@ mod tests {
         };
         assert!(matches!(
             bad.save(&p),
-            Err(SettingsError::InvalidThreshold(0))
+            Err(SettingsError::InvalidThreshold { got: 0, .. })
         ));
         let _ = std::fs::remove_file(&p);
     }
@@ -364,7 +381,7 @@ mod tests {
                 ..ReminderSettings::default()
             };
             assert!(
-                matches!(s.save(&p), Err(SettingsError::InvalidAutoOutHours(_))),
+                matches!(s.save(&p), Err(SettingsError::InvalidAutoOutHours { .. })),
                 "{bad} 应被拒（合法 4–12）"
             );
         }
@@ -407,6 +424,53 @@ mod tests {
         )
         .unwrap();
         assert!(ReminderSettings::load(&p).is_err());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// FIX008.6/.7：阈值**边界**（下限 / 上限合法；越界被拒）且**错误文案由常量拼出**
+    /// （改常量 → 文案随之变，不再手抄数值）。
+    #[test]
+    fn threshold_bounds_and_error_message_use_constants() {
+        let p = temp_path("threshold-consts");
+        for ok in [THRESHOLD_RANGE_MIN, THRESHOLD_RANGE_MAX] {
+            let s = ReminderSettings {
+                threshold_min: ok,
+                ..ReminderSettings::default()
+            };
+            assert!(s.save(&p).is_ok(), "{ok} 应合法");
+        }
+        for bad in [THRESHOLD_RANGE_MIN - 1, THRESHOLD_RANGE_MAX + 1] {
+            let s = ReminderSettings {
+                threshold_min: bad,
+                ..ReminderSettings::default()
+            };
+            assert!(
+                matches!(s.save(&p), Err(SettingsError::InvalidThreshold { .. })),
+                "{bad} 应被拒"
+            );
+        }
+        let msg = SettingsError::InvalidThreshold {
+            got: 0,
+            min: THRESHOLD_RANGE_MIN,
+            max: THRESHOLD_RANGE_MAX,
+        }
+        .to_string();
+        assert!(
+            msg.contains(&THRESHOLD_RANGE_MIN.to_string())
+                && msg.contains(&THRESHOLD_RANGE_MAX.to_string()),
+            "文案应含常量给出的区间：{msg}"
+        );
+        let hours = SettingsError::InvalidAutoOutHours {
+            got: 0,
+            min: crate::workday::AUTO_OUT_MIN_HOURS,
+            max: crate::workday::OVERTIME_CAP_HOURS,
+        }
+        .to_string();
+        assert!(
+            hours.contains(&crate::workday::AUTO_OUT_MIN_HOURS.to_string())
+                && hours.contains(&crate::workday::OVERTIME_CAP_HOURS.to_string()),
+            "文案应含常量给出的区间：{hours}"
+        );
         let _ = std::fs::remove_file(&p);
     }
 }

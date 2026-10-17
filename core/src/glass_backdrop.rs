@@ -63,8 +63,7 @@ pub fn hide_active_border(window: &tauri::WebviewWindow) {
         let none = DWMWA_COLOR_NONE;
         let hr = unsafe { DwmSetWindowAttribute(hwnd.0 as isize, DWMWA_BORDER_COLOR, &none, 4) };
         if hr != 0 {
-            eprintln!("窗口激活描边隐藏失败 hr={hr:#x}（维持前态）");
-            crate::diag::log(&format!("窗口激活描边隐藏失败 hr={hr:#x}"));
+            crate::warn_diag(&format!("窗口激活描边隐藏失败 hr={hr:#x}（维持前态）"));
         }
     }
     #[cfg(not(target_os = "windows"))]
@@ -102,7 +101,7 @@ pub fn set_backdrop(window: &tauri::WebviewWindow, on: bool) {
     #[cfg(target_os = "windows")]
     {
         let Ok(hwnd) = window.hwnd() else {
-            eprintln!("窗口句柄获取失败（系统背板未切换）");
+            // FIX008.15：原为 eprintln + warn_diag 双调（同一句打两遍 console）⇒ 收敛为一次
             crate::warn_diag("窗口句柄获取失败（系统背板未切换）");
             return;
         };
@@ -115,7 +114,7 @@ pub fn set_backdrop(window: &tauri::WebviewWindow, on: bool) {
             DwmSetWindowAttribute(hwnd.0 as isize, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, 4)
         };
         if hr != 0 {
-            eprintln!("系统背板切换失败 hr={hr:#x}（维持前态）");
+            // FIX008.15：原为 eprintln + warn_diag 双调（同一句打两遍 console）⇒ 收敛为一次
             crate::warn_diag(&format!("系统背板切换失败 hr={hr:#x}（维持前态）"));
         }
     }

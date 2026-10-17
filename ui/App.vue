@@ -98,6 +98,8 @@ const windowFocused = ref(false);
 let unlistenFocus: (() => void) | undefined;
 // 窗口偏好同步解绑句柄（PL028.3：托盘右键菜单改偏好 → 设置面板开关回显）
 let unlistenPrefs: (() => void) | undefined;
+// 拖拽结束事件解绑句柄（FIX008.17：补上——原实现漏存句柄，该订阅无法退订）
+let unlistenDragEnd: (() => void) | undefined;
 
 // —— PL010.1 拖拽修复：data-tauri-drag-region 只在"被点中元素自身"带属性时生效，
 // 弹性布局铺满后 main 无裸区可点（回归 bug）——改为全局 mousedown 接线：
@@ -107,16 +109,21 @@ let unlistenPrefs: (() => void) | undefined;
 // .topbar 自 PATCH001.2 起在列——标题改走阈值拖拽把手（否则"按下即拖"会吞掉双击）；
 // label 自 PATCH002.2 起在列——三段控件的「工作/休息」是 <label>，不在白名单时按下即被
 // startDragging 抢走鼠标捕获、click 永不派发（"按了没反应"根因；凡交互控件一律在列）
+// .glass-thumb 自 FIX008.5 起在列——玻璃滚动浮钮的把手锚在 `#win`（**板外**节点、非板内子元素），
+// 不入列则按下会走到 `markWindowDragStart()` 变成拖窗口、它自己的拖拽滚动永远起不来
 const DRAG_INTERACTIVE =
-  "button, input, textarea, select, a, label, .sideButton, #stats-board, #settings-board, .overlay, .topbar";
+  "button, input, textarea, select, a, label, .sideButton, #stats-board, #settings-board, .overlay, .topbar, .glass-thumb";
 
 /** 按下（mousedown）时**不收板**的区域（PATCH009.7 / PATCH009.8 用户定案）：板内交互、确认
  * 遮罩、两个开板钮（各自负责开合，点另一侧钮仍由钮自己切到那一板）+ **标题**。与
  * `DRAG_INTERACTIVE` **刻意分开**：标题必须在拖拽白名单里（阈值把手：按下只记起点、超 5px
  * 才启动拖拽）—— 原先两者共用一个常量，标题命中白名单即 return，导致"板开着点标题没反应"。
  * 标题的收板改挂 `click`（PATCH009.8）：拖动时 `startDragging()` 会吞掉 click ⇒ 拖拽与单击
- * 天然分流（CT `useThresholdDrag` 注释同史），故标题不进"按下即收"这条路。 */
-const NO_CLOSE_ON_PRESS = "#stats-board, #settings-board, .overlay, .sideButton, .topbar";
+ * 天然分流（CT `useThresholdDrag` 注释同史），故标题不进"按下即收"这条路。
+ * `.glass-bar`（FIX008.5）：玻璃滚动浮钮锚在 `#win`（统计板的**兄弟**节点、板外）⇒ 不入本列时
+ * 按下会命中"按下即收"直接把板关掉，浮钮的拖拽滚动永远用不上；故必须显式入列。 */
+const NO_CLOSE_ON_PRESS =
+  "#stats-board, #settings-board, .overlay, .sideButton, .topbar, .glass-bar";
 
 // —— design flyBoard（PL019.2）：把开板按钮中心换算成板内坐标写入 transform-origin，
 // 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = boards.css 板位常量（design 同名）——
@@ -634,7 +641,11 @@ onMounted(() => {
   // drag-end（PATCH011）：Rust 在"真拖动过 + 左键已松 + 静默满阈值"时发出 ⇒ 解除拖拽中标记
   listen("drag-end", () => {
     clearWindowDragging();
-  }).catch((err) => console.error("drag-end 监听注册失败", err));
+  })
+    .then((un) => {
+      unlistenDragEnd = un;
+    })
+    .catch((err) => console.error("drag-end 监听注册失败", err));
   // prefs-changed（PL028.3）：托盘右键菜单改了窗口偏好 → 设置面板开关回显同步。
   // 面板自改那一路已即时写入本地态（onSaveSettings），此处只补"另一入口"的回显
   listen<PrefsSnapshot>("prefs-changed", (event) => {
@@ -729,6 +740,7 @@ onUnmounted(() => {
   unlistenAutoOutPending?.();
   unlistenFocus?.();
   unlistenPrefs?.();
+  unlistenDragEnd?.();
   destroyTitleParticles?.();
   destroyThresholdDrag?.();
 });

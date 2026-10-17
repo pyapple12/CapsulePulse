@@ -12,8 +12,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import type { HotkeyAction, ReminderSettings } from "../types";
-// FIX006.16：自动下班区间与后端同源（镜像常量，勿再写裸字面量）
-import { AUTO_OUT_MIN_HOURS, OVERTIME_CAP_HOURS } from "../types";
+// FIX006.16 / FIX008.6：自动下班区间与提醒阈值（下限 / 上限 / 默认）一律与后端同源（镜像常量，勿再写裸字面量）
+import {
+  AUTO_OUT_MIN_HOURS,
+  OVERTIME_CAP_HOURS,
+  THRESHOLD_DEFAULT,
+  THRESHOLD_RANGE_MAX,
+  THRESHOLD_RANGE_MIN,
+} from "../types";
 
 const props = defineProps<{
   /** 板开合（父持态，两板互斥）；.open 驱动 visibility + 自按钮中心 scale 飞出 */
@@ -80,21 +86,24 @@ watch(
 );
 
 /** 阈值下限（PATCH010.6/.8 用户定案）：计时器启动后须 ≥ 本段分钟 + 1（已过 2:30 ⇒ 最低 4）——
- * 保证改完仍留 ≥ 1 分钟余量，沙漏才能与铃响同刻流完；未启动 / 新段 ⇒ 1（1–99 自由）。 */
+ * 保证改完仍留 ≥ 1 分钟余量，沙漏才能与铃响同刻流完；未启动 / 新段 ⇒ 后端下限（区间内自由）。 */
 const thresholdFloor = computed(() => {
   if (!props.sessionRunning) {
-    return 1;
+    return THRESHOLD_RANGE_MIN;
   }
-  return Math.min(99, (props.segmentMin ?? 0) + 1);
+  return Math.min(THRESHOLD_RANGE_MAX, (props.segmentMin ?? 0) + 1);
 });
 /** 阈值行是否锁定（PATCH010.6 用户定案）：本段已触发提醒 ⇒ 禁改，只有暂停后才能改 */
 const thresholdLocked = computed(() => props.reminderFired === true);
 
-/** 阈值 change 夹取（design 守卫原样：空/0/NaN 回落 50，1~99 封顶）后即时上抛；
- * PATCH010.8：下界改由 `thresholdFloor` 动态收窄（计时器启动后） */
+/** 阈值 change 夹取（design 守卫原样：空/0/NaN 回落后端默认值，上限封顶）后即时上抛；
+ * PATCH010.8：下界改由 `thresholdFloor` 动态收窄（计时器启动后）；FIX008.6：数值全走后端镜像常量 */
 function onThresholdChange(e: Event): void {
   const input = e.target as HTMLInputElement;
-  const v = Math.min(99, Math.max(thresholdFloor.value, Number(input.value) || 50));
+  const v = Math.min(
+    THRESHOLD_RANGE_MAX,
+    Math.max(thresholdFloor.value, Number(input.value) || THRESHOLD_DEFAULT),
+  );
   input.value = String(v);
   emit("save", { ...props.settings, threshold_min: v });
 }
@@ -103,7 +112,7 @@ function onThresholdChange(e: Event): void {
  * 此处为程序兜底）；手打 / 键盘 ↑↓ / 滚轮走 `onThresholdChange` 原路 */
 function stepThreshold(delta: number): void {
   const v = props.settings.threshold_min + delta;
-  if (v < thresholdFloor.value || v > 99) {
+  if (v < thresholdFloor.value || v > THRESHOLD_RANGE_MAX) {
     return;
   }
   emit("save", { ...props.settings, threshold_min: v });
@@ -153,7 +162,7 @@ function onInputEnter(e: PointerEvent): void {
   (e.target as HTMLInputElement).focus();
 }
 
-/** 移出释放焦点（同时触发 `@change` ⇒ 值提交 + 1–99 夹取） */
+/** 移出释放焦点（同时触发 `@change` ⇒ 值提交 + 区间夹取） */
 function onInputLeave(e: PointerEvent): void {
   (e.target as HTMLInputElement).blur();
 }
@@ -327,7 +336,7 @@ watch(
             class="stepper-value stepper-input"
             type="number"
             :min="thresholdFloor"
-            max="99"
+            :max="THRESHOLD_RANGE_MAX"
             :disabled="thresholdLocked"
             :value="settings.threshold_min"
             aria-label="提醒阈值（分钟）"
@@ -339,7 +348,7 @@ watch(
             class="stepper-btn"
             aria-label="增加"
             type="button"
-            :disabled="thresholdLocked || settings.threshold_min >= 99"
+            :disabled="thresholdLocked || settings.threshold_min >= THRESHOLD_RANGE_MAX"
             @pointerdown="onStepDown(1)"
             @pointerup="stopRepeat"
             @pointercancel="stopRepeat"

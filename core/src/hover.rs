@@ -90,11 +90,12 @@ pub fn hover_summary(
         // （加班只在到点弹框里点、点一次推一带），故两者等价、取前者即天然单一口径。
         let b = bands.unwrap_or(ShiftBands {
             clock_in_at: duty_started_at,
-            d0_secs: i64::from(crate::workday::OVERTIME_CAP_HOURS) * 3_600,
             base_hours: crate::workday::OVERTIME_CAP_HOURS,
+            used_before_secs: 0, // 防御兜底：无段带输入 ⇒ 视作"本班前未用"
             due_at: None,
         });
-        let (band, band_end_offset) = shift_band(now_secs - b.clock_in_at, b.d0_secs, b.base_hours);
+        let (band, band_end_offset) =
+            shift_band(now_secs - b.clock_in_at, b.base_hours, b.used_before_secs);
         let label = match band {
             Band::Base => "本班",
             Band::First => "1st 加班",
@@ -255,35 +256,42 @@ pub enum Band {
     Second,
 }
 
-/// 行①段带输入（PATCH007.7 修正版）：本班打卡 + **本班带长 d0** + 基准 + 自动下班到点。
+/// 行①段带输入（PATCH007.7 修正版；FIX008.8 改带"本班之前已用"原值）：本班打卡 + 基准 +
+/// **本班之前今日已用（未夹零原值）** + 自动下班到点。
+///
+/// 带长与总账可用都由 [`shift_band`] 从这两个量**各自导出**——不再传"夹零后的带长"：夹零只是
+/// "带长不为负"的展示约束，而"到 12h 顶还剩多少"与它无关，混用一个量会让后者在已用超基准时
+/// 偏大（FIX008.8 的实质）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShiftBands {
     /// 本班打卡（当前班，Unix 秒）
     pub clock_in_at: i64,
-    /// 本班带长 `d0 = 基准 − 今日在本班之前的已用`（秒；到顶/已用≥基准时为 0）
-    pub d0_secs: i64,
-    /// 自动下班基准小时数（算总账可用 = 12h 硬顶扣掉本班之前已用）
+    /// 自动下班基准小时数
     pub base_hours: u32,
+    /// **今日在本班之前的已累计在岗秒**（未夹零；取 `day_budget_context.used_before_shift_secs`）
+    pub used_before_secs: i64,
     /// 自动下班到点（`auto_out.due_at`；未武装为 `None` ⇒ 剩余兜底用带末）
     pub due_at: Option<i64>,
 }
 
-/// 段带判定与带末偏移（PATCH007.7 修正版；纯函数，单测直测）。
-/// **锚点 = 本班带长 `d0 = 基准 − 今日在本班之前的已用`**（不是原始基准 ✗ —— A2.8 实测：
-/// 做到 7h50m 再打卡 ⇒ 到点 = 剩 10 分钟处；A2.7 实测：已用 8h + 隐式加班 ⇒ 到点 = 打卡 + 4h）。
-/// 带末（相对本班打卡）：本班 `d0` / 1st `min(d0 + 4h, 总账可用)` / 2nd `总账可用`；
-/// **总账可用 = d0 + (12h − 基准)**（= 12h 硬顶扣掉本班之前已用 ⇒ 基准 8h + 已用 0 时 2nd 带为空）。
+/// 段带判定与带末偏移（PATCH007.7 修正版；FIX008.8 修公式；纯函数，单测直测）。
+/// **锚点 = 本班带长 `d0 = 基准 − 今日在本班之前的已用`（夹零，不为负）**（不是原始基准 ✗ ——
+/// A2.8 实测：做到 7h50m 再打卡 ⇒ 到点 = 剩 10 分钟处；A2.7 实测：已用 8h + 隐式加班 ⇒ 到点 = 打卡 + 4h）。
+/// 带末（相对本班打卡）：本班 `d0` / 1st `min(d0 + 4h, 总账可用)` / 2nd `总账可用`。
+/// **总账可用 = 12h 硬顶 − 本班之前已用**（独立由**未夹零**的已用算出；写成 `d0 + (12h − 基准)`
+/// 只在"已用 ≤ 基准"时等价 ⇒ FIX008.8 的实质：锚点要夹零、总账不夹，两者不能互推）。
 ///
 /// # 参数
-/// `elapsed_secs` 本班已过秒数；`d0_secs` 本班带长；`base_hours` 自动下班基准小时数。
+/// `elapsed_secs` 本班已过秒数；`base_hours` 自动下班基准小时数；
+/// `used_before_secs` 今日在本班之前的已累计在岗秒（**未夹零原值**）。
 ///
 /// # 返回
 /// `(段带, 带末相对本班打卡的偏移秒数)`。
-pub fn shift_band(elapsed_secs: i64, d0_secs: i64, base_hours: u32) -> (Band, i64) {
+pub fn shift_band(elapsed_secs: i64, base_hours: u32, used_before_secs: i64) -> (Band, i64) {
     let step = i64::from(crate::workday::OVERTIME_STEP_HOURS) * 3_600;
-    let cap_offset =
-        i64::from(crate::workday::OVERTIME_CAP_HOURS) * 3_600 - i64::from(base_hours) * 3_600;
-    let total = d0_secs + cap_offset; // 总账可用（相对本班打卡）
+    // 锚点：带长不为负（夹零）；总账可用：12h 硬顶扣掉本班之前已用（**不夹**）
+    let d0_secs = (i64::from(base_hours) * 3_600 - used_before_secs).max(0);
+    let total = i64::from(crate::workday::OVERTIME_CAP_HOURS) * 3_600 - used_before_secs;
     let first_end = (d0_secs + step).min(total);
     if elapsed_secs < d0_secs {
         (Band::Base, d0_secs)
@@ -337,22 +345,32 @@ mod tests {
     /// 带末分别 6h / 10h / 12h（与用户例一致）。
     #[test]
     fn shift_band_boundaries_for_base_six() {
-        let d0 = hours(6);
-        assert_eq!(shift_band(hours(5) + 3_599, d0, 6), (Band::Base, hours(6)));
-        assert_eq!(shift_band(hours(6), d0, 6), (Band::First, hours(10)));
-        assert_eq!(shift_band(hours(10) - 1, d0, 6), (Band::First, hours(10)));
-        assert_eq!(shift_band(hours(10), d0, 6), (Band::Second, hours(12)));
+        // 基准 6h、本班之前已用 0（FIX008.8：入参 = 基准 + **未夹零**已用，不再传夹零带长）
+        assert_eq!(shift_band(hours(5) + 3_599, 6, 0), (Band::Base, hours(6)));
+        assert_eq!(shift_band(hours(6), 6, 0), (Band::First, hours(10)));
+        assert_eq!(shift_band(hours(10) - 1, 6, 0), (Band::First, hours(10)));
+        assert_eq!(shift_band(hours(10), 6, 0), (Band::Second, hours(12)));
     }
 
     /// 基准 8h（已用 0）：1st 带末即 12h 硬顶（2nd 带为空）；基准 12h：只有本班。
     #[test]
     fn shift_band_base_eight_and_twelve() {
-        assert_eq!(shift_band(hours(8), hours(8), 8), (Band::First, hours(12)));
+        assert_eq!(shift_band(hours(8), 8, 0), (Band::First, hours(12)));
         assert_eq!(
-            shift_band(hours(9), hours(12), 12),
+            shift_band(hours(9), 12, 0),
             (Band::Base, hours(12)),
             "基准 12h 无处加班"
         );
+    }
+
+    /// **FIX008.8 红线**：已用**超过**基准时，锚点夹零，但总账仍 = **12h − 已用**（旧写法
+    /// `d0 + (12h − 基准)` 在此偏大）。算例：基准 4h、本班之前已用 8h ⇒ 本班可用 4h。
+    /// （该状态可达：基准 4h + 两次加班步进 ⇒ 上限 12h、已用 8h；见 `clock_in_inner` 的隐式加班分支。）
+    #[test]
+    fn total_stays_cap_minus_used_when_used_exceeds_base() {
+        assert_eq!(shift_band(0, 4, hours(8)), (Band::First, hours(4)));
+        assert_eq!(shift_band(hours(3), 4, hours(8)), (Band::First, hours(4)));
+        assert_eq!(shift_band(hours(4), 4, hours(8)), (Band::Second, hours(4)));
     }
 
     /// **红线**：带锚点 = 本班带长 `d0 = 基准 − 本班之前已用`（PATCH007.7 修正版）。
@@ -363,14 +381,13 @@ mod tests {
     fn band_anchors_on_d0_after_prior_usage() {
         let clock_in = 1_000;
         let now = clock_in + 35 * 60;
-        let d0 = hours(8) - (7 * 3_600 + 57 * 60); // 3 分钟
         let s = hover_summary(
             &day(Some(clock_in), None, 3_600, 0),
             Some(ShiftBands {
                 clock_in_at: clock_in,
-                d0_secs: d0,
                 base_hours: 8,
-                due_at: Some(clock_in + d0 + hours(4)),
+                used_before_secs: 7 * 3_600 + 57 * 60, // = 基准 8h − 3 分钟带长
+                due_at: Some(clock_in + 180 + hours(4)), // 到点 = 打卡 + 带长(3 分 = 180s) + 4h
             }),
             now,
             Duration::ZERO,
@@ -378,7 +395,7 @@ mod tests {
             None,
         );
         assert_eq!(s.label, "1st 加班", "已用 7h57m ⇒ 本班带只剩 3 分钟");
-        assert_eq!(s.remaining_secs, Some(hours(4) + d0 - 35 * 60));
+        assert_eq!(s.remaining_secs, Some(hours(4) + 180 - 35 * 60));
     }
 
     /// 无到点时剩余兜底用**带末**（已用 0、本班 35 分钟 ⇒ 仍本班、剩余 = 8h − 35min）。
@@ -389,8 +406,8 @@ mod tests {
             &day(Some(clock_in), None, 0, 0),
             Some(ShiftBands {
                 clock_in_at: clock_in,
-                d0_secs: hours(8),
                 base_hours: 8,
+                used_before_secs: 0,
                 due_at: None,
             }),
             clock_in + 35 * 60,
@@ -431,8 +448,8 @@ mod tests {
             &day(Some(clock_in), None, 3_600, 600),
             Some(ShiftBands {
                 clock_in_at: clock_in,
-                d0_secs: hours(8),
                 base_hours: 8,
+                used_before_secs: 0,
                 due_at: None,
             }),
             clock_in + 30 * 60,
@@ -457,8 +474,8 @@ mod tests {
             &day(Some(1_000), None, 0, 0),
             Some(ShiftBands {
                 clock_in_at: 1_000,
-                d0_secs: hours(8),
                 base_hours: 8,
+                used_before_secs: 0,
                 due_at: None,
             }),
             99_999,
@@ -497,8 +514,8 @@ mod tests {
             &day(Some(clock_in), None, 0, 0),
             Some(ShiftBands {
                 clock_in_at: clock_in,
-                d0_secs: hours(8),
                 base_hours: 8,
+                used_before_secs: 0,
                 due_at: None,
             }),
             clock_in + 60,

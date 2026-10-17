@@ -1,8 +1,9 @@
 //! 工作日/打卡纯逻辑层（PL005）：WorkdayState 状态机（Off/OnDuty）、EventKind 事件类型、
 //! 事件归约纯函数 reduce_day（events → 在岗/工作/休息 + 时间图谱区块）。
 //! 设计要点：① 状态机与归约零 IO、时间戳全用 Unix 秒入参注入——跨零点/回填等边界
-//! 在 cargo test 下直测，禁真实等待（AGENTS 陷阱清单）；② OnDuty 携带库行 id（下班落库
-//! 的行句柄随态流转，免二次查询——对条目"OnDuty{clock_in_at}"的实现细则扩展）；
+//! 在 cargo test 下直测，禁真实等待（AGENTS 陷阱清单）；② OnDuty **只携带 `clock_in_at`**
+//! （FIX008.19 照实：**PL027 起不再携带库行 id**——存储改 `events` 单表后不存在"班行"可关，
+//! 见 [`WorkdayState`]）；
 //! ③ reduce_day 输出结构直接 derive Serialize 作为 IPC DTO 单一来源（serde 非 tauri，纯度不破）。
 //! 关联：storage.rs 的 **`events` 单表（唯一事实源；旧 `workdays`/`sessions` 两表 PL027 已退役）** + `runtime`/`days` 缓存层，commands/workday.rs（接线）。
 
@@ -435,7 +436,7 @@ pub struct DaySummary {
     pub work_secs: i64,
     /// 休息总秒数（在岗 − 工作）。
     pub rest_secs: i64,
-    /// 时间图谱区块（按时间序，Work/Rest 交替）。
+    /// 时间图谱区块（按时间序；**同一在岗窗口内 Work/Rest 交替**——一日多班时班间空档不入列，故可出现 `Work→Work` 相邻）。
     pub blocks: Vec<DayBlock>,
     /// 今日上限小时数（PATCH005.3：基准 + 4h×加班步数、封顶 12h）——**仅今日有意义**，过去日为 0。
     pub budget_hours: u32,
@@ -891,7 +892,7 @@ mod tests {
         assert_eq!(sum.blocks[1].end, DAY + 17 * HOUR);
     }
 
-    /// 多段多间隙：三值与四区块（Work/Rest 交替）按序产出。
+    /// 多段多间隙：三值与四区块（单窗口内 Work/Rest 交替；班间空档不产出区块）按序产出。
     #[test]
     fn multiple_segments_alternate_blocks() {
         let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];

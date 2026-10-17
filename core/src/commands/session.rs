@@ -101,7 +101,12 @@ pub(super) fn pause_session_at<C: Clock>(
         }
     };
     let segment = lock(ctx)?.pause()?;
-    let outcome = clear_reminder_fire(ctx).and_then(|()| persist_session_with_end(ctx, at));
+    // FIX008.13：**先落库、后清留痕**——两步的失败可达性不同：落库（存储）会因瞬时占用失败
+    // （可达），清留痕（fire 锁）只在锁中毒这种终态失败。把**可达失败放第一步** ⇒ 失败即回滚、
+    // 留痕保留；原顺序（先清后落库）在落库失败时留痕已被清 ⇒ 回滚后同段会以"首次句式"再响
+    // 一次（重复提醒）。代价：fire 锁中毒（终态）而落库已成功时会留一条"提前的 `segment_end`"
+    // 并回滚会话态——极罕见，且那时应用本就该重启（取舍的另一面见 `.14` 的注释）。
+    let outcome = persist_session_with_end(ctx, at).and_then(|()| clear_reminder_fire(ctx));
     if let Err(err) = outcome {
         // 回滚后数据未落库——落诊断日志（容错白名单 ⑥ 通道；FIX002.7）
         crate::diag::log(&format!("暂停落库/留痕失败已回滚（计时继续）：{err}"));
@@ -272,6 +277,11 @@ pub async fn session_status(
     if let Some(due_at) = super::workday::auto_out_pending_inner(&handle, now_secs(&handle)?)? {
         app.emit("workday-auto-out-pending", due_at)
             .map_err(|e| CommandError::Event(e.to_string()))?;
+        // FIX008.3 实测（2026-10-17；永久豁免 #22）：本命令是 **async（非主线程）**，但这里直调
+        // 窗口三连**实测有效**——造景令"到点前 60s 待决"成立、主窗隐藏到托盘后，窗口被成功前置
+        // （用户目击聚焦 + 弹框），`pulse.log` **零新增**窗口失败。故**不加** `run_on_main_thread`；
+        // 单实例路径那处的包裹保留（无害，且能在 webview 不可用期挡住无意义调用）——两处写法
+        // 各自保留、**不要"顺手统一"**（详见 `z.plan.md` §四 永久豁免 #22）。
         crate::show_main_window(&app);
     }
     // 自动下班检查挂现有 tick 评估口（与提醒同构）：到点以基准时刻下班并发事件；
@@ -539,6 +549,39 @@ mod tests {
         ));
         let s = status_snapshot(&ctx).unwrap();
         assert_eq!(s.state, "running", "落库失败回滚：计时继续而非停在 Paused");
+    }
+
+    /// FIX008.13：**落库失败时 `last_fired` 必须保持不清**（原顺序先清留痕、后落库 ⇒ 失败回滚后
+    /// 同段会以"首次句式"再响一次；现顺序把可达失败放第一步 ⇒ 留痕保留、无重复提醒）。
+    #[test]
+    fn pause_keeps_last_fired_when_persist_fails() {
+        let clock = FakeClock::new();
+        let ctx = ctx(clock.clone());
+        begin_duty(&ctx);
+        clock.advance(secs(51 * 60)); // 越过阈值（默认 50 分钟）
+        assert!(
+            crate::commands::reminder::reminder_check_inner(&ctx)
+                .unwrap()
+                .is_some(),
+            "本段应先响过一次"
+        );
+        assert!(
+            ctx.fire.lock().unwrap().last_fired().is_some(),
+            "响过之后 last_fired 应有值"
+        );
+        // 污染存储锁 ⇒ 落库必失败（沿用 FIX002.1 用例的造法）
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ctx.storage.lock().unwrap();
+            panic!("污染 storage 锁");
+        }));
+        assert!(matches!(
+            pause_session(&ctx),
+            Err(CommandError::Poisoned("存储"))
+        ));
+        assert!(
+            ctx.fire.lock().unwrap().last_fired().is_some(),
+            "落库失败 ⇒ 留痕不得被清（否则同段重复提醒）"
+        );
     }
 
     /// FIX002.1：start 留痕失败回滚回 Idle——计时未开始。

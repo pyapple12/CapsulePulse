@@ -48,8 +48,7 @@ fn send_notification(app: &AppHandle, body: &str) {
         .body(body)
         .show()
     {
-        eprintln!("系统通知发送失败（降级仅声音）：{err}");
-        crate::diag::log(&format!("系统通知发送失败（降级仅声音）：{err}"));
+        crate::warn_diag(&format!("系统通知发送失败（降级仅声音）：{err}"));
     }
 }
 
@@ -373,8 +372,12 @@ pub(crate) fn register_action(
         .map_err(|err| err.to_string())
 }
 
-/// 写全局热键（PL028.2 单一写路径）：校验规范化 → 撤旧 → 注册新（失败则回滚旧注册并上抛，
+/// 写全局热键（PL028.2 单一写路径）：校验规范化 → 撤旧 → 注册（失败则回滚旧注册并上抛，
 /// 内存态与磁盘不动）→ 落库。
+///
+/// FIX008.1：**不再"无变化早退"**——配置串相同 ≠ 运行态已注册（启动注册可失败、仅落日志
+/// 放行，见容错白名单 PL028.2 条）。同串也走一次"先撤后建"，把"配置在、热键却没注册"的
+/// 缺口救回来；失败照下面分支上抛（用户主动操作要即时反馈）并回滚旧注册。
 ///
 /// # 返回
 /// 规范化后的组合串——前端据此回显，与落库值同源。
@@ -387,9 +390,7 @@ pub fn set_hotkey(
 ) -> Result<String, CommandError> {
     let normalized = crate::hotkey::parse(&combo)?;
     let old = action.current(&handle)?;
-    if normalized == old {
-        return Ok(normalized); // 无变化：不折腾注册
-    }
+    let unchanged = normalized == old;
     // 撤旧：旧键可能本就没注册成功（启动注册失败仅日志），故失败也仅记、继续换新
     if let Err(err) = app.global_shortcut().unregister(old.as_str()) {
         crate::warn_diag(&format!("旧热键撤销失败（继续换新）：{err}"));
@@ -402,6 +403,10 @@ pub fn set_hotkey(
         return Err(CommandError::HotkeyRegister(format!(
             "快捷键注册失败（已保留 {old}）：{err}"
         )));
+    }
+    if unchanged {
+        // 配置未变：上面那步已把注册态补齐 ⇒ 无需落盘/写内存（值本就一致）
+        return Ok(normalized);
     }
     // FIX006.12：落盘/内存更新失败 ⇒ **回滚注册**（此刻新键已生效、旧键已撤；不回滚会出现
     // "运行态 = 新键、config = 旧键"的不一致——界面报失败却能用新键，重启后新键又失效）
@@ -510,7 +515,7 @@ mod tests {
         assert!(matches!(
             set_settings_inner(&ctx, &bad),
             Err(CommandError::Settings(
-                crate::settings::SettingsError::InvalidThreshold(0)
+                crate::settings::SettingsError::InvalidThreshold { got: 0, .. }
             ))
         ));
     }

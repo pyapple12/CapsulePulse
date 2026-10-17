@@ -24,6 +24,13 @@ export const OVERTIME_CAP_HOURS = 12;
 /** 自动下班小时数**可配下限**（镜像 `core/src/workday.rs` `AUTO_OUT_MIN_HOURS`，单一来源在后端；
  * 与 `OVERTIME_CAP_HOURS` 一起构成设置板步进器的区间；FIX006.16 补齐镜像） */
 export const AUTO_OUT_MIN_HOURS = 4;
+/** 提醒阈值**下限 / 上限**（分钟，镜像 `core/src/settings.rs` 的 `THRESHOLD_RANGE_MIN` /
+ * `THRESHOLD_RANGE_MAX`，单一来源在后端）：阈值输入框的 `min`/`max`、夹取与步进边界
+ * 一律引本常量，勿再写裸字面量（FIX008.6 补齐镜像）。 */
+export const THRESHOLD_RANGE_MIN = 1;
+export const THRESHOLD_RANGE_MAX = 99;
+/** 提醒阈值**默认值**（分钟，镜像 `THRESHOLD_DEFAULT`）：输入空/0/NaN 时的回落值。 */
+export const THRESHOLD_DEFAULT = 50;
 /** PATCH006.4 电池分母：固定 12h = 100%（人一天能干的总量，与硬顶同源） */
 export const BATTERY_TOTAL_HOURS = OVERTIME_CAP_HOURS;
 /** PATCH006.4 电池红阈值：≤25%（= 相对 12h 只剩 3h，固定第 9h 起红） */
