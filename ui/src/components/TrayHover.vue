@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { splitDuration } from "../../format";
+import { measureChrome, snap4 } from "../measure-window";
 import type { HoverSummary } from "../../types";
 
 const summary = ref<HoverSummary | null>(null);
@@ -24,17 +25,10 @@ const remainParts = computed(() => splitDuration((summary.value?.remaining_secs 
 const workParts = computed(() => splitDuration((summary.value?.work_secs ?? 0) / 60));
 const restParts = computed(() => splitDuration((summary.value?.rest_secs ?? 0) / 60));
 
-/** 把目标尺寸**向上**取到 **4 的倍数**（PATCH007.24 用户定案）：125% 下 4 逻辑 = 5 物理 ⇒
- * **逻辑与物理同时为整数** ⇒ 系统取整与 WebView 视口取整不再产生任何差（可视区 = 窗 = 卡片）；
- * 100% / 150% / 175% / 200% 下同样成立 ✓。**只向上**（只多不少 ⇒ 内容永不裁 ✓）。 */
-function snap4(value: number): number {
-  return Math.ceil(value / 4) * 4;
-}
-
-/** 窗尺寸自适应（PATCH007.8 + .14 + .23 + .24）：**高恒按内容实测** ✓、**单行宽按内容实测** ✓
- * （PATCH007.14 用户定案），两者一律经 `snap4` **向上取到 4 的倍数**（双整数 ⇒ 无取整差 ✓）；
- * 多行态传 `null` 交后端取固定 228（= 4×57 ✓ 已双整数）。Rust 命令设完会**重锚托盘**（右缘恒对齐
- * 图标右缘 ⇒ 宽度变化表现为**左缘移动、右缘不动** ✓）。 */
+/** 窗尺寸自适应（PATCH007.8 + .14 + .23 + .24）：**高恒按内容实测**、**单行宽按内容实测**
+ * （PATCH007.14 用户定案）；量法与取整见 `measure-window`（FIX007.12 与菜单窗同源）——
+ * 多行态传 `null` 交后端取固定 228（= 4×57，已双整数）。Rust 命令设完会**重锚托盘**（右缘恒对齐
+ * 图标右缘 ⇒ 宽度变化表现为**左缘移动、右缘不动**）。 */
 /** FIX006.19b：上次已下发尺寸的键（`宽|高`）——相同即跳过 invoke（后端每秒推 `hover-update`，
  * 原实现每秒都 `set_size` + 重锚，含跨线程窗口调用，而尺寸其实不变）。 */
 let lastSizeKey = "";
@@ -42,34 +36,16 @@ watch(
   summary,
   async () => {
     await nextTick();
-    const body = bodyEl.value;
-    const card = cardEl.value;
-    if (body == null || card == null) {
+    // FIX007.12：量内容层 + 从 CSS 读 chrome 的管线收敛到 `measure-window`（元素缺失回 null ⇒
+    // 本轮跳过；原实现里那对重复的空值守卫一并收进该函数）
+    const measured = measureChrome(bodyEl.value, cardEl.value);
+    if (measured == null) {
       return;
     }
-    // PATCH007.19/.21/.23/.24（A 方案延伸）：**量内容**（`.hover-body` ✓）+ 从 CSS 读内边距/边框/外边距 ✓
-    // （不手抄常量 ✓）⇒ 窗 = 内容 + 这些 ✓；卡片 `height: 100%` 铺满 ⇒ 取整差藏进卡片内 ✓；
-    // 尺寸一律经 **`snap4`** 向上取到 4 的倍数（PATCH007.24 ✓）—— `.23` 的 `ceil` 只保证逻辑整数，
-    // 单行 34 → 42.5 物理仍落半像素 ⇒ 底边框被裁；4 的倍数 = 逻辑 + 物理双整数 ⇒ 差从根上消失 ✓
-    const bodyRect = body.getBoundingClientRect();
-    const cs = getComputedStyle(card);
-    const chromeX =
-      parseFloat(cs.paddingLeft) +
-      parseFloat(cs.paddingRight) +
-      parseFloat(cs.borderLeftWidth) +
-      parseFloat(cs.borderRightWidth) +
-      parseFloat(cs.marginLeft) +
-      parseFloat(cs.marginRight);
-    const chromeY =
-      parseFloat(cs.paddingTop) +
-      parseFloat(cs.paddingBottom) +
-      parseFloat(cs.borderTopWidth) +
-      parseFloat(cs.borderBottomWidth) +
-      parseFloat(cs.marginTop) +
-      parseFloat(cs.marginBottom);
+    // 本窗语义留在本窗：单行宽按内容实测、多行传 `null`（后端固定 228）
     const singleLine = summary.value?.single_line === true;
-    const width = singleLine ? snap4(bodyRect.width + chromeX) : null;
-    const height = snap4(bodyRect.height + chromeY);
+    const width = singleLine ? snap4(measured.contentW + measured.chromeX) : null;
+    const height = snap4(measured.contentH + measured.chromeY);
     // FIX006.19b：尺寸与上次相同 ⇒ 不再打扰后端（失败时不记键，下一拍重试）
     const sizeKey = `${width}|${height}`;
     if (sizeKey === lastSizeKey) {

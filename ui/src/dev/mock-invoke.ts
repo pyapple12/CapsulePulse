@@ -5,7 +5,18 @@
  * 种子数据对齐 design 实验场演示态（在岗计时中 / 阈值 50 / 自动下班 8h / 有统计）。
  * **IPC DTO 有增删必须同步本基座**（FIX007.10）：类型镜像在 `ui/types.ts`、数据源在本文件——
  * 只改前者会出现"基座缺字段 ⇒ DEV 专属错渲染"（`?? 0` 兜底成 1970 起点、布尔缺省成 false）。
+ * 故各 DTO 分支的返回对象一律用 `satisfies <DTO>` 标注：类型系统替"记得同步"把关，
+ * 漏字段 / 拼错字段在 `vue-tsc` 阶段即失败（仅类型约束，零运行时开销）。
  */
+import type {
+  DaySummary,
+  HoverSummary,
+  RecoveryNotice,
+  ReminderSettings,
+  SessionStatus,
+  WeekDay,
+  WorkdayTotal,
+} from "../../types";
 
 /** MM-DD 标签（周卡日期列，与后端 WeekDay.date 同格式） */
 function mmdd(d: Date): string {
@@ -54,10 +65,10 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         // PATCH010.6：本段是否已触发过提醒（基座阈值恒 50 分钟 ⇒ 达阈值即真，用于验阈值行锁定）
         reminder_fired:
           mockState === "running" && Date.now() - mockSegStart >= MOCK_THRESHOLD_MIN * 60_000,
-      };
+      } satisfies SessionStatus;
     case "take_recovery_notice":
       // PL027.8：一次性崩溃恢复提示——基座恒返回 null（无缝续静默路径）
-      return null;
+      return null satisfies RecoveryNotice | null;
     case "day_detail": {
       // 单位对齐真实后端：时间戳一律秒（SessionStatus.total_ms 例外为毫秒）
       const start = Math.floor(todayStart.getTime() / 1000);
@@ -79,7 +90,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
           can_overtime: true, // 未跨零点且基准 < 12h 硬顶 ⇒ 可加班（自动下班确认框的加班钮）
           cap_reached: false,
           blocks: [{ start, end: nowSec, kind: "work" }],
-        };
+        } satisfies DaySummary;
       }
       const noon = start + 12 * 3_600;
       const onePm = start + 13 * 3_600;
@@ -100,7 +111,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
           { start, end: noon, kind: "work" },
           { start: noon, end: onePm, kind: "rest" },
         ],
-      };
+      } satisfies DaySummary;
     }
     case "week_detail": {
       // 自然周（PL022）：查看日所在周固定周一~周日 7 行，"今"随真实星期、未来日零值
@@ -123,7 +134,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
           work_secs: work,
           duty_secs: isFuture ? 0 : isToday ? work : work + 1_800,
         };
-      });
+      }) satisfies WeekDay[];
     }
     case "workday_total":
       // 全历史三值总和 + 有数据天数（PL024.6：前端据此算各值平均与偏离）
@@ -133,7 +144,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         rest_secs: 21_600,
         days: 12,
         first_offset: -11,
-      };
+      } satisfies WorkdayTotal;
     case "get_settings":
       return {
         threshold_min: 50,
@@ -145,7 +156,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         hotkey_toggle_visible: "Alt+Shift+S",
         hotkey_toggle_timer: "Alt+Shift+P",
         window_pos: null, // FIX007.10：位置记忆为空（基座无真实窗口位置）
-      };
+      } satisfies ReminderSettings;
     /* PL028.2 录键：基座无注册能力，回显规范化串（真注册与冲突拒绝在 Rust 侧） */
     case "set_hotkey":
       return String(args?.combo ?? "");
@@ -160,7 +171,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         rest_secs: 0,
         until_reminder_min: 48.3,
         single_line: false,
-      };
+      } satisfies HoverSummary;
     case "set_settings":
     case "main_hide_to_tray":
     case "set_board_backdrop":

@@ -7,6 +7,7 @@ import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { measureChrome, snap4 } from "../measure-window";
 import type { PrefsSnapshot, ReminderSettings } from "../../types";
 
 /** 菜单项动作全集（与 Rust `tray_menu_action` 分发一致；id 沿用原菜单项语义） */
@@ -22,41 +23,19 @@ const topOn = ref(false);
 const snapOn = ref(false);
 let unlisten: (() => void) | undefined;
 
-/** 把目标尺寸**向上**取到 **4 的倍数**（PATCH007.24 同款纪律）：125% 下 4 逻辑 = 5 物理 ⇒
- * 逻辑与物理同时为整数 ⇒ 可视区 = 窗 = 卡片，无取整差；**只向上**（只多不少 ⇒ 内容永不裁）。 */
-function snap4(value: number): number {
-  return Math.ceil(value / 4) * 4;
-}
-
 /** 量内容定窗（PATCH008.3）：**内容层** + 从 CSS 读 padding / border / margin 作 chrome ⇒
- * 窗 = 内容 + chrome，一律 `snap4`；宽高都走本管线（菜单窗无固定宽）。 */
+ * 窗 = 内容 + chrome，一律 `snap4`；宽高都走本管线（菜单窗无固定宽）。
+ * FIX007.12：量法与取整收敛到 `measure-window`（与悬浮卡同一份实现）。 */
 async function resizeToContent(): Promise<void> {
   await nextTick();
-  const body = bodyEl.value;
-  const card = cardEl.value;
-  if (body == null || card == null) {
+  const measured = measureChrome(bodyEl.value, cardEl.value);
+  if (measured == null) {
     return;
   }
-  const rect = body.getBoundingClientRect();
-  const cs = getComputedStyle(card);
-  const chromeX =
-    parseFloat(cs.paddingLeft) +
-    parseFloat(cs.paddingRight) +
-    parseFloat(cs.borderLeftWidth) +
-    parseFloat(cs.borderRightWidth) +
-    parseFloat(cs.marginLeft) +
-    parseFloat(cs.marginRight);
-  const chromeY =
-    parseFloat(cs.paddingTop) +
-    parseFloat(cs.paddingBottom) +
-    parseFloat(cs.borderTopWidth) +
-    parseFloat(cs.borderBottomWidth) +
-    parseFloat(cs.marginTop) +
-    parseFloat(cs.marginBottom);
   try {
     await invoke("tray_menu_resize", {
-      width: snap4(rect.width + chromeX),
-      height: snap4(rect.height + chromeY),
+      width: snap4(measured.contentW + measured.chromeX),
+      height: snap4(measured.contentH + measured.chromeY),
     });
   } catch (err) {
     console.error("菜单窗尺寸调整失败", err);

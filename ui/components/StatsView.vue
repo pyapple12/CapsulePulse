@@ -579,10 +579,10 @@ interface DetailRow {
 const detailRows = ref<DetailRow[]>([]);
 const detailMax = ref(1);
 
-/** 分钟轴 → `HH:MM`（段明细时间列：分钟是**相对班起点**的偏移，故先加到班起点再格式化）。 */
+/** 分钟轴 → `HH:MM`（段明细时间列：分钟是**相对班起点**的偏移，故先加到班起点再格式化；
+ * `format.hhmm` 收**秒** ⇒ `min × 60`。FIX007.11 收敛：与轴标同一份格式化实现）。 */
 function fmtT(min: number): string {
-  const d = new Date((day.value?.duty_started_at ?? 0) * 1000 + min * 60_000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return hhmm((day.value?.duty_started_at ?? 0) + min * 60);
 }
 
 function renderDetail(): void {

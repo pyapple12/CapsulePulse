@@ -15,6 +15,7 @@
 | 玻璃效果 | CT 分态纱（PL021.4 照抄 CapsuleTODO：恒纯 alpha 透明窗 + 前端 ::before 纱层失焦 30%/聚焦 0%，双主题三态令牌锁暗；DWM 背板退役，仅留 Win11 窗口框架整定（激活描边隐藏 + 系统圆角，投影已关）；macOS/Linux 天然同构，仅需验证） |
 | 通知提醒 | tauri-plugin-notification + 前端 `<audio>` 提示音                                                                                                                                                                             |
 | 常驻     | Tauri 内置 tray API + 全局快捷键                                                                                                                                                                                              |
+| 测试     | Rust 侧 `cargo test`（核心逻辑直测）；前端 vitest + @vue/test-utils（jsdom，`ui/tests/`，`npm test`）                                                                                                                         |
 
 ## 启动命令（规划）
 
@@ -78,6 +79,7 @@ ui/               # Vue 前端（展示层）
     dev/              # mock-invoke（无 Tauri 外壳时的 DEV 假 IPC 基座）
     title-particles.ts / use-glass-bar.ts / use-threshold-drag.ts # 视觉与交互件
   types.ts            # IPC DTO 类型镜像（与 Rust serde 同源）；format.ts 展示格式化助手；main.ts 入口
+  tests/              # 前端测试（vitest + @vue/test-utils + jsdom；setup.ts 只补 jsdom 缺项如 ResizeObserver/matchMedia/document.timeline；`npm test`）
 configs/          # 程序读的固定参数与用户参数（预建占位，首个实体文件出现于设置持久化落地时）
 release/          # 发布目录（PATCH012）：release/README.md 入库（随包使用说明，中英双语 + 更新日志）；exe 与 zip 二进制 gitignore（由各版本构建产出、zip 走 GitHub Release 挂载）
 assets/           # 提示音、图标
@@ -103,7 +105,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **编辑前端文件（`.ts` `.tsx` `.vue` `.css`）后**：运行 `npx prettier --write <file>`；若改动含逻辑（非纯样式），还需 `npx vue-tsc --noEmit` 通过
 - **编辑 `.md` 后**：运行 `npx prettier --write <file>`（本文件与计划书等均适用）
 - **Rust 文档注释与签名变更后**：`cargo doc --no-deps` 确认无 broken intra-doc link（可与其他检查合并跑）
-- **提交前全量门禁**：`cargo fmt --check` + `cargo clippy -D warnings` + `cargo test` + `npm run build`
+- **提交前全量门禁**：`cargo fmt --check` + `cargo clippy -D warnings` + `cargo test` + `npm run build` + `npm test`
 
 ## 工程原则（设计哲学，所有项目通用）
 

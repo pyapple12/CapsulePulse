@@ -1254,7 +1254,7 @@ Mica 首施实测"暗色模式下 ≈ 不透明深板"（透明度较 Acrylic �
 > 状态：✅ 已修复（2026-10-05 收口，ui2.0 V0.010——ui 分支单序列号仅入 commit 标题合并即弃，主项目版本号不推进；FIX005 八条勾结见 x.progress.md——P3-1/3/4/5/6/7 代码修复 + 门禁全绿 91 测试；P3-2 免实机走查留档，条件豁免登记为第四节 #14（需验证标注）；门禁拦出计划外缺陷一并修复：stats 周一时间敏感测试按运行日归一）
 > 范围：core/ 全部 .rs（16 文件 3927 行）+ ui/ 全部前端（12 文件 1827 行）+ Cargo.toml / tauri.conf.json / capabilities / package.json / vite.config.ts / tsconfig.json / 根 index.html / 静态资源引用；不审计 node_modules / dist / target / .temp / .agents / design/（A004 已单独覆盖）与生成代码。基线 = 6e99ea5（ui-2.0 分支，该分支对 ui/ 与 core/ 相对 main 零改动，结论对 main 同样成立）。
 > 方式：主会话回归复核（A003 十五项逐项 grep + git 行级对比）+ 三路并行逐文件通读（Rust 纯逻辑 / Tauri 集成 / 前端 explore 子任务）+ 汇总后六条 P3 主张行号 sed 实证。豁免比对以第四节（永久 21 + 条件 13）为准。
-> 观察项处置：编号经用户确认取 A005/FIX005（A004 已被 design 审计占用）；7 条观察项按默认不提升（与 A004 先例一致），其中两条带豁免条目外延建议（#8 events 无索引 → "sessions/events 无索引"；#14 session_stats 静默冻结 → "session_\* 快照命令"），待用户确认后再并入第四节，不在本轮直接修订。
+> 观察项处置：编号经用户确认取 A005/FIX005（A004 已被 design 审计占用）；7 条观察项按默认不提升（与 A004 先例一致），其中两条带豁免条目外延建议（#8 events 无索引 → "sessions/events 无索引"；#14 session_stats 静默冻结 → "session_\* 快照命令"），已按默认收口（观察项不提升、不并入第四节）——不在本轮直接修订。
 
 ### 零、上轮修复复核清单（A003 → FIX003，V0.1.1.2–3）
 
@@ -1417,7 +1417,7 @@ PL014.1–4 见 x.progress.md「PL014」任务组。
 
 > 背景：PL014 落地后用户目测四缺陷，实验场实测定位（canvas 字体度量 + 截图像素级包围盒）——① 步进器 `+`/`−` 字形不居中：CSS 居中的是字体盒，而 `+`/`−` 按排版惯例画在数学轴（基线上方 ~3.5px），本机 Segoe UI Variable Display 13px 字体盒中心在基线上方 5.5px，固定下沉 `+` 1.1px / `−` 1.6px（`−` 孤杆无竖笔参照更显眼）；② 按压"文字下沉"观感：`:active` 的 scale(0.94) 以中心整体缩小无任何下移，是"字形本已偏低 + 下缘上贴 + 0.15s ease 慢曲线放大过程感"三者叠加，且 scale 重光栅化字形有 hinting 抖动（"形变"来源）；③ 按压动画曲线生硬：`transition: all 0.15s` 默认 ease；④ 阈值输入框 "50" 左偏 7.5px：原生 number 旋钮（`::-webkit-inner-spin-button`，实测预留 13.98px）占位后 `text-align: center` 只在剩余 46px 内居中。
 > 目标：四缺陷全数归位——"50" 真居中（旋钮保留）、加减按钮 SVG 几何居中 + 加粗、按压双速曲线；设置逻辑与交互行为零变化。
-> 状态：✅ 已完成（2026-10-08 收口，ui2.0 V0.016；PL015 四条勾结见 x.progress.md，验证记录见 .temp/pl015-verification.md——改前探针 FAIL 复现（"50" −7px、+/− 下沉 1.0/1.5px）、改后 A1–A4 全过（"50" delta 0、布局级双按钮 dx=0/dy=0 严格居中、双速曲线与退避扫描在位）、live 交互零回归；实验场标签页遮挡节流（rAF 0 帧）探针对策 = board-glass transition:none 注入瞬达终态，按压手感目验留待用户日常使用。**追加修正 1（同日，ui2.0 V0.017）**：步进器整体 SVG 化——框+符号整幅单 SVG 矢量单元，drop-shadow CT 软晕、按压动画作用于 SVG，根治 CSS 分层绘制的枢轴偏移观感，详见下方追加修正节）
+> 状态：✅ 已完成（2026-10-08 收口，ui2.0 V0.016；PL015 四条勾结见 x.progress.md，验证记录见 .temp/pl015-verification.md——改前探针 FAIL 复现（"50" −7px、+/− 下沉 1.0/1.5px）、改后 A1–A4 全过（"50" delta 0、布局级双按钮 dx=0/dy=0 严格居中、双速曲线与退避扫描在位）、live 交互零回归；实验场标签页遮挡节流（rAF 0 帧）探针对策 = board-glass transition:none 注入瞬达终态，按压手感已承接（`.temp/pl027-visual-standards.md` 附录 D2）。**追加修正 1（同日，ui2.0 V0.017）**：步进器整体 SVG 化——框+符号整幅单 SVG 矢量单元，drop-shadow CT 软晕、按压动画作用于 SVG，根治 CSS 分层绘制的枢轴偏移观感，详见下方追加修正节）
 > 编号：PL015（PL013/PL014 已占用，PL012 永久废弃，顺位下一）
 
 ### 方向定案（2026-10-07 用户拍板）
@@ -2220,7 +2220,7 @@ PATCH003.1–PATCH003.5 见 x.progress.md「PATCH003」任务组。
 
 ## 附录 PL027：存储模型重做（events 单表 + 运行态缓存 + 按天汇总）与崩溃恢复（2026-10-13 立项）
 
-> 状态：✅ **已收口**（2026-10-13，V0.1.4.1；`.1`–`.11` 全落 + 自动验证全绿 + 真实库迁移/归一化实测 + live 崩溃矩阵实测（结论见 `.temp/pl027-verification.md`）；整组见 x.progress.md「PL027」已完成区）。**遗留（如实登记）**：① 计划书 §2.2 与 AGENTS 架构要点两处旧口径文字待改写（见 `.11` 剩余项）；② ②分支弹条目视留待用户日常。
+> 状态：✅ **已收口**（2026-10-13，V0.1.4.1；`.1`–`.11` 全落 + 自动验证全绿 + 真实库迁移/归一化实测 + live 崩溃矩阵实测（结论见 `.temp/pl027-verification.md`）；整组见 x.progress.md「PL027」已完成区）。**遗留（如实登记）**：① 计划书 §2.2 与 AGENTS 架构要点两处旧口径文字待改写（见 `.11` 剩余项）；② ②分支弹条目视已承接（`.temp/pl027-visual-standards.md` 附录 3② / 4.2）。
 
 > 来源：用户 2026-10-12 提出崩溃恢复方案（在岗期间每分钟落定时间段；重启后按 10 分钟阈值决定"接着算"还是"补下班"）。评审中确认现模型的问题：`workdays`（上下班）与 `events`（上下班）重复记录、`sessions`（已结束段时长）与 `events` 归约重复计算，"今天干了多久"存在两套答案（三值/图谱走 events、今日/本周/累计走 sessions），今天库里"20:25 打卡未下班"把后续各班全裹进去即由此而来。
 > 编号：PL027（PL 轨道；PL012 废弃、PL023–PL026 已用）。
@@ -2359,7 +2359,7 @@ PATCH004.1–PATCH004.4 见 x.progress.md「PATCH004」任务组。
 
 `design/` 为冻结参照物，本项属**有意偏离**（配色与动画形态），理由 = 用户日常使用观感；记录在案，不算静默偏离。
 
-### 五、今日预算与加班步进（PATCH005.3，需求定案 2026-10-13；**已实现 2026-10-13，目测待复核**）
+### 五、今日预算与加班步进（PATCH005.3，需求定案 2026-10-13；**已实现 2026-10-13；目测已承接**（`.temp/pl027-visual-standards.md` 附录 A2：12/12 通过）**）
 
 **模型**：今日基准 N = 当天**第一次打卡**时的自动下班小时数（快照）；计量口径 = **在岗累计**（含班内休息、含加班段；班间空档不计）；上限 = `N + 4h × 加班步数`，**硬顶 12h**；每次加班 **+4h**（即 `min(今日累计 + 4h, 12h)`；6 → 10 → 12）。
 
@@ -2496,7 +2496,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 | 事件 `workday-auto-out-pending` / `reminder-due` | App.vue 监听                                        | 纯展示（该刻日数据未变）                                             | ✓                  |
 | StatsView 数据面                                 | `watch(refreshKey / dataDayOffset / offset / open)` | 组件自行取数                                                         | ✓                  |
 
-**次要候选（健壮性，待用户定是否纳入本条）**：`window-focus` 监听（App.vue:359）只驱动分态纱 `focused` class、**不顺带刷数**；窗口被托盘隐藏较久时 WebView 定时器可能被节流 ⇒ 重新显示瞬间视图可能陈旧（≤30 秒自愈）。可选在该监听 `focused === true` 分支补一次 `refreshStats()`。
+**次要候选（健壮性；已定案：立项 PATCH005.9 并落地 ✓）**：`window-focus` 监听（App.vue:359）只驱动分态纱 `focused` class、**不顺带刷数**；窗口被托盘隐藏较久时 WebView 定时器可能被节流 ⇒ 重新显示瞬间视图可能陈旧（≤30 秒自愈）。可选在该监听 `focused === true` 分支补一次 `refreshStats()`。
 
 **验证（待实施后执行）**：`npx prettier --write ui/App.vue` + `npx vue-tsc --noEmit` + `npm run build`；live 实机在到点前 60s 点「加班」→ 轴末 / 蓝条**当帧**延伸、电池分母同步跳变（对照现状：需等 ≤30s）。
 
@@ -2525,7 +2525,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 
 **验证（2026-10-15 已过）**：`npx prettier --write ui/App.vue`（unchanged）+ `npx vue-tsc --noEmit`（0）+ `npm run build` + `cargo build`（重嵌 dist，exe 重建）⇒ 造景重启后**文案条出现** ✓（「上次未打卡下班就离开了，已按 00:15:45 结束工作记账；要继续请重新打卡」）。
 
-**遗留（用户 2026-10-15 目视提出，另立条目待审）**：条带**参与文档流** ⇒ 出现时把下方内容整体**下顶**，在固定窗（300×400）里造成挤压/裁切。要求改为**浮层式**（不顶内容 + 被盖内容自雾化 + 双向居中于"日期卡 + 表盘"那一行）——建议顺延 **PATCH005.11**，方案待用户同步后再落。
+**遗留（用户 2026-10-15 目视提出，另立条目待审）**：条带**参与文档流** ⇒ 出现时把下方内容整体**下顶**，在固定窗（300×400）里造成挤压/裁切。要求改为**浮层式**（不顶内容 + 被盖内容自雾化 + 双向居中于"日期卡 + 表盘"那一行）——建议顺延 **PATCH005.11**——**已按此落地 ✓**。
 
 ### 十二、PATCH005.11 文案条浮层化（2026-10-15 立项 + 当日落地；来源 = PATCH005.10 修复后用户目视"文案条把下方内容往下顶"）
 
@@ -2875,7 +2875,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 | `ui/src/components/TrayHover.vue` | 高度链三处直改 + `user-select: none`（`.3`）；三行**左对齐** + `cnDurationMinutes` + `.hover-body` 量高 + `width: 100%`（`.8`）                                                                                                                                                                                                                                             |
 | `ui/src/dev/mock-invoke.ts`       | `tray_hover` 样例（最长行取值 ✓）                                                                                                                                                                                                                                                                                                                                           |
 
-**已知待用户目测/调整项**：① 宽度 225 为临界值（内容 ≈205 vs 可用 205 ✓，当前实测不换行 ✓）；② 行② 时长格式分钟**不补零**（`10小时9分钟`，与 `fmtCN` 同式 ✓）——若要补零另开一条 ✓。
+**已知待目测项**：① 宽度 225 为临界值；② 行② 时长格式分钟**不补零**（`10小时9分钟`）——**两项已承接关闭**：见 `.temp/pl027-visual-standards.md` 附录 B1 附记与附录 I3.2（已被后续方案取代：`.14` 单行态宽自适应 / `.12` 行②定宽右对齐），**不再重复目测** ✓。
 
 ### 十三、PATCH007.12 行② 数字补位口径：补空格、不补零（2026-10-15 用户定案）
 
@@ -2902,7 +2902,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 
 **验证**：`cargo test` + 门禁 + live（多行态右缘与左/上一致、无 1px 裁切 ✓；单行态（实测宽）右缘同样完整 ✓；换缩放比（若日后有）亦应成立 —— 不实测系统设置变更 ✓ 按项目纪律 ✓）。
 
-> **补记 2（2026-10-16，用户复看"没变化"后）**：**PATCH007.18（`border-width: 1px → 0.8px`）已按用户指示回退** ✗ —— 实测无变化 ⇒ 该假设（边框宽度非整数物理）**不成立** ✗。**现有事实**：窗口 = 客户 = **283 × 90 物理（整数 ✓、差 0×0 ✓）**、卡片 `width:100%` 占满客户区 ✓ ⇒ **窗侧已无问题** ✓；现象仍在 ⇒ 下一步只能从**卡片侧**取证（前端临时上报 `.hover-card` 的 `getBoundingClientRect` + `devicePixelRatio` + `#app/body/html` 三层的宽度 ⇒ 一次即知是"卡片比客户窄"还是"视觉错觉/圆角错开" ✓），**待用户发话** ✓。
+> **补记 2（2026-10-16，用户复看"没变化"后）**：**PATCH007.18（`border-width: 1px → 0.8px`）已按用户指示回退** ✗ —— 实测无变化 ⇒ 该假设（边框宽度非整数物理）**不成立** ✗。**现有事实**：窗口 = 客户 = **283 × 90 物理（整数 ✓、差 0×0 ✓）**、卡片 `width:100%` 占满客户区 ✓ ⇒ **窗侧已无问题** ✓；现象仍在 ⇒ 下一步只能从**卡片侧**取证（前端临时上报 `.hover-card` 的 `getBoundingClientRect` + `devicePixelRatio` + `#app/body/html` 三层的宽度 ⇒ 一次即知是"卡片比客户窄"还是"视觉错觉/圆角错开" ✓），**已完成**（PATCH007 全组已经用户确认，见 `.temp/pl027-visual-standards.md` 附录 B1）✓。
 
 ### 二十三、PATCH007.25 单行态横向"卡片 ≡ 窗"（治右缘亮/暗缝）（2026-10-16 用户定案）
 
@@ -3146,7 +3146,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 >
 > **待目测**：① 文字垂直定位改 em 盒居中（`dominant-baseline: central`）是否有 1px 级微移；② SVG 文字是否照旧吃 `text-shadow`；③ 按下时文字是否不再下沉。
 
-> **补记三（同日，用户目测发现"点录键 → 按 Esc 后留一圈黑框"）**：那是 **Chromium 默认焦点环**（UA 的 `outline: auto` 两色对比环，暗底上呈黑框、跟按钮圆角）—— 机理：点按钮获焦（鼠标点击本身不给 `:focus-visible`），**紧接着按任意键**（Esc 取消等）把元素提升为 `:focus-visible`，UA 遂画环。设置板数字输入框早有 `.setting-row input[type="number"]:focus { outline: 1.5px solid var(--accent) }`，录键按钮（PL028.2 新增）漏了这条。**修法**：`.hotkey-btn:focus-visible { outline: 1.5px solid var(--accent) }`（同板语言；用 `:focus-visible` 而非 `:focus` —— 纯鼠标点击不需要环，键盘 Tab / 录键才给）。**同源待办**：`.stepper-btn` 同为"透明壳 + SVG"按钮、亦无焦点环规则，键盘 Tab 到它会露同一个 UA 黑框（本次未动，待用户定）。
+> **补记三（同日，用户目测发现"点录键 → 按 Esc 后留一圈黑框"）**：那是 **Chromium 默认焦点环**（UA 的 `outline: auto` 两色对比环，暗底上呈黑框、跟按钮圆角）—— 机理：点按钮获焦（鼠标点击本身不给 `:focus-visible`），**紧接着按任意键**（Esc 取消等）把元素提升为 `:focus-visible`，UA 遂画环。设置板数字输入框早有 `.setting-row input[type="number"]:focus { outline: 1.5px solid var(--accent) }`，录键按钮（PL028.2 新增）漏了这条。**修法**：`.hotkey-btn:focus-visible { outline: 1.5px solid var(--accent) }`（同板语言；用 `:focus-visible` 而非 `:focus` —— 纯鼠标点击不需要环，键盘 Tab / 录键才给）。**同源待办**：`.stepper-btn` 同为"透明壳 + SVG"按钮、亦无焦点环规则，键盘 Tab 到它会露同一个 UA 黑框（**已完成**：焦点环全应用退役，见 `.temp/pl027-visual-standards.md` 附录 D3）。
 
 > **补记四（同日，用户目测"补了焦点环之后反而多一圈蓝框"）**：焦点环规则细化 —— 定案 **录键这条路不留任何环**。三件：① `.hotkey-btn:focus-visible { outline: 1.5px solid var(--accent) }` **保留**（服务键盘 Tab 使用者，与数字输入框同语言）；② 新增 `.hotkey-btn.recording:focus-visible { outline: none }`（录制中 accent 录制环已是信号，不再叠一圈）；③ `stopRecord()` 内**主动 `blur()` 放弃录键按钮焦点**（判据 = `document.activeElement` 命中 `.hotkey-btn`）—— 鼠标点击获焦 + 录制期按键会把按钮提升为 `:focus-visible`，不放弃则环一直挂到用户点别处（看着像故障）。
 
@@ -3295,7 +3295,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 - **设置板阈值行**（`ui/components/SettingsPanel.vue`）：新增 props（本段毫秒 / 是否已触发）；下限 `floor = running && segment_ms > 0 ? ceil(segment_ms / 60000) + 1 : 1`（与 99 取小）；步进器 `−` 到 `floor` 置灰、`stepThreshold` 守卫加 floor、输入框 `:min="floor"` 且 `onThresholdChange` 夹到 `[floor, 99]`；**已触发 ⇒ 整行控件置灰**（复用"自动下班小时数在岗锁定"的置灰做法）+ 说明文字改「本段已触发提醒，暂停后可改」。
 - **已定案（2026-10-16 用户裁定）**：① **新段（打卡 / 继续）保留"翻半圈"** —— 沉底是常态，进入工作必须翻过来才能"上满开始漏"（不翻则沙从下腔瞬间跳回上腔，突兀）；**只有阈值变更不翻**；② **贯通只走"TimerCard 顺手上报 → App → 设置板"**（单一来源、零时差、零额外 IPC），**不另加 App 侧轮询**（两条线必有 ~1s 时差 ⇒ 设置板会慢半拍：铃响后阈值行还没灰）。
 
-**验证**：后端 TDD 用例 `set_settings_rejects_threshold_below_elapsed`（假钟推 2:30 ⇒ 改 3 被拒、改 4 通过）、`set_settings_rejects_threshold_after_fire`（触发后禁改、暂停后可改）、`set_settings_allows_other_fields_while_locked`（只改开关照常通过）、`session_status_exposes_segment_and_fired`（Running 有值 / Paused 为 0）；前端 `vue-tsc` 0 + `npm run build`；live 目测 8 项（见 x.progress `.9`）并入 `.temp/pl027-visual-standards.md` 附录 E 待用户签认。
+**验证**：后端 TDD 用例 `set_settings_rejects_threshold_below_elapsed`（假钟推 2:30 ⇒ 改 3 被拒、改 4 通过）、`set_settings_rejects_threshold_after_fire`（触发后禁改、暂停后可改）、`set_settings_allows_other_fields_while_locked`（只改开关照常通过）、`session_status_exposes_segment_and_fired`（Running 有值 / Paused 为 0）；前端 `vue-tsc` 0 + `npm run build`；live 目测 8 项（见 x.progress `.9`）并入 `.temp/pl027-visual-standards.md` 附录 E（**已签认** ✓）。
 
 **落地补记（2026-10-16，`.6`–`.8` 已落）**：① 沙漏实现比原方案更彻底——水位改由 CSS 变量 `--hg-w` **直接驱动**（`translate(0, calc(13px × var(--hg-w)))` / `scale(1, var(--hg-w))`，默认值即 1 = 沉底），**`.run` 类整类退役**、`hg-mound-top/bottom` 关键帧删除 ⇒ "启动未挂类即两端满"从根上消失（不再需要"幂等挂载"）；水位过渡由 `--hg-drain`（0.6s）承担。② 探针实证（真 SVG + 真 CSS，Chromium）：`--hg-w` = 0 / 0.25 / 0.6 / 1 四档水位全部正确；真机启动未在岗 = **沉底**（修前为"两端满"）。③ 踩坑登记：**浏览器缓存会骗人**——探针改 CSS 后必须带 `?v=` 版本号，否则读到旧样式表（曾据此误判"`var()` 驱动不生效"，实际是缓存）。④ 会话提示贯通取 **`ceil(segment_ms / 60000)`**（与后端下限口径同源），且**分钟粒度 + 变化才发**（避免 10 次/秒的无效重渲染）。
 
@@ -3379,7 +3379,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 
 **验证**：`cargo fmt --check` / `clippy -D warnings` / `cargo test`（回归）+ `vue-tsc --noEmit` + `npm run build` + `cargo build`；live——① 启动后查 `HKCU\SOFTWARE\Classes\AppUserModelId\com.pyapple12.capsule-pulse` 三值在位（`IconUri` 指向 `data/aumid-icon.png` 且文件已解出）；② 触发一次提醒 ⇒ 系统通知**署名 = CapsulePulse + 正式图标**（用户目测）；③ 删除该项后重启 ⇒ 自动重建（自愈）；④ 其它功能不受影响。
 
-### 补充：文案整定（PATCH012.5，2026-10-16 用户目测提出，**待用户定稿后落码**）
+### 补充：文案整定（PATCH012.5，2026-10-16 用户目测提出，**已按用户定稿落码**（承接：`.temp/pl027-visual-standards.md` 附录 H1.1/H1.2））
 
 **① 统计板「今日明细」进行中行**（`ui/components/StatsView.vue:1081-1096`）
 
@@ -3391,7 +3391,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 
 - 现状（**已统一为单一口径**）：`今日在岗累计满 {budget_hours} 小时，到点将自动下班并记账。`（到顶时数字为 12）
 - 用户截图里那句"上班满 8 小时"是**旧版本口径**（PATCH005.3 之前），当前代码已无此措辞。
-- 候选（待用户选）：A `今天已在岗满 X 小时，到点自动下班并记账。` ／ B 保持现状 ／ C 用户另给。
+- **已选定并落码**（承接：`.temp/pl027-visual-standards.md` 附录 H1.1）：A `今天已在岗满 X 小时，到点自动下班并记账。` ／ B 保持现状 ／ C 用户另给。
 
 **③ 打卡确认框两段文案**（`ui/App.vue:827-831`）
 
@@ -3510,7 +3510,7 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 - 锁序 `workday → session → storage/settings/fire` 全链无反向嵌套，async 读命令无跨 await 持锁
 - `generate_handler` 与定义 24 项一一对应；前端 invoke 命令全部已注册；`DRAG_INTERACTIVE` 覆盖完整；前端零 `any`
 
-> **豁免判定**：本轮无新增豁免候选；A005 两条外延建议（"sessions/events 无索引"、"session_\* 快照命令"）仍待用户定案；P3-9 死 IPC 不属静默冻结豁免，按死代码报告。
+> **豁免判定**：本轮无新增豁免候选；A005 两条外延建议（"sessions/events 无索引"、"session_\* 快照命令"）**已收口**（不纳入豁免清单）；P3-9 死 IPC 不属静默冻结豁免，按死代码报告。
 
 ## 附录 PATCH013：窗口/任务栏图标"发糊"根因修复（ICO 首帧被当作唯一窗口图标）（2026-10-17 立项并当日收口）
 
@@ -3535,11 +3535,11 @@ PATCH005.1–PATCH005.4（及后续条目）见 x.progress.md「PATCH005」任�
 
 ## 附录 A007：全量代码审计报告（第 6 轮，2026-10-17）
 
-> 状态：📌 待修复（FIX007 任务清单见 `x.progress.md`）
+> 状态：✅ 已修复（FIX007.1–.13 全部落地；任务清单与逐条证据见 `x.progress.md`「FIX007」组；live/目测项已由用户确认无问题 2026-10-17；收口提交 = 本批（V0.1.9.5，哈希见 `git log`））
 > 范围：`core/` 全部 `.rs`（17 文件，含新增 `single_instance.rs` / `window_icon.rs`）+ `ui/` 全部 `.ts` / `.vue` / `.css` + `capabilities` / `tauri.conf.json` / `Cargo.toml`（55 文件 / 18255 行）。排除 `design/`、`.temp/`、`target/`、`node_modules/`。
 > 方式：三路只读并行（Rust 纯逻辑 / Tauri 集成 / 前端）+ 主会话对上轮修复逐项 grep + 关键主张逐行核验（含对子代理结论的复核修正）。审计未修改任何代码。
 > 编号：A/FIX 同号取下一可用 = **A007 / FIX007**（FIX 现有最大 = 006）。
-> 豁免比对：以本文件「四、审计观察项豁免定案清单」为准，无重复报告；本轮观察项 7 条**默认不提升、暂不并入豁免清单**（待用户确认后由归档环节追加）。
+> 豁免比对：以本文件「四、审计观察项豁免定案清单」为准，无重复报告；本轮观察项 7 条**默认不提升、暂不并入豁免清单**（**已收口**：保持默认不提升、不并入豁免清单）。
 
 ### 零、上轮修复复核清单（A006 → FIX006，`4996bd4` → `98f2864` / `6aefd1e`）
 
