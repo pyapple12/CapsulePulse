@@ -109,7 +109,7 @@ pub(super) fn clock_out_inner<C: Clock>(
     // 下班后顺手滚一轮按天汇总（PL027.7）：本班所在数据日此刻仍算"今天"不会滚，
     // 但更早的未滚日会被带走；失败仅落档（汇总只是加速层）
     if let Err(err) = seal_days_inner(ctx, at) {
-        crate::diag::log(&format!("按天汇总失败（下班后忽略）：{err}"));
+        crate::warn_diag(&format!("按天汇总失败（下班后忽略）：{err}"));
     }
     Ok(())
 }
@@ -588,6 +588,10 @@ pub(crate) fn beat_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(), C
 /// 心跳线程（PL027.3）：每 60 秒刷新一次运行态缓存（线程常驻，未上班时空转）。
 /// 无调用方兜底——出错只落档、绝不 panic（与自动下班兜底线程同款纪律）。
 pub(crate) fn spawn_beat_thread(app: &AppHandle) {
+    // FIX009.4：本线程常驻（60s/拍）⇒ 两处失败日志各上一口闩——终态失败（锁中毒，应用内不可
+    // 恢复）会让每拍必失败，逐拍落档无界增长；与其余五个守候线程同一条纪律（FIX006.7 家族）
+    static CLOCK_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
+    static WRITE_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
     let app = app.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(BEAT_INTERVAL_SECS));
@@ -595,12 +599,18 @@ pub(crate) fn spawn_beat_thread(app: &AppHandle) {
         let at = match now_secs(&ctx) {
             Ok(at) => at,
             Err(err) => {
-                crate::warn_diag(&format!("心跳时钟异常，跳过本轮：{err}"));
+                crate::warn_diag_once(
+                    &CLOCK_FAIL_LOGGED,
+                    &format!("心跳时钟异常，跳过本轮（后续同类不再重复记录）：{err}"),
+                );
                 continue;
             }
         };
         if let Err(err) = beat_inner(&ctx, at) {
-            crate::warn_diag(&format!("心跳写入失败（忽略）：{err}"));
+            crate::warn_diag_once(
+                &WRITE_FAIL_LOGGED,
+                &format!("心跳写入失败（忽略；后续同类不再重复记录）：{err}"),
+            );
         }
     });
 }

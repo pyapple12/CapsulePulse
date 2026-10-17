@@ -34,7 +34,8 @@ pub enum HoverState {
 pub struct HoverSummary {
     /// 状态（前端据此决定渲染分支）
     pub state: HoverState,
-    /// 行①标签：`未在岗` / `正班` / `1st 加班` / `2nd 加班` / `暂下班`（**互斥**，无中间值）
+    /// 行①标签：`未在岗` / `本班` / `1st 加班` / `2nd 加班` / `暂下班`（**互斥**，无中间值；
+    /// FIX009.5 更正：原写"正班"，实现（`:100`）与前端、测试均为"本班"）
     pub label: String,
     /// 行①剩余秒数（在岗 = 本班到点 − now；其余 `None` ⇒ 不渲染该值）
     pub remaining_secs: Option<i64>,
@@ -248,11 +249,12 @@ pub fn step_watch(
 /// 行①段带（PATCH007.7）：按**当前班已过时长**落在哪一段带。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Band {
-    /// 本班 `[0, 基准)`
+    /// 本班 `[0, d0)`（`d0 = 基准 − 本班之前已用`，**夹零**）
+    /// FIX009.5 更正：原三行按**原始基准**为锚（PATCH007.7 之前的旧口径），修正版锚点是 `d0`
     Base,
-    /// 1st 加班 `[基准, 基准 + 4h)`
+    /// 1st 加班 `[d0, min(d0 + 4h, 总账可用))`
     First,
-    /// 2nd 加班 `[基准 + 4h, 12h)`（仅当基准 < 8h 时该带非空）
+    /// 2nd 加班 `[min(d0 + 4h, 总账可用), 总账可用]`（总账可用 = 12h 硬顶 − 本班之前已用）
     Second,
 }
 

@@ -48,6 +48,20 @@ impl EventKind {
         }
     }
 
+    /// 是否属于"关闭在岗窗口"的事件（**穷举 match、无 `_` 分支**——FIX009.7：将来给本枚举新增
+    /// 变体时**编译失败**，强制作者当场决定它算不算"关闭类"；原先该集合在归约器与
+    /// `duty_windows_for_day` 各写一遍、且两处都有 `_ => {}` 兜底 ⇒ 新变体会被静默漏掉）。
+    pub const fn is_duty_close(self) -> bool {
+        match self {
+            EventKind::ClockOut | EventKind::AutoClockOut | EventKind::CrashClockOut => true,
+            EventKind::ClockIn
+            | EventKind::SegmentStart
+            | EventKind::SegmentEnd
+            | EventKind::Overtime
+            | EventKind::SessionReset => false,
+        }
+    }
+
     /// 自存储文本解析；未知值返回 None（存储层据此严格报错）。
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -333,7 +347,8 @@ pub fn nested_clock_in_fixes(events: &[(i64, EventKind)]) -> Vec<(i64, EventKind
                 }
                 duty_open = true;
             }
-            EventKind::ClockOut | EventKind::AutoClockOut | EventKind::CrashClockOut => {
+            // FIX009.7：关闭类判据收敛到 `EventKind::is_duty_close()`（不再并列三变体）
+            k if k.is_duty_close() => {
                 duty_open = false;
                 work_open = false;
             }
@@ -376,7 +391,8 @@ pub fn duty_windows_for_day(
                     }
                 }
             }
-            EventKind::ClockOut | EventKind::AutoClockOut | EventKind::CrashClockOut => {
+            // FIX009.7：同归一到 `EventKind::is_duty_close()`
+            k if k.is_duty_close() => {
                 if let Some(start) = open.take() {
                     if at > start {
                         windows.push((start, at));
@@ -461,7 +477,9 @@ pub struct DaySummary {
 /// 窗口由 `duty_windows_for_day` **从流水推出**（该数据日 `clock_in` 开窗、下班事件关窗；未关的末窗闭于 now；可多段 =
 /// 同日多班；跨零点尾巴随窗口天然带入，**不再按自然日切分**）；`segment_start → segment_end`
 /// 记工作块，窗口内空隙记休息块；**孤儿段末丢弃**（无起点的 segment_end 无窗口可归，不再从
-/// 窗口起点起算）；clock_in / clock_out / auto_clock_out / overtime 只作留痕，不参与窗口推导。
+/// 窗口起点起算）；**除 `segment_*` 外的事件一律只作留痕**（`clock_in` / `clock_out` /
+/// `auto_clock_out` / `crash_clock_out` / `overtime` / `session_reset`），不参与窗口推导
+/// （FIX009.5 更正：原枚举此处 4 类、行内注释 5 类、实现 6 类，三者互不一致）。
 /// 输入契约 = 状态机产出的合法事件流（乱序冗余仅做容错合并，不放大为错误——本函数是视图聚合）。
 /// # 参数
 /// windows 为该数据日的在岗区间（升序，半开 `[start, end)`；零长窗口忽略）；
@@ -491,7 +509,7 @@ pub fn reduce_day(
                 }
             }
             EventKind::SegmentEnd => take_work(&mut pending_work, &mut work_windows, at),
-            // 窗口由 windows 给定：打卡/自动下班/加班/重置标记/崩溃补下班只作留痕，不参与窗口推导
+            // 窗口由 windows 给定：**除 `segment_*` 外的事件一律只作留痕**（枚举见函数文档），不参与窗口推导
             EventKind::ClockIn
             | EventKind::ClockOut
             | EventKind::AutoClockOut
@@ -595,6 +613,28 @@ mod tests {
     /// 时间简写：基准日零点 + 秒偏移（纯整数，无时区耦合）。
     const DAY: i64 = 864_000;
     const HOUR: i64 = 3_600;
+
+    /// FIX009.7：关闭类判据单一来源——三个关闭事件为真、其余五个为假（**新增变体时
+    /// `is_duty_close` 的穷举 match 会编译失败** ⇒ 强制作者当场决策）。
+    #[test]
+    fn is_duty_close_covers_exactly_three_kinds() {
+        for k in [
+            EventKind::ClockOut,
+            EventKind::AutoClockOut,
+            EventKind::CrashClockOut,
+        ] {
+            assert!(k.is_duty_close(), "{k:?} 应为关闭类");
+        }
+        for k in [
+            EventKind::ClockIn,
+            EventKind::SegmentStart,
+            EventKind::SegmentEnd,
+            EventKind::Overtime,
+            EventKind::SessionReset,
+        ] {
+            assert!(!k.is_duty_close(), "{k:?} 不应为关闭类");
+        }
+    }
 
     /// 事件简写。
     fn ev(at: i64, kind: EventKind) -> (i64, EventKind) {

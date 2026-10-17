@@ -224,9 +224,10 @@ impl Storage {
     /// `at >= clock_in` 把更早的那条 `clock_out` 也算进来），与 `duty_windows_for_day` 的
     /// 逐条开关窗口径不一致；id 才是流水的定序依据（`insert_events` 按入参顺序追加）。
     pub fn open_duty_clock_in(&self) -> Result<Option<i64>, StorageError> {
+        // FIX009.1：kind 文本一律取 `EventKind::as_str()`（单一来源）——**SQL 里不得出现字面量**
         let last_in_id: Option<i64> = self.conn.query_row(
-            "SELECT MAX(id) FROM events WHERE kind = 'clock_in'",
-            [],
+            "SELECT MAX(id) FROM events WHERE kind = ?1",
+            [crate::workday::EventKind::ClockIn.as_str()],
             |row| row.get(0),
         )?;
         let Some(clock_in_id) = last_in_id else {
@@ -239,8 +240,13 @@ impl Storage {
         )?;
         let closes: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM events
-             WHERE kind IN ('clock_out', 'auto_clock_out', 'crash_clock_out') AND id > ?1",
-            [clock_in_id],
+             WHERE kind IN (?1, ?2, ?3) AND id > ?4",
+            rusqlite::params![
+                crate::workday::EventKind::ClockOut.as_str(),
+                crate::workday::EventKind::AutoClockOut.as_str(),
+                crate::workday::EventKind::CrashClockOut.as_str(),
+                clock_in_id
+            ],
             |row| row.get(0),
         )?;
         Ok((closes == 0).then_some(clock_in_at))
@@ -540,9 +546,9 @@ impl Storage {
             self.conn.query_row(
                 "SELECT COUNT(*) FROM workdays w
                  WHERE NOT EXISTS (
-                    SELECT 1 FROM events e WHERE e.kind = 'clock_in' AND e.at = w.clock_in_at
+                    SELECT 1 FROM events e WHERE e.kind = ?1 AND e.at = w.clock_in_at
                  )",
-                [],
+                [crate::workday::EventKind::ClockIn.as_str()],
                 |row| row.get(0),
             )?
         } else {
@@ -667,16 +673,15 @@ impl Storage {
         let mut pairs = Vec::new();
         let mut open: Option<i64> = None;
         for (at, kind) in events {
-            match kind.as_str() {
-                "segment_start" => open = open.or(Some(at)),
-                "segment_end" => {
-                    if let Some(start) = open.take() {
-                        if at > start {
-                            pairs.push((start, at));
-                        }
+            // FIX009.1：与 `EventKind::as_str()` 比对（SQL 只取文本，**比较也走单一来源**）
+            if kind == crate::workday::EventKind::SegmentStart.as_str() {
+                open = open.or(Some(at));
+            } else if kind == crate::workday::EventKind::SegmentEnd.as_str() {
+                if let Some(start) = open.take() {
+                    if at > start {
+                        pairs.push((start, at));
                     }
                 }
-                _ => {}
             }
         }
         Ok(pairs)
@@ -698,6 +703,27 @@ impl Storage {
 mod tests {
     use super::*;
     use crate::workday::EventKind;
+
+    /// FIX009.7：三种关闭类事件**都能**让 `open_duty_clock_in` 归 `None`（守住 SQL 侧关闭集，
+    /// 新增/改名关闭类事件时该用例会红 ⇒ 与 `is_duty_close()` 的编译期护栏互补）。
+    #[test]
+    fn all_duty_close_kinds_close_the_open_duty() {
+        for close in [
+            EventKind::ClockOut,
+            EventKind::AutoClockOut,
+            EventKind::CrashClockOut,
+        ] {
+            let s = Storage::open_in_memory().unwrap();
+            s.insert_event(1_000, EventKind::ClockIn).unwrap();
+            assert_eq!(s.open_duty_clock_in().unwrap(), Some(1_000));
+            s.insert_event(2_000, close).unwrap();
+            assert_eq!(
+                s.open_duty_clock_in().unwrap(),
+                None,
+                "{close:?} 应关闭在岗窗口"
+            );
+        }
+    }
 
     /// W4 数据源：事件写入按 kind 编码，查询按时间序返回类型化结果。
     #[test]

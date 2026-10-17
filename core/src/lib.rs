@@ -48,10 +48,11 @@ use tauri::{
 };
 
 /// 运行期警告双写：eprintln（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
-/// 文件日志是唯一落点——FIX003.8）。**全项目失败双写统一走本助手**（**含启动期致命退出路径**，
-/// 见 `run()` 里四处 `exit(1)` 前的调用；热路径另配 [`warn_diag_once`] 上闩——FIX008.15 收口）；
-/// 例外只有**刻意只打 dev 控制台**的两处：`glass_backdrop::apply_round_corners`（Win10 无该
-/// 属性、失败属预期，落 diag 会每次启动写常驻噪音）与其句柄获取失败分支。
+/// 文件日志是唯一落点——FIX003.8）。**全项目失败双写统一走本助手**（含**启动期致命退出路径**，
+/// 见 `run()` 里**五处** `exit(1)` 前的调用；热路径另配 [`warn_diag_once`] 上闩——FIX008.15 / FIX009.3 收口）；
+/// 例外只有**刻意区分通道**的三处：`glass_backdrop::apply_round_corners` 的句柄与设置失败（**只打控制台**——
+/// Win10 无该属性、失败属预期，落 diag 会每次启动写常驻噪音）与 `hide_active_border` 的句柄失败（**只落档**——
+/// 同因，控制台无收益）；PANIC hook 走 diag 单写 + 默认 hook 的 stderr（等价双写）。
 pub(crate) fn warn_diag(msg: &str) {
     eprintln!("{msg}");
     diag::log(msg);
@@ -581,6 +582,8 @@ fn spawn_hover_watcher(app: &AppHandle) {
                 push_ticks += 1;
                 if push_ticks >= hover::PUSH_EVERY_TICKS {
                     push_ticks = 0;
+                    // FIX009.5：**刻意忽略返回值**——失败已在 `push_hover_summary` 内落闩日志
+                    // （装饰层纪律：本拍不显示、下一拍自愈），此处再判一次无额外收益。
                     let _ = push_hover_summary(&handle);
                 }
             } else {
@@ -994,7 +997,7 @@ pub fn run() {
                             // 原生拖拽循环会给出成对 Focused(false/true) 抖动，见 z.plan 附录 PATCH011）。
                             // 发送失败仅日志——装饰层纪律，下次拖拽自愈。
                             if let Err(err) = win.emit("drag-end", ()) {
-                                diag::log(&format!("drag-end 事件发送失败：{err}"));
+                                warn_diag(&format!("drag-end 事件发送失败：{err}"));
                             }
                             snap_if_needed(&win);
                         }
@@ -1013,7 +1016,7 @@ pub fn run() {
                 // 分态纱浓度联动：前端监听本事件切换 focused class；发送失败落日志不吞
                 // （观感降级为常纱态，功能不受损；容错白名单 FIX003.7 剩余适用部分）
                 if let Err(err) = window.emit("window-focus", *focused) {
-                    diag::log(&format!("window-focus 事件发送失败：{err}"));
+                    warn_diag(&format!("window-focus 事件发送失败：{err}"));
                 }
             }
         })

@@ -109,7 +109,7 @@ pub(super) fn pause_session_at<C: Clock>(
     let outcome = persist_session_with_end(ctx, at).and_then(|()| clear_reminder_fire(ctx));
     if let Err(err) = outcome {
         // 回滚后数据未落库——落诊断日志（容错白名单 ⑥ 通道；FIX002.7）
-        crate::diag::log(&format!("暂停落库/留痕失败已回滚（计时继续）：{err}"));
+        crate::warn_diag(&format!("暂停落库/留痕失败已回滚（计时继续）：{err}"));
         lock(ctx)?.undo_pause(SessionState::Running { start }, segment);
         return Err(err);
     }

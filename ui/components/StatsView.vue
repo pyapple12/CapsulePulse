@@ -323,37 +323,11 @@ function renderGraph(): void {
   // "已下班但仍停在当前数据日"时照旧发射，出现"暂下班后斜纹仍满条飞"）
   cometWalk = onDutyToday ? W - birthX + 24 : 0;
   if (comet.dataset.awake !== "1") {
+    // FIX009.2：此处只做**一次性纪元初始化**（纪元不随板开合重置 ⇒ 相位连续）；
+    // 两条自维持循环的**启停统一由下方"按需启动"处处理**（板关停、板开重启）
     comet.dataset.awake = "1";
     cometEpoch =
       Number(document.timeline.currentTime ?? 0) - ((2 * cometWalk) / COMET.speed) * 1000;
-    requestAnimationFrame(function frame(t) {
-      if (t - cometLastFrame > 250) {
-        cometNeedsRebuild = true;
-      }
-      cometLastFrame = t;
-      if (cometNeedsRebuild) {
-        cometNeedsRebuild = false;
-        launchComet(true);
-      }
-      if (!destroyed) {
-        cometRaf = requestAnimationFrame(frame);
-      }
-    });
-    (function wake(): void {
-      if (destroyed) {
-        return;
-      }
-      const period = (COMET.spacing / COMET.speed) * 1000;
-      const animNow = Number(document.timeline.currentTime ?? 0);
-      const next = cometEpoch + (Math.floor((animNow - cometEpoch) / period) + 1) * period;
-      cometWakeTimer = window.setTimeout(
-        () => {
-          launchComet(false);
-          wake();
-        },
-        Math.max(0, next - animNow),
-      );
-    })();
   }
   if (onDutyToday && cometWalk > 24) {
     const wasHidden = comet.style.display === "none";
@@ -363,8 +337,17 @@ function renderGraph(): void {
     // 原本就是 W，右端那半圆由裁剪层 rx=6 自己裁出来）
     clipRect.setAttribute("x", birthX.toFixed(2));
     clipRect.setAttribute("width", (W - birthX).toFixed(2));
-    if (wasHidden) {
+    // FIX009.2：首次显示（`wasHidden`）或**板关停过一轮后重进本函数**（`cometRaf === 0`）⇒
+    // **同步**补一次铺满 + 重启两条循环（不依赖下一次 rAF ⇒ 开板首帧即满条）；纪元不重置
+    // ⇒ 相位与"从未停过"一致 ⇒ 板关/开板**肉眼零差异**
+    if (wasHidden || cometRaf === 0) {
+      cometLastFrame = Number(document.timeline.currentTime ?? 0);
+      cometNeedsRebuild = false;
       launchComet(true);
+      cometRaf = requestAnimationFrame(cometFrame);
+      if (cometWakeTimer === 0) {
+        cometWakeLoop();
+      }
     }
   } else {
     comet.style.display = "none";
@@ -372,6 +355,46 @@ function renderGraph(): void {
       s.remove();
     }
   }
+}
+
+/** 走时帧（FIX009.2：**板关即停**——`props.open` 为假时不重排 rAF ⇒ 自然停；重进 `renderGraph`
+ * 时按 `cometRaf === 0` 重启）。停机时把 id 归零，作为"是否在跑"的唯一判据。 */
+function cometFrame(t: number): void {
+  if (destroyed || !props.open) {
+    cometRaf = 0;
+    return;
+  }
+  if (t - cometLastFrame > 250) {
+    cometNeedsRebuild = true;
+  }
+  cometLastFrame = t;
+  if (cometNeedsRebuild) {
+    cometNeedsRebuild = false;
+    launchComet(true);
+  }
+  cometRaf = requestAnimationFrame(cometFrame);
+}
+
+/** 发射节拍（同上：**板关即停**；`cometWakeTimer === 0` = 未在跑）。 */
+function cometWakeLoop(): void {
+  if (destroyed || !props.open) {
+    cometWakeTimer = 0;
+    return;
+  }
+  const period = (COMET.spacing / COMET.speed) * 1000;
+  const animNow = Number(document.timeline.currentTime ?? 0);
+  const next = cometEpoch + (Math.floor((animNow - cometEpoch) / period) + 1) * period;
+  cometWakeTimer = window.setTimeout(
+    () => {
+      if (destroyed || !props.open) {
+        cometWakeTimer = 0;
+        return;
+      }
+      launchComet(false);
+      cometWakeLoop();
+    },
+    Math.max(0, next - animNow),
+  );
 }
 
 /** 白纹发射（design launchComet 1:1）：纪元网格对齐 + 负延迟相位接入 + 寿命回收 */
