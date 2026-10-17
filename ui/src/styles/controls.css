@@ -195,10 +195,10 @@
   background: var(--accent);
 }
 .banner.auto .dot {
-  background: var(--mint-bright);
+  background: var(--rest);
 }
 
 /* 页面级微调（原 index.html 内联块）：打卡 pill 的纵向落位 */
 .stage .pill-cast {
-  margin-top: -1px; /* pill + 三段控制一起上移 3px（用户定案） */
+  margin-top: -1px; /* pill + 三段控制一起上移 1px（值以本行为准；FIX010.9 订正：原注释写 3px 与值不符，只改注释、不动值） */
 }

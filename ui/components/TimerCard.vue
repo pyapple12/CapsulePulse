@@ -245,8 +245,11 @@ const dialArcsSvg = computed(() => {
   if (!d?.duty_started_at) {
     return "";
   }
-  // FIX006.20c：时间源改用 **`secTs`（每秒档 ref）**——原用 `Date.now()` 而该 computed 只依赖
-  // `props.day`（30 秒才刷）⇒ 进行中弧最多滞后 30 秒（注释所称"每秒重建"名不副实）
+  // FIX006.20c / FIX010.11 订正：时间源改用 `secTs`（每秒档 ref）⇒ 本 computed **每秒重算**；
+  // 但块数据（`props.day.blocks`）来自 30 秒兜底刷新 ⇒ 末段右端仍是"取数刻"，
+  // 而 `draw()` 的 `Math.min(t1, nowMs, clipEnd)` 只能截短、不能延长 ⇒ **进行中弧末端最多滞后 30s**
+  // （12h 表盘上 ≈0.3px，肉眼与像素栅格均不可见）。原注释写成"不再滞后 30 秒"与实现不符；
+  // 真要"活尾巴"须给 `daySegments` 传 `tailToMs`（`StatsView` 那样）——按其收益不可见，此处**有意不做**。
   const nowMs = secTs.value;
   const segs = daySegments(d.blocks);
   if (segs.length === 0) {

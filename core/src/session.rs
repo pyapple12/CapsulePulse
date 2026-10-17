@@ -105,6 +105,11 @@ pub struct WorkSession<C: Clock = RealClock> {
     clock: C,
     state: SessionState,
     accumulated: Duration,
+    /// **本段在进程外已走的时间**（FIX010.3）：仅崩溃恢复"无缝续"写入（= 重启前本段已走的部分
+    /// 与停机时长之和，墙钟算得）。它与 `accumulated` **并列**参与 `total()` 与 `segment_secs()`，
+    /// 但不并入 `accumulated`——如此 `pause()` / `undo_pause()` 可原样往返（回滚不丢这段），
+    /// 段真正结束（`resume` 开新段）时才并入、`reset` 时清零。
+    carry: Duration,
 }
 
 impl Default for WorkSession {
@@ -120,6 +125,7 @@ impl<C: Clock> WorkSession<C> {
             clock,
             state: SessionState::Idle,
             accumulated: Duration::ZERO,
+            carry: Duration::ZERO,
         }
     }
 
@@ -157,12 +163,16 @@ impl<C: Clock> WorkSession<C> {
     }
 
     /// 继续：仅 Paused 合法；本段起点重新记为当前时刻（累计保留在 `accumulated`）。
+    /// FIX010.3：把"本段在进程外已走的时间"（`carry`）并入累计——暂停已结束上一段，
+    /// 新开的本段必须从零起算（`segment_secs()` 归零），而总读数一分不减。
     /// # 错误
     /// 非 Paused 态返回 [`SessionError::NotPaused`]。
     pub fn resume(&mut self) -> Result<(), SessionError> {
         let SessionState::Paused { .. } = self.state else {
             return Err(SessionError::NotPaused);
         };
+        self.accumulated += self.carry;
+        self.carry = Duration::ZERO;
         self.state = SessionState::Running {
             start: self.clock.now(),
         };
@@ -173,6 +183,7 @@ impl<C: Clock> WorkSession<C> {
     pub fn reset(&mut self) {
         self.state = SessionState::Idle;
         self.accumulated = Duration::ZERO;
+        self.carry = Duration::ZERO;
     }
 
     /// 重置为"归零休息"（PATCH002：重置按钮的落点）：任意态 → `Paused { elapsed: 0 }`，
@@ -184,6 +195,7 @@ impl<C: Clock> WorkSession<C> {
             elapsed: Duration::ZERO,
         };
         self.accumulated = Duration::ZERO;
+        self.carry = Duration::ZERO;
     }
 
     /// 撤销最近一次 pause（命令层落库/留痕失败回滚专用）：恢复 Running{start} 并把
@@ -210,41 +222,52 @@ impl<C: Clock> WorkSession<C> {
     /// 回推本段起点，故调用方只需给墙钟算出的 `elapsed`（= now − 段起点）；任意态合法。
     /// PATCH004.4：单调钟起点 = 本进程启动（[`RealClock`] 契约），而 `elapsed` 来自**墙钟**——
     /// 段起于进程之前时 `elapsed` 会超过"本进程已运行时长"，直接相减即 Duration 下溢 panic
-    /// （实机表现：停机 ≤10 分钟重启后主线程崩、应用起不来）。故把超出部分**折进基线**：
-    /// 本段起点落在单调零，读数一分不减（累计 = 此前累计 + 超出部分，total() 不变量仍成立）。
+    /// （实机表现：停机 ≤10 分钟重启后主线程崩、应用起不来）。故把超出部分记为 `carry`：
+    /// 本段起点落在单调零、读数一分不减（`total()` = 累计 + `carry` + 本段实时，不变量仍成立）。
+    /// FIX010.3：`carry` **不并入** `accumulated`（原实现并入）——它是**本段**在进程外已走的
+    /// 时间（无缝续口径含"重启前本段 + 停机"），必须同时反映在 `segment_secs()` 上（提醒基准
+    /// / 沙漏水位的取数源）；否则总读数对、而本段时长从零重启（与 PL027 定案 B4「提醒基准 =
+    /// 原段起点」相反）。
     pub fn restore_running_elapsed(&mut self, elapsed: Duration, accumulated: Duration) {
         let now = self.clock.now();
         let (start, carry) = match elapsed.checked_sub(now) {
             Some(extra) => (Duration::ZERO, extra),
             None => (now - elapsed, Duration::ZERO),
         };
-        self.accumulated = accumulated + carry;
+        self.accumulated = accumulated;
+        self.carry = carry;
         self.state = SessionState::Running { start };
     }
 
     /// 按给定累计恢复为暂停态（PL027.5 崩溃恢复专用，休息中崩溃）：读数停在基线上，
-    /// 不自动开跑；任意态合法。
+    /// 不自动开跑；任意态合法。FIX010.3：休息态无"本段在进程外已走的时间"⇒ `carry` 清零。
     pub fn restore_paused(&mut self, accumulated: Duration) {
         self.accumulated = accumulated;
+        self.carry = Duration::ZERO;
         self.state = SessionState::Paused {
             elapsed: accumulated,
         };
     }
 
-    /// 当前段时长：Running = 本段实时；Paused/Idle 为零（"暂停即重置"提醒语义的取数源）。
+    /// 当前段时长：Running = `carry`（FIX010.3：崩溃无缝续时**本段**在进程外已走的时间）+ 本段
+    /// 实时；Paused/Idle 为零（"暂停即重置"提醒语义的取数源）。
     pub fn segment_secs(&self) -> Duration {
         match self.state {
-            SessionState::Running { start } => self.clock.now() - start,
+            SessionState::Running { start } => self.carry + (self.clock.now() - start),
             SessionState::Idle | SessionState::Paused { .. } => Duration::ZERO,
         }
     }
 
-    /// 累计工作时长：Idle 为零；Running = 已完成段累计 + 本段实时；Paused = 已完成段累计。
+    /// 累计工作时长：Idle 为零；Running = 已完成段累计 + `carry` + 本段实时；
+    /// Paused = 已完成段累计 + `carry`（FIX010.3：`carry` 属"未并入累计的本段进程外时长"，
+    /// 段结束时（`resume` 开新段）才并入 `accumulated` ⇒ 两态读数连续、无跳变）。
     pub fn total(&self) -> Duration {
         match self.state {
             SessionState::Idle => Duration::ZERO,
-            SessionState::Running { start } => self.accumulated + (self.clock.now() - start),
-            SessionState::Paused { elapsed } => elapsed,
+            SessionState::Running { start } => {
+                self.accumulated + self.carry + (self.clock.now() - start)
+            }
+            SessionState::Paused { elapsed } => elapsed + self.carry,
         }
     }
 }
@@ -547,6 +570,32 @@ mod tests {
         assert_eq!(s.total(), secs(32 * 60), "读数 = 此前累计 + 本段已走");
         *clock.at.lock().unwrap() = secs(5);
         assert_eq!(s.total(), secs(32 * 60 + 5), "恢复后继续走字");
+    }
+
+    /// FIX010.3：`carry`（崩溃无缝续时**本段**在进程外已走的时间）必须同时进入 `segment_secs()`
+    /// —— 提醒基准与沙漏水位都取它。原实现把超出部分并进 `accumulated` ⇒ 总读数对、而本段时长
+    /// 从零重启（与 PL027 定案 B4「提醒基准 = 原段起点」相反："重启后可能立刻弹提醒"变成"推迟"）。
+    #[test]
+    fn restore_running_elapsed_keeps_segment_span_after_seamless_resume() {
+        let clock = FakeClock::new();
+        let mut s = WorkSession::new(clock.clone());
+        // 进程刚起（单调 0）：恢复"本段已走 27 分钟、此前累计 5 分钟"
+        s.restore_running_elapsed(secs(27 * 60), secs(5 * 60));
+        assert_eq!(s.segment_secs(), secs(27 * 60), "本段时长须含重启前那段");
+        assert_eq!(s.total(), secs(32 * 60), "总读数 = 此前累计 + 本段已走");
+        clock.advance(secs(5));
+        assert_eq!(s.segment_secs(), secs(27 * 60 + 5), "本段在恢复后继续走字");
+        // 暂停：只把"进程内运行的那一段"并入累计并返回（落库取数源；`carry` 原样保留）
+        assert_eq!(s.pause().unwrap(), secs(5), "返回值为进程内运行段");
+        assert_eq!(s.segment_secs(), Duration::ZERO, "暂停即重置本段");
+        assert_eq!(s.total(), secs(32 * 60 + 5), "暂停不丢 `carry`");
+        // 继续：`carry` 并入累计 ⇒ 新段从零起算，总读数连续
+        s.resume().unwrap();
+        assert_eq!(s.segment_secs(), Duration::ZERO, "新段从零起算");
+        assert_eq!(s.total(), secs(32 * 60 + 5), "继续后总读数连续");
+        clock.advance(secs(3));
+        assert_eq!(s.segment_secs(), secs(3));
+        assert_eq!(s.total(), secs(32 * 60 + 8));
     }
 
     /// PL027.5：按给定累计恢复暂停态（休息中崩溃）——读数停在基线上、不自动开跑。

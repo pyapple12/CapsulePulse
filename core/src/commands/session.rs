@@ -108,7 +108,7 @@ pub(super) fn pause_session_at<C: Clock>(
     // 并回滚会话态——极罕见，且那时应用本就该重启（取舍的另一面见 `.14` 的注释）。
     let outcome = persist_session_with_end(ctx, at).and_then(|()| clear_reminder_fire(ctx));
     if let Err(err) = outcome {
-        // 回滚后数据未落库——落诊断日志（容错白名单 ⑥ 通道；FIX002.7）
+        // 回滚后数据未落库——双写（控制台 + diag 落档）、不阻断主流程（容错白名单 ⑥ 通道；FIX002.7）
         crate::warn_diag(&format!("暂停落库/留痕失败已回滚（计时继续）：{err}"));
         lock(ctx)?.undo_pause(SessionState::Running { start }, segment);
         return Err(err);
@@ -274,9 +274,12 @@ pub async fn session_status(
 ) -> Result<SessionStatus, CommandError> {
     let status = status_snapshot(&handle)?;
     // 自动下班待决（PL025.8）：到点前 60s 提示一次——发事件（前端弹倒计时框）+ 把窗口拉到前台
-    if let Some(due_at) = super::workday::auto_out_pending_inner(&handle, now_secs(&handle)?)? {
+    // FIX010.4：**先发事件、成功后再置位**——emit 失败则标志未消费，下一拍（100ms）自然重试；
+    // 原序（判定即置位、随后 emit）在发送失败时会把这次一次性提示永久吞掉
+    if let Some(due_at) = super::workday::auto_out_pending_probe(&handle, now_secs(&handle)?)? {
         app.emit("workday-auto-out-pending", due_at)
             .map_err(|e| CommandError::Event(e.to_string()))?;
+        super::workday::mark_pending_notified(&handle)?;
         // FIX008.3 实测（2026-10-17；永久豁免 #22）：本命令是 **async（非主线程）**，但这里直调
         // 窗口三连**实测有效**——造景令"到点前 60s 待决"成立、主窗隐藏到托盘后，窗口被成功前置
         // （用户目击聚焦 + 弹框），`pulse.log` **零新增**窗口失败。故**不加** `run_on_main_thread`；

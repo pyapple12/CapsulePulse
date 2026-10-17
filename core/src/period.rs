@@ -1,18 +1,17 @@
-//! 统计周期边界：今日/本周起点的纯函数计算（PL002 阶段 A）。
+//! 统计周期边界：今日起点的纯函数计算（PL002 阶段 A）。
 //! 入参泛型 over chrono 时区（生产传 Local，测试传 FixedOffset）——核心逻辑机器时区无关可测；
-//! 本周定义 = 周一起自然周（用户定案 2026-09-09）。
-//! 纯整数推导（零点秒数 + 距周一已知天数），无 Option 分支、无 panic 路径。
+//! 纯整数推导（零点秒数），无 Option 分支、无 panic 路径。
+//!
+//! **本周口径不在本模块**（FIX010.2 订正）：自 PL022 起"周一起自然周"走**按日期偏移逐日取本地零点**
+//! （`commands/workday.rs::monday_offset` + 逐日 `day_bounds`），不再由单个"周起点秒"推导。原先的
+//! `week_start_secs` 按 `× 86_400` 整数近似推周一零点（DST 时区会偏 ±1 小时），且全仓零消费者，
+//! 属废弃 API ⇒ 已删除（AGENTS「不长期保留废弃方案」）。
 
-use chrono::{DateTime, Datelike, TimeZone, Timelike};
+use chrono::{DateTime, TimeZone, Timelike};
 
 /// 今日起点（本地当日零点）的 Unix 秒。
 pub fn day_start_secs<Tz: TimeZone>(now: &DateTime<Tz>) -> i64 {
     now.timestamp() - i64::from(now.num_seconds_from_midnight())
-}
-
-/// 本周起点（周一 00:00:00）的 Unix 秒——周日深夜仍归位本周一。
-pub fn week_start_secs<Tz: TimeZone>(now: &DateTime<Tz>) -> i64 {
-    day_start_secs(now) - i64::from(now.weekday().num_days_from_monday()) * 86_400
 }
 
 #[cfg(test)]
@@ -38,33 +37,6 @@ mod tests {
         let after = at(2026, 9, 9, 0, 0, 1);
         assert_eq!(day_start_secs(&before), at(2026, 9, 8, 0, 0, 0).timestamp());
         assert_eq!(day_start_secs(&after), at(2026, 9, 9, 0, 0, 0).timestamp());
-    }
-
-    /// 本周起点 = 周一零点：周内任意时刻（含周日深夜）都归位到同一周一。
-    #[test]
-    fn week_start_is_monday_midnight() {
-        let monday = at(2026, 9, 7, 8, 0, 0);
-        let wednesday = at(2026, 9, 9, 12, 0, 0);
-        let sunday_late = at(2026, 9, 13, 23, 59, 59);
-        let expected = at(2026, 9, 7, 0, 0, 0).timestamp();
-        assert_eq!(week_start_secs(&monday), expected);
-        assert_eq!(week_start_secs(&wednesday), expected);
-        assert_eq!(week_start_secs(&sunday_late), expected);
-    }
-
-    /// 周边界翻转：周日 23:59:59 仍属旧周；周一 00:00:00 恰好归位新周零点。
-    #[test]
-    fn week_boundary_flips_at_monday_midnight() {
-        let sun_last_tick = at(2026, 9, 13, 23, 59, 59);
-        let mon_first_tick = at(2026, 9, 14, 0, 0, 0);
-        assert_eq!(
-            week_start_secs(&sun_last_tick),
-            at(2026, 9, 7, 0, 0, 0).timestamp()
-        );
-        assert_eq!(
-            week_start_secs(&mon_first_tick),
-            at(2026, 9, 14, 0, 0, 0).timestamp()
-        );
     }
 
     /// 今日起点恰在边界：00:00:00 即当日零点自身。

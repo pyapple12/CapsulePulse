@@ -107,7 +107,7 @@ pub(super) fn clock_out_inner<C: Clock>(
         crate::warn_diag(&format!("运行态缓存清理失败（忽略）：{err}"));
     }
     // 下班后顺手滚一轮按天汇总（PL027.7）：本班所在数据日此刻仍算"今天"不会滚，
-    // 但更早的未滚日会被带走；失败仅落档（汇总只是加速层）
+    // 但更早的未滚日会被带走；失败双写（控制台 + diag 落档）、不阻断主流程（汇总只是加速层）
     if let Err(err) = seal_days_inner(ctx, at) {
         crate::warn_diag(&format!("按天汇总失败（下班后忽略）：{err}"));
     }
@@ -866,21 +866,26 @@ fn read_auto_out_watch(app: &AppHandle) -> Option<(Option<i64>, u64)> {
     read
 }
 
-/// 自动下班待决判定（PL025.8）：到点前 60s 内且本轮尚未提示过 → 置提示标志并返回到点时刻
-/// （同一基准只提示一次；基准变更时标志复位）。无基准（未武装）不提示。
-pub(super) fn auto_out_pending_inner<C: Clock>(
+/// 自动下班待决**判定**（PL025.8；FIX010.4 拆分为纯读）：到点前 60s 内且本轮尚未提示过 →
+/// 返回到点时刻；无基准（未武装）/ 已提示过则不提示。
+/// **不置位**——置位由 [`mark_pending_notified`] 在事件发送成功之后执行，使"同一基准至多提示
+/// 一次"与"发送失败不吞提示"同时成立（原实现先置位后发事件 ⇒ emit 失败即永久丢失该次提示）。
+pub(super) fn auto_out_pending_probe<C: Clock>(
     ctx: &AppContext<C>,
     now: i64,
 ) -> Result<Option<i64>, CommandError> {
-    let mut watch = poison("自动下班", ctx.auto_out.lock())?;
+    let watch = poison("自动下班", ctx.auto_out.lock())?;
     if watch.pending_notified {
         return Ok(None);
     }
-    let Some(due) = auto_out_pending(watch.due_at, now) else {
-        return Ok(None);
-    };
-    watch.pending_notified = true;
-    Ok(Some(due))
+    Ok(auto_out_pending(watch.due_at, now))
+}
+
+/// 标记"本基准已提示过"（FIX010.4）：**须在 `workday-auto-out-pending` 事件发送成功之后**调用；
+/// 基准变更（打卡 / 加班 / 启动恢复重建）时由 [`set_auto_out_watch`] 复位。
+pub(super) fn mark_pending_notified<C: Clock>(ctx: &AppContext<C>) -> Result<(), CommandError> {
+    poison("自动下班", ctx.auto_out.lock())?.pending_notified = true;
+    Ok(())
 }
 
 /// 加班（PATCH005.3 步进版）：本班上限 **+4h**（硬顶 12h）+ 写 `overtime` 事件（留痕）；
@@ -2121,14 +2126,22 @@ mod tests {
             Some(due),
             "打卡武装到点 = 上班 + N（设置口径）"
         );
-        assert_eq!(auto_out_pending_inner(&ctx, due - 61).unwrap(), None);
+        assert_eq!(auto_out_pending_probe(&ctx, due - 61).unwrap(), None);
         assert_eq!(
-            auto_out_pending_inner(&ctx, due - 60).unwrap(),
+            auto_out_pending_probe(&ctx, due - 60).unwrap(),
             Some(due),
             "恰 60s 进待决窗口"
         );
+        // FIX010.4：置位只在"事件发送成功"之后执行 ⇒ 未置位前每拍都能重复读到同一提示
+        // （发送失败 ⇒ 下一拍重试，不丢；原实现先置位后发事件会把提示永久吞掉）
         assert_eq!(
-            auto_out_pending_inner(&ctx, due - 20).unwrap(),
+            auto_out_pending_probe(&ctx, due - 59).unwrap(),
+            Some(due),
+            "未置位前可重复读（emit 失败可重试）"
+        );
+        mark_pending_notified(&ctx).unwrap();
+        assert_eq!(
+            auto_out_pending_probe(&ctx, due - 20).unwrap(),
             None,
             "同一基准只提示一次"
         );

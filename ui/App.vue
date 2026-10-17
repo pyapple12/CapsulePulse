@@ -73,6 +73,14 @@ let statsTimer: number | undefined;
  * 非红字提示 **5s** 自动消失——文案条与板内红字（板底保存失败 / 行内录键失败）共用同一口径。 */
 const HINT_HIDE_MS = 5_000;
 const ERROR_HIDE_MS = 10_000;
+
+/** 数据刷新失败的可见提示文案（FIX010.10 方案 A）：与"成功即清"的判据共用同一常量，
+ * 避免两处字符串漂移 */
+const STATS_FAIL_MSG = "数据刷新失败，正在自动重试";
+/** 连续失败计数 + "本轮已提示过"标记（FIX010.10）：`refreshStats` 是低频兜底口，
+ * 失败**不得常驻提示**（PATCH010.5 口径）⇒ 同一轮故障只提示一次，成功即复位 */
+let statsFailCount = 0;
+let statsFailWarned = false;
 let bannerHideTimer: number | undefined;
 /** 录键失败短标签的自动恢复计时（PATCH010.4 用户定案：10s 后该行换回正常说明文字） */
 let hotkeyErrorTimer: number | undefined;
@@ -208,8 +216,22 @@ async function refreshStats(): Promise<void> {
     const status = await invoke<SessionStatus>("session_status");
     dataDayOffset.value = status.data_day_offset;
     day.value = await invoke<DaySummary>("day_detail", { offset: status.data_day_offset });
+    // FIX010.10：本轮恢复正常 ⇒ 复位失败计数，并撤掉刚才那条失败提示（自愈后不挂残留红字）
+    statsFailCount = 0;
+    statsFailWarned = false;
+    if (actionError.value === STATS_FAIL_MSG) {
+      actionError.value = "";
+    }
   } catch (err) {
+    // FIX010.10（方案 A）：失败**主动可见**（此前只 console）；错误详情仍只进 console，UI 只放短文案。
+    // 限流：连续 ≥2 次才提示，且**同一轮故障只提示一次**（禁止常驻提示——PATCH010.5 口径；
+    // 提示条自隐走 ERROR_HIDE_MS = 10s，见下面的 banner 计时 watch）
     console.error("session_status / day_detail 调用失败", err);
+    statsFailCount += 1;
+    if (statsFailCount >= 2 && !statsFailWarned) {
+      statsFailWarned = true;
+      actionError.value = STATS_FAIL_MSG;
+    }
   }
 }
 

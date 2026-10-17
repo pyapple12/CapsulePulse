@@ -50,9 +50,10 @@ core/             # Tauri 2 后端（原框架默认名 src-tauri，整体改名
   src/
     lib.rs            # 应用装配：玻璃挂载 + 模块注册
     main.rs           # 薄入口（调 capsule_pulse::run()）
+    single_instance.rs # 单实例闸门（FIX006.10：**进程第一行**判重——第二实例不碰库 / 不写日志 / 不建窗；手写 kernel32 命名对象 FFI，零新依赖）
     session.rs        # 计时状态机（纯逻辑，可单测；业务纯逻辑平铺于此，禁 import tauri）
     workday.rs        # 工作日状态机 + 事件归约 reduce_day（PL005；打卡/图谱纯逻辑，注入时间可单测）
-    commands/         # Tauri 命令层（PL001 阶段 D；按职责分文件：mod 上下文与共享 / session 会话 / stats 统计 / reminder 副作用与设置 / workday 打卡与单日明细 / hover 托盘悬浮概览 / tray_menu 自绘菜单窗 / window 窗口级命令）
+    commands/         # Tauri 命令层（PL001 阶段 D；按职责分文件：mod 上下文与共享 / session 会话 / workday 打卡、单日明细与统计读取 / reminder 副作用与设置 / hover 托盘悬浮概览 / tray_menu 自绘菜单窗 / window 窗口级命令）
     storage.rs        # SQLite Repository（PL002；**PL027 重做**：events 单表为唯一事实源 + runtime 运行态缓存 + days 按天汇总——旧 sessions / workdays 两表已退役）
     period.rs         # 统计周期边界纯函数（PL002）
     reminder.rs       # 提醒评估器（PL003）

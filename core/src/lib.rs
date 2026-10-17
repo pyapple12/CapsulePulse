@@ -60,7 +60,9 @@ pub(crate) fn warn_diag(msg: &str) {
 
 /// 运行期警告双写**只记一次**（FIX006.7）：面向热路径（100ms 守候循环）与终态失败（锁中毒
 /// 不可恢复、窗口查询失败多为持续态）——每拍落档会把 `pulse.log` 刷爆，而事件本身只发生一次。
-/// 全项目失败分支**统一走本助手**（含低频路径，写法一致）；各调用点自带 `AtomicBool` 闩。
+/// **适用面**（FIX010.6 订正，原写"全项目失败分支统一走本助手（含低频路径）"过宽）：**需上闩的**
+/// 热路径 / 终态失败走本助手；低频分支（每次动作至多一次）直接用 [`warn_diag`]、**不要上闩**
+/// ——给低频失败上闩会把瞬时失败永久静音，反而丢掉本可自愈的线索。各调用点自带 `AtomicBool` 闩。
 pub(crate) fn warn_diag_once(flag: &AtomicBool, msg: &str) {
     if !flag.swap(true, Ordering::Relaxed) {
         warn_diag(msg);
@@ -864,9 +866,12 @@ fn register_global_shortcuts(app: &tauri::App) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-/// 装配并运行 Tauri 应用：窗口属性由 tauri.conf.json 声明（透明无边框 300×400），
-/// 玻璃观感走前端 CT 分态纱方案（失焦 30% 纱、聚焦 0% 纱桌面直透；PL021.4 定案——
-/// DWM 系统背板材质随 CT 化退役，磨砂观感不再由系统层提供）。
+/// 装配并运行 Tauri 应用：窗口属性由 tauri.conf.json 声明（透明无边框 300×400）。
+/// 玻璃观感 = 前端 CT 分态纱（失焦 30% 纱、聚焦 0% 纱桌面直透；PL021.4 定案）＋ **按需系统背板**
+/// ——PL029 起系统背板按"板开合 + 窗口聚焦"挂摘（`glass_backdrop::set_backdrop`，经
+/// `commands/window.rs` 的 `set_board_backdrop` 由前端调用）：PL021 曾整体退役、PL029 以按需形态
+/// 回归，见 AGENTS「玻璃效果」条。（FIX010.6 订正：原文档写"随 CT 化退役、磨砂观感不再由系统层
+/// 提供"，与 PL029 实现矛盾。）
 pub fn run() {
     // 单实例闸门（FIX006.10 定案）：**进程第一行**——第二个实例在此直接退场，**不碰库、不写日志、
     // 不建窗**（旧插件判定在 setup、晚于开库与留痕，且有"两实例并存"的启动竞态，见 single_instance.rs）。
@@ -1168,7 +1173,7 @@ pub fn run() {
             build_tray(app)?;
             register_global_shortcuts(app)?;
             // 惰性按天汇总（PL027.7）：启动时把"已封口但未滚"的过去日滚进 days（幂等；
-            // 失败仅落档——汇总只是加速层，不影响主流程）
+            // 失败双写（控制台 + diag 落档）、不阻断主流程——汇总只是加速层）
             let ctx = app.state::<AppContext>();
             let now = match commands::now_secs(&ctx) {
                 Ok(now) => now,
@@ -1186,7 +1191,7 @@ pub fn run() {
                 }
             }
             // 旧模型一次性迁移（PL027.1b）：备份 → 校验 → 删旧两表 → 回填汇总 → 置版本。
-            // 失败不阻断启动（新代码只读流水，旧表留着无害），仅落档、下次启动重试。
+            // 失败双写（控制台 + diag 落档）、不阻断启动（新代码只读流水，旧表留着无害），下次启动重试。
             if now > 0 {
                 commands::workday::migrate_on_start(&ctx, now);
             }

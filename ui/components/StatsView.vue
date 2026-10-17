@@ -130,6 +130,10 @@ let cometLastFrame = Number.NEGATIVE_INFINITY;
 let cometNeedsRebuild = false;
 let cometRaf = 0;
 let cometWakeTimer = 0;
+// 节点层内容签名（FIX010.8）：覆盖**全部绘制输入**——逐节点 `字符@时刻@是否点亮`（横坐标 = f(时刻)）
+// ＋画布宽 `W`（横坐标的缩放因子）＋节点顺序与个数（由有序拼接串体现）。与上次相同即整段跳过重建。
+// 注意：`renderGraphEmpty` 会清空该层 ⇒ 那里必须一并复位（否则回到同样内容时误判"已在位"）。
+let lastNodesSig = "";
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -142,6 +146,8 @@ function renderGraphEmpty(): void {
   const nodesG = graphSvg.value?.querySelector<SVGGElement>("#graphNodes");
   if (nodesG) {
     nodesG.innerHTML = "";
+    // FIX010.8：本层已被清空 ⇒ 内容签名作废（否则回到同样内容时会误判"已在位"而跳过重建）
+    lastNodesSig = "";
   }
   cometWalk = 0;
   const comet = cometEl.value;
@@ -151,6 +157,8 @@ function renderGraphEmpty(): void {
       s.remove();
     }
   }
+  // FIX010.1：空态（无打卡日 / 今日未上班）同样没有彗星走廊 ⇒ 两条自维持循环停机
+  stopCometLoops();
   axisStart.value = "上班 na:na";
   axisEnd.value = "下班 na:na";
 }
@@ -211,11 +219,13 @@ function renderGraph(): void {
   const xpx = (ts: number): number => frac(ts) * W;
 
   // bars：数量对齐 + 改属性（design 复用策略）
+  // FIX010.9：删掉 `active` 字段及其类名消费——它算的是"当前在岗那一段"，但**全仓从无消费方**
+  // （`graph.css` 没有 `.graph-seg.active` 规则、JS 也不读）⇒ 写而不读的历史遗留；若要真做
+  // "在岗段高亮"须当新特性另立（需先定高亮口径），不属清理范围。
   interface Bar {
     st: string;
     x: number;
     w: number;
-    active: boolean;
   }
   const list: Bar[] = [];
   const nodes: { ts: number; ch: string; kind: string }[] = [];
@@ -230,7 +240,6 @@ function renderGraph(): void {
       st,
       x: xpx(t0),
       w: xpx(capped) - xpx(t0),
-      active: nowTs < endTs && capped === nowTs,
     });
     if (i === 0 || st !== segs[i - 1]!.kind) {
       // PL025.10 节点语义 = 进入状态那一刻：进入工作 W / 进入休息 R / 进灰（= 上一班末）D；
@@ -241,7 +250,7 @@ function renderGraph(): void {
   });
   if (nowTs < endTs) {
     // 在岗尾巴：画到画布右缘（W = 轴末，与填色同一条映射；圆角由裁剪层裁出）
-    list.push({ st: "duty", x: xpx(nowTs), w: W - xpx(nowTs), active: false });
+    list.push({ st: "duty", x: xpx(nowTs), w: W - xpx(nowTs) });
   }
   nodes.push({ ts: endTs, ch: "D", kind: "end" });
   // PATCH012.7（用户定案）：**在岗状态下**，末尾这个 `D` 是"**预计下班**"占位（`endTs` = 本班预算到点，
@@ -269,7 +278,7 @@ function renderGraph(): void {
     }
     [...g.children].forEach((rect, i) => {
       const b = items[i]!;
-      rect.setAttribute("class", `graph-seg ${b.st}${b.active ? " active" : ""}`);
+      rect.setAttribute("class", `graph-seg ${b.st}`);
       rect.setAttribute("x", b.x.toFixed(2));
       rect.setAttribute("width", Math.max(0, b.w).toFixed(2));
       rect.setAttribute("y", "0");
@@ -285,24 +294,31 @@ function renderGraph(): void {
     list.filter((b) => b.st !== "duty"),
   );
 
-  // nodes：数量变化整层重建（design：避免复用跨色渐变伪影）
+  // nodes：**内容签名去重**（FIX010.8）——节点层原先是每秒刷新里唯一"无条件整层重建"的块
+  // （bars 有 `syncGroup` 复用、周卡有签名去重）⇒ 每秒清空 + 重建全部节点、纯白做功。
+  // 签名 = 画布宽 + 逐节点 `字符@时刻@是否点亮` 的有序拼接（覆盖横坐标、点亮、顺序与个数）；
+  // 相同 ⇒ 整段跳过（DOM 一个不碰），不同 ⇒ 重建（design：避免复用跨色渐变伪影）。
   const nodesG = svg.querySelector<SVGGElement>("#graphNodes");
   if (nodesG) {
-    nodesG.innerHTML = "";
-    nodes.forEach((n) => {
-      // PATCH003.4 定案 a：节点圆心 = 它的真实时刻（= 颜色分界线），覆盖顺序因此 = 纯时间顺序
-      // （DOM 追加序 = 时间序；SVG 同层后画在上）。
-      // PATCH004.3：圆心横向**夹进 [6, W−6]**（圆角帽心区间）——内部节点不受影响（圆心恰在时刻上）；
-      // 轴两端（时刻落在画布边缘 0 / W）被夹进 6px，整颗圆（r 5.4 < 圆角 6）落在圆角帽内不被裁掉。
-      const center = Math.min(Math.max(xpx(n.ts), 6), Math.max(6, W - 6));
-      const g = document.createElementNS(SVG_NS, "g");
-      g.setAttribute("class", `graph-node ${n.kind}${n.ts <= nowTs ? " lit" : ""}`);
-      g.setAttribute("transform", `translate(${(center - 6).toFixed(2)} 0)`);
-      g.innerHTML =
-        '<circle cx="6" cy="6" r="5.4" /><text x="6" y="6" dy="-0.5" text-anchor="middle" dominant-baseline="central"></text>';
-      (g.querySelector("text") as SVGTextElement).textContent = n.ch;
-      nodesG.append(g);
-    });
+    const nodesSig = `${W}|${nodes.map((n) => `${n.ch}@${n.ts}@${n.ts <= nowTs}`).join("|")}`;
+    if (nodesSig !== lastNodesSig) {
+      lastNodesSig = nodesSig;
+      nodesG.innerHTML = "";
+      nodes.forEach((n) => {
+        // PATCH003.4 定案 a：节点圆心 = 它的真实时刻（= 颜色分界线），覆盖顺序因此 = 纯时间顺序
+        // （DOM 追加序 = 时间序；SVG 同层后画在上）。
+        // PATCH004.3：圆心横向**夹进 [6, W−6]**（圆角帽心区间）——内部节点不受影响（圆心恰在时刻上）；
+        // 轴两端（时刻落在画布边缘 0 / W）被夹进 6px，整颗圆（r 5.4 < 圆角 6）落在圆角帽内不被裁掉。
+        const center = Math.min(Math.max(xpx(n.ts), 6), Math.max(6, W - 6));
+        const g = document.createElementNS(SVG_NS, "g");
+        g.setAttribute("class", `graph-node ${n.kind}${n.ts <= nowTs ? " lit" : ""}`);
+        g.setAttribute("transform", `translate(${(center - 6).toFixed(2)} 0)`);
+        g.innerHTML =
+          '<circle cx="6" cy="6" r="5.4" /><text x="6" y="6" dy="-0.5" text-anchor="middle" dominant-baseline="central"></text>';
+        (g.querySelector("text") as SVGTextElement).textContent = n.ch;
+        nodesG.append(g);
+      });
+    }
   }
 
   // 轴标（FIX006.18：复用 `format.hhmm`——**注意单位换算**：本处毫秒、format 收秒）
@@ -330,17 +346,18 @@ function renderGraph(): void {
       Number(document.timeline.currentTime ?? 0) - ((2 * cometWalk) / COMET.speed) * 1000;
   }
   if (onDutyToday && cometWalk > 24) {
-    const wasHidden = comet.style.display === "none";
     comet.style.display = "";
     comet.setAttribute("transform", `translate(${birthX.toFixed(2)} 0)`);
     // 彗星走廊右端 = 画布右缘 W（与 cometWalk 同源；PATCH004.3 起不再止于帽心——设计稿
     // 原本就是 W，右端那半圆由裁剪层 rx=6 自己裁出来）
     clipRect.setAttribute("x", birthX.toFixed(2));
     clipRect.setAttribute("width", (W - birthX).toFixed(2));
-    // FIX009.2：首次显示（`wasHidden`）或**板关停过一轮后重进本函数**（`cometRaf === 0`）⇒
-    // **同步**补一次铺满 + 重启两条循环（不依赖下一次 rAF ⇒ 开板首帧即满条）；纪元不重置
-    // ⇒ 相位与"从未停过"一致 ⇒ 板关/开板**肉眼零差异**
-    if (wasHidden || cometRaf === 0) {
+    // FIX009.2 / FIX010.1：**唯一启动闸门 = 未在跑**（`cometRaf === 0`）——已在跑的一律不重启
+    // （原条件含 `wasHidden`，会在旧链仍存活时又起一条 ⇒ 孤儿链累积；FIX010.1 的实测复现见
+    // `ui/tests/comet-loop.spec.ts`）。停机只发生在"板关"与"图上无走廊"两处（`stopCometLoops`）。
+    // 未在跑 ⇒ **同步**补一次铺满 + 重启两条循环（不依赖下一次 rAF ⇒ 首帧即满条）；纪元不重置
+    // ⇒ 相位与"从未停过"一致 ⇒ 板关/开板、翻页往返**肉眼零差异**
+    if (cometRaf === 0) {
       cometLastFrame = Number(document.timeline.currentTime ?? 0);
       cometNeedsRebuild = false;
       launchComet(true);
@@ -354,7 +371,25 @@ function renderGraph(): void {
     for (const s of [...comet.children]) {
       s.remove();
     }
+    // FIX010.1：未在岗 / 非当前数据日 ⇒ 图上没有彗星走廊 ⇒ 两条循环一并停机
+    stopCometLoops();
   }
+}
+
+/** 彗星两条自维持循环**成对停机**（FIX010.1）：rAF 与发射节拍一起撤排程 + id 双归零
+ * （id 归零 = "未在跑"的唯一判据，`renderGraph` 据此重启）。
+ * **必须真撤排程**——只把 id 清零不撤销排程，已排的定时器到点仍会 `launchComet + cometWakeLoop()`
+ * 在隐藏子树上复活，等于制造同一类泄漏。 */
+function stopCometLoops(): void {
+  if (cometRaf !== 0) {
+    cancelAnimationFrame(cometRaf);
+    cometRaf = 0;
+  }
+  if (cometWakeTimer !== 0) {
+    window.clearTimeout(cometWakeTimer);
+    cometWakeTimer = 0;
+  }
+  cometNeedsRebuild = false;
 }
 
 /** 走时帧（FIX009.2：**板关即停**——`props.open` 为假时不重排 rAF ⇒ 自然停；重进 `renderGraph`
@@ -829,12 +864,7 @@ onUnmounted(() => {
   destroyed = true;
   glassBar?.destroy();
   window.clearInterval(secTimer);
-  if (cometRaf !== 0) {
-    cancelAnimationFrame(cometRaf);
-  }
-  if (cometWakeTimer !== 0) {
-    window.clearTimeout(cometWakeTimer);
-  }
+  stopCometLoops();
   if (selTimer !== 0) {
     window.clearTimeout(selTimer);
   }
@@ -1123,13 +1153,7 @@ onUnmounted(() => {
                 ><template v-else>{{ fmtT(r.endMin) }}</template></span
               >
               <span class="track">
-                <span
-                  class="blk"
-                  :class="r.kind"
-                  :data-secs="r.secs"
-                  :data-ongoing="r.ongoing ? '' : undefined"
-                  :style="{ width: blkWidth(r.secs) }"
-                ></span>
+                <span class="blk" :class="r.kind" :style="{ width: blkWidth(r.secs) }"></span>
               </span>
               <span class="dur">{{ durText(r.secs) }}</span>
             </div>

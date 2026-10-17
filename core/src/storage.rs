@@ -238,6 +238,8 @@ impl Storage {
             [clock_in_id],
             |row| row.get(0),
         )?;
+        // FIX010.5：本三元组 = `EventKind::is_duty_close()` 的**真集**，改判据须同步此处
+        // （新增变体由判据的穷举 match 编译报错强制决策；下方用例只守取值、不守新增）
         let closes: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM events
              WHERE kind IN (?1, ?2, ?3) AND id > ?4",
@@ -704,8 +706,11 @@ mod tests {
     use super::*;
     use crate::workday::EventKind;
 
-    /// FIX009.7：三种关闭类事件**都能**让 `open_duty_clock_in` 归 `None`（守住 SQL 侧关闭集，
-    /// 新增/改名关闭类事件时该用例会红 ⇒ 与 `is_duty_close()` 的编译期护栏互补）。
+    /// FIX009.7：三种关闭类事件**都能**让 `open_duty_clock_in` 归 `None`（守住 SQL 侧关闭集的**取值**）。
+    /// **护栏边界（FIX010.5 订正——原注释自称"新增/改名会红"与实现不符）**：本用例与 SQL 同样硬编码
+    /// 这三个变体 ⇒ 新增"关闭类"变体时它**不会**变红。改名由 `EventKind::as_str()` 单一来源解决；
+    /// 新增变体由 `EventKind::is_duty_close()` 的穷举 match **编译报错**强制作者决策，再据此人工同步
+    /// `open_duty_clock_in` 里那个三元组（Rust 无反射，变体无法自动枚举）。
     #[test]
     fn all_duty_close_kinds_close_the_open_duty() {
         for close in [

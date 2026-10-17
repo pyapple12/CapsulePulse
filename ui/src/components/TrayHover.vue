@@ -32,34 +32,42 @@ const restParts = computed(() => splitDuration((summary.value?.rest_secs ?? 0) /
 /** FIX006.19b：上次已下发尺寸的键（`宽|高`）——相同即跳过 invoke（后端每秒推 `hover-update`，
  * 原实现每秒都 `set_size` + 重锚，含跨线程窗口调用，而尺寸其实不变）。 */
 let lastSizeKey = "";
-watch(
-  summary,
-  async () => {
-    await nextTick();
-    // FIX007.12：量内容层 + 从 CSS 读 chrome 的管线收敛到 `measure-window`（元素缺失回 null ⇒
-    // 本轮跳过；原实现里那对重复的空值守卫一并收进该函数）
-    const measured = measureChrome(bodyEl.value, cardEl.value);
-    if (measured == null) {
-      return;
-    }
-    // 本窗语义留在本窗：单行宽按内容实测、多行传 `null`（后端固定 228）
-    const singleLine = summary.value?.single_line === true;
-    const width = singleLine ? snap4(measured.contentW + measured.chromeX) : null;
-    const height = snap4(measured.contentH + measured.chromeY);
-    // FIX006.19b：尺寸与上次相同 ⇒ 不再打扰后端（失败时不记键，下一拍重试）
-    const sizeKey = `${width}|${height}`;
-    if (sizeKey === lastSizeKey) {
-      return;
-    }
-    try {
-      await invoke("tray_hover_resize", { width, height });
-      lastSizeKey = sizeKey;
-    } catch (err) {
-      console.error("悬浮窗尺寸调整失败", err);
-    }
-  },
-  { deep: true },
-);
+/** FIX010.12：上次已**测量**的内容键（单行标记 + 卡片全文）——`hover-update` 每秒推一次，但卡片文本
+ * 是**分钟级**（行①/② 走 `splitDuration` 取分钟、行③ `toFixed(1)` 为 6 秒粒度）⇒ 内容没变时
+ * 不必再量（`getBoundingClientRect` + `getComputedStyle` 各是一次强制布局读）。 */
+let lastMeasureKey = "";
+watch(summary, async () => {
+  await nextTick();
+  // FIX010.12：内容键不变 ⇒ **整段早退**（连测量都省）。内容一样 ⇒ 量出的尺寸必然一样
+  // ⇒ 不会出现"少测导致窗口偏窄、右缘被裁"（PATCH007.19 修过的那个坑）。
+  // 键在**成功取到测量**之后才记（元素缺失的 null 分支不记，下一拍自然重试）
+  const measureKey = `${summary.value?.single_line === true}|${cardEl.value?.textContent ?? ""}`;
+  if (measureKey === lastMeasureKey) {
+    return;
+  }
+  // FIX007.12：量内容层 + 从 CSS 读 chrome 的管线收敛到 `measure-window`（元素缺失回 null ⇒
+  // 本轮跳过；原实现里那对重复的空值守卫一并收进该函数）
+  const measured = measureChrome(bodyEl.value, cardEl.value);
+  if (measured == null) {
+    return;
+  }
+  lastMeasureKey = measureKey;
+  // 本窗语义留在本窗：单行宽按内容实测、多行传 `null`（后端固定 228）
+  const singleLine = summary.value?.single_line === true;
+  const width = singleLine ? snap4(measured.contentW + measured.chromeX) : null;
+  const height = snap4(measured.contentH + measured.chromeY);
+  // FIX006.19b：尺寸与上次相同 ⇒ 不再打扰后端（失败时不记键，下一拍重试）
+  const sizeKey = `${width}|${height}`;
+  if (sizeKey === lastSizeKey) {
+    return;
+  }
+  try {
+    await invoke("tray_hover_resize", { width, height });
+    lastSizeKey = sizeKey;
+  } catch (err) {
+    console.error("悬浮窗尺寸调整失败", err);
+  }
+});
 
 onMounted(() => {
   // 高度链修正（PATCH007.3，抄 CT `TrayPreview.vue`）：`html`/`body`/`#app` 无显式高度时
