@@ -1,4 +1,5 @@
-//! Tauri 命令层：前端 invoke 的唯一入口——按职责拆分（会话/统计/提醒设置），本层只做转发与副作用。
+//! Tauri 命令层：前端 invoke 的唯一入口——按职责拆分（会话 / 提醒与设置 / 工作日报表 /
+//! 托盘悬浮与菜单窗 / 窗口），本层只做转发与副作用。
 //! `AppContext`、`CommandError` 与共享助手集中在本模块；`#[tauri::command]` 包装在各子模块，
 //! 经 `pub use` 再导出给 lib.rs。命令核心逻辑抽为接收 `&AppContext` 的自由函数，
 //! T3 可在 cargo test 下无窗口直测（注入内存库 + 假钟，见 test_support）。
@@ -66,7 +67,8 @@ pub(crate) fn now_secs<C: Clock>(ctx: &AppContext<C>) -> Result<i64, CommandErro
 /// lib.rs 经 `.manage()` 注册，各命令经 State 访问。泛型默认 [`RealClock`]；测试注入假钟。
 /// rusqlite Connection 非 Sync，故 Storage 亦入 Mutex；
 /// 锁序恒 workday → session → storage/settings/fire → auto_out 单向（禁反向嵌套，防死锁）。
-/// 线程现状（FIX002.8）：写命令同步（主线程串行），四个读命令（status/stats/day/week）已 async 化——
+/// 线程现状（FIX002.8）：写命令同步（主线程串行），**五个读命令**
+///（`session_status` / `day_detail` / `week_detail` / `workday_total` / `tray_hover`）已 async 化——
 /// 全面 async 化后本锁序纪律即实际承压面，新增命令必须遵守。
 pub struct AppContext<C: Clock = RealClock> {
     /// 工作日状态机（Off/OnDuty，PL005）。

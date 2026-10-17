@@ -30,10 +30,10 @@ pub struct SessionStatus {
 }
 
 /// 提醒决策（评估纯逻辑的输出载体；副作用由提醒子模块执行）。
+/// FIX007.6：**只在"要发"时才构造**（`reminder_check_inner` 用 `then_some` 产出）⇒
+/// 原 `fire: bool` 字段恒为 true 已删——"要不要发"由 `Option<ReminderDecision>` 表达。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReminderDecision {
-    /// 是否应触发提醒。
-    pub(super) fire: bool,
     /// 当前阈值（分钟，供**首次**提醒文案的数值；PATCH012.8）。
     pub(super) threshold_min: u32,
     /// 本次触发是否为**重发**（`evaluate` 之前 `last_fired` 已有值 ⇒ 本段此前已响过）——
@@ -499,10 +499,9 @@ mod tests {
             .is_none());
 
         clock.advance(secs(60));
-        let d = crate::commands::reminder::reminder_check_inner(&ctx)
+        crate::commands::reminder::reminder_check_inner(&ctx)
             .unwrap()
             .expect("恰达阈值应触发");
-        assert!(d.fire);
 
         // 5 分钟间隔内不重发
         assert!(crate::commands::reminder::reminder_check_inner(&ctx)
@@ -520,7 +519,6 @@ mod tests {
         let d = crate::commands::reminder::reminder_check_inner(&ctx)
             .unwrap()
             .expect("新段再次达阈值应触发");
-        assert!(d.fire);
         assert_eq!(d.threshold_min, 50);
     }
 

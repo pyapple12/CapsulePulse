@@ -3,6 +3,8 @@
  * 让映射期的对比探针能在 IAB 里驱动真实组件树。生产构建经 main.ts 的
  * import.meta.env.DEV 死分支静态消除，dist 零痕迹。
  * 种子数据对齐 design 实验场演示态（在岗计时中 / 阈值 50 / 自动下班 8h / 有统计）。
+ * **IPC DTO 有增删必须同步本基座**（FIX007.10）：类型镜像在 `ui/types.ts`、数据源在本文件——
+ * 只改前者会出现"基座缺字段 ⇒ DEV 专属错渲染"（`?? 0` 兜底成 1970 起点、布尔缺省成 false）。
  */
 
 /** MM-DD 标签（周卡日期列，与后端 WeekDay.date 同格式） */
@@ -72,6 +74,10 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
           budget_hours: 8, // PATCH005.3：基座固定基准 8h
           used_secs: used,
           remaining_secs: Math.max(0, 8 * 3_600 - used),
+          // FIX007.10：与 duty_started_at 同源（当前班起点秒，供表盘底轨 / 轴末起算）
+          shift_start: start,
+          can_overtime: true, // 未跨零点且基准 < 12h 硬顶 ⇒ 可加班（自动下班确认框的加班钮）
+          cap_reached: false,
           blocks: [{ start, end: nowSec, kind: "work" }],
         };
       }
@@ -86,6 +92,10 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         budget_hours: 0, // PATCH005.3：暂下班 → 不画蓝条、轴末取末段末尾（预算字段 0）
         used_secs: 3 * 3_600,
         remaining_secs: 0,
+        // FIX007.10：当日已收尾，起点仍如实给出（底轨画的是"今天这一班"）
+        shift_start: start,
+        can_overtime: false,
+        cap_reached: false,
         blocks: [
           { start, end: noon, kind: "work" },
           { start: noon, end: onePm, kind: "rest" },
@@ -134,6 +144,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
         snap_to_edge: true,
         hotkey_toggle_visible: "Alt+Shift+S",
         hotkey_toggle_timer: "Alt+Shift+P",
+        window_pos: null, // FIX007.10：位置记忆为空（基座无真实窗口位置）
       };
     /* PL028.2 录键：基座无注册能力，回显规范化串（真注册与冲突拒绝在 Rust 侧） */
     case "set_hotkey":

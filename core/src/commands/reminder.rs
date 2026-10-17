@@ -1,5 +1,7 @@
 //! 提醒副作用与设置命令：系统通知（降级白名单）、reminder-due 事件、提醒设置读写。
 
+use std::sync::atomic::AtomicBool;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -23,14 +25,12 @@ pub(super) fn reminder_text(refire: bool, threshold_min: u32) -> String {
 }
 
 /// 提醒副作用：系统通知（notify_enabled 门控；失败降级仅声音——容错白名单）+ reminder-due 事件。
+/// FIX007.6：本函数**只在"要发"时被调用**（`ReminderDecision` 由 `then_some` 产出）⇒ 无 `fire` 守卫。
 /// PATCH012.8：payload 由"阈值分钟数"改为**完整文案字符串**（文案只在 Rust 一处定义）。
 pub(super) fn deliver_reminder(
     app: &AppHandle,
     decision: ReminderDecision,
 ) -> Result<(), CommandError> {
-    if !decision.fire {
-        return Ok(());
-    }
     let text = reminder_text(decision.refire, decision.threshold_min);
     if decision.notify_enabled {
         send_notification(app, &text);
@@ -81,7 +81,6 @@ pub(super) fn reminder_check_inner<C: Clock>(
         )
     };
     Ok(fire_now.then_some(ReminderDecision {
-        fire: true,
         threshold_min,
         refire,
         notify_enabled,
@@ -90,8 +89,13 @@ pub(super) fn reminder_check_inner<C: Clock>(
 
 /// 提醒评估守候线程（FIX006.5）：**不依赖前端轮询**——主窗收到托盘 / WebView 节流定时器 /
 /// 前端崩溃时，提醒仍按阈值准时触发（与自动下班兜底线程同一条纪律：功能本体不押在前端活着上）。
-/// 每 [`REMINDER_TICK_SECS`] 秒评估一次；评估只读内存态（零查库）。失败仅落档不阻断。
+/// 每 [`REMINDER_TICK_MS`]（100ms）评估一次；评估只读内存态（零查库）。
+/// 失败仅落档不阻断——**本线程是 100ms 热循环，故两处失败都必须走 `warn_diag_once`**
+/// （FIX007.1：锁中毒是终态、每拍落档会刷爆 `pulse.log`；与 `lib.rs` 悬停/菜单守候同款）。
 pub(crate) fn spawn_reminder_watcher(app: &AppHandle) {
+    // 热路径"只记一次"闩（一失败一闩；FIX007.1）
+    static DELIVER_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
+    static EVAL_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
     let app = app.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_millis(REMINDER_TICK_MS));
@@ -99,11 +103,17 @@ pub(crate) fn spawn_reminder_watcher(app: &AppHandle) {
         match reminder_check_inner(&ctx) {
             Ok(Some(decision)) => {
                 if let Err(err) = deliver_reminder(&app, decision) {
-                    crate::warn_diag(&format!("提醒事件发送失败：{err}"));
+                    crate::warn_diag_once(
+                        &DELIVER_FAIL_LOGGED,
+                        &format!("提醒事件发送失败（后续同类失败不再重复记录）：{err}"),
+                    );
                 }
             }
             Ok(None) => {}
-            Err(err) => crate::warn_diag(&format!("提醒评估失败：{err}")),
+            Err(err) => crate::warn_diag_once(
+                &EVAL_FAIL_LOGGED,
+                &format!("提醒评估失败（后续同类失败不再重复记录）：{err}"),
+            ),
         }
     });
 }
@@ -283,17 +293,19 @@ pub(crate) fn set_window_pref<C: Clock>(
 
 /// [`set_window_pref`] 核心实现：更新内存态 + 原子落盘（窗口操作在壳层；直测 = 临时
 /// 路径内存库，禁触真实用户数据）。
+/// FIX007.2：**锁内取副本 → 锁外落盘 → 成功后才替换内存**（与 [`set_hotkey_core`] 同款范式）。
 fn set_window_pref_core<C: Clock>(
     ctx: &AppContext<C>,
     kind: PrefKind,
     on: bool,
 ) -> Result<(), CommandError> {
-    let mut settings = poison("设置", ctx.settings.lock())?;
+    let mut merged = poison("设置", ctx.settings.lock())?.clone();
     match kind {
-        PrefKind::AlwaysOnTop => settings.always_on_top = on,
-        PrefKind::SnapToEdge => settings.snap_to_edge = on,
+        PrefKind::AlwaysOnTop => merged.always_on_top = on,
+        PrefKind::SnapToEdge => merged.snap_to_edge = on,
     }
-    settings.save(&ctx.settings_path)?;
+    merged.save(&ctx.settings_path)?;
+    *poison("设置", ctx.settings.lock())? = merged;
     Ok(())
 }
 
@@ -407,17 +419,21 @@ pub fn set_hotkey(
 
 /// [`set_hotkey`] 核心实现：更新内存态 + 原子落盘（注册在壳层；直测 = 临时路径内存库，
 /// 禁触真实用户数据）。
+/// FIX007.2：**锁内取副本 → 锁外落盘 → 成功后才替换内存**（照 `set_settings_inner` 范式）——
+/// 落盘失败时内存与磁盘都不动（原实现先改内存 ⇒ 后续"无变化早退"会把"重录同一组合"误判为
+/// 无变化而跳过注册；且持锁做文件 IO 会拖住 100ms 链路上取 settings 锁者）。
 fn set_hotkey_core<C: Clock>(
     ctx: &AppContext<C>,
     action: HotkeyAction,
     combo: &str,
 ) -> Result<(), CommandError> {
-    let mut settings = poison("设置", ctx.settings.lock())?;
+    let mut merged = poison("设置", ctx.settings.lock())?.clone();
     match action {
-        HotkeyAction::ToggleVisible => settings.hotkey_toggle_visible = combo.to_string(),
-        HotkeyAction::ToggleTimer => settings.hotkey_toggle_timer = combo.to_string(),
+        HotkeyAction::ToggleVisible => merged.hotkey_toggle_visible = combo.to_string(),
+        HotkeyAction::ToggleTimer => merged.hotkey_toggle_timer = combo.to_string(),
     }
-    settings.save(&ctx.settings_path)?;
+    merged.save(&ctx.settings_path)?;
+    *poison("设置", ctx.settings.lock())? = merged;
     Ok(())
 }
 
@@ -426,6 +442,36 @@ mod tests {
     use super::*;
     use crate::commands::test_support::{begin_duty, ctx, secs, FakeClock};
     use crate::settings::WindowPos;
+
+    /// FIX007.2：**落盘失败时内存态与磁盘都不动**——原实现先改内存 ⇒ 内存被污染，后续
+    /// `set_hotkey` 的"无变化早退"会把"重录同一组合"误判为无变化而**跳过注册**（界面报成功、
+    /// 键实际未注册）。本条同时覆盖"锁外落盘"（不再持 settings 锁做文件 IO）。
+    #[test]
+    fn settings_write_paths_keep_memory_on_save_failure() {
+        let mut ctx = ctx(FakeClock::new());
+        // 造"不可写"：设置路径落在一个**普通文件**下面 ⇒ 落盘必失败（跨平台确定）
+        let blocker = crate::commands::test_support::temp_settings_path("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        ctx.settings_path = blocker.join("config.json");
+
+        let before = get_settings_inner(&ctx).unwrap();
+        assert!(
+            set_hotkey_core(&ctx, HotkeyAction::ToggleVisible, "Ctrl+Alt+Z").is_err(),
+            "热键落盘失败应上抛"
+        );
+        assert!(
+            set_window_pref_core(&ctx, PrefKind::AlwaysOnTop, true).is_err(),
+            "窗口偏好落盘失败应上抛"
+        );
+        assert_eq!(
+            get_settings_inner(&ctx).unwrap(),
+            before,
+            "内存态必须保持旧值（不得被落盘失败污染）"
+        );
+        assert!(!ctx.settings_path.exists(), "磁盘不得出现半成品文件");
+
+        let _ = std::fs::remove_file(&blocker);
+    }
 
     /// T4a：set_settings 校验 + 持久化 + 内存态更新；非法阈值被拒。
     #[test]

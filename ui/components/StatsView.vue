@@ -738,11 +738,20 @@ watch(
     }
   },
 );
-// 渲染节拍：数据到位后重建 + 每秒重算（design 1s 节流同效）
-watch([day, week], () => {
+/** 三块渲染的**唯一入口**（FIX007.9）：门控只认 `props.open` 一个口径——此前 watch 与秒表各写一遍
+ * 三连调用、而门只加在秒表上，于是 `day` 每秒换新对象时（自动下班框开着走秒）板关也整层重建。 */
+function renderAll(): void {
   renderGraph();
   renderWeek();
   renderDetail();
+}
+// 渲染节拍：数据到位后重建。板开时首帧仍立即补齐——开板走 `watch(props.open)` ⇒ `refresh()` ⇒
+// `day` 换新对象 ⇒ 本 watch 在 `open === true` 下命中 ✓
+watch([day, week], () => {
+  if (!props.open) {
+    return;
+  }
+  renderAll();
 });
 // FIX006.19：**板关时本拍零工作**（原实现不论板开关都每秒重建图谱节点层 / 周卡 / 明细 ⇒ 常态空转；
 // 关板复位到统计面后这些 DOM 本来也不可见）。板开后的首帧由上面的 watch 立即补齐 ✓。
@@ -750,9 +759,7 @@ const secTimer = window.setInterval(() => {
   if (!props.open) {
     return;
   }
-  renderGraph();
-  renderWeek();
-  renderDetail();
+  renderAll();
 }, 1000);
 
 // PATCH006.1：在岗节拍——"板开 && 在岗中"时每 5 秒**只重取当日明细**（橙红块与三值随时间增长）；

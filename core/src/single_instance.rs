@@ -95,12 +95,20 @@ where
             ));
             return;
         }
+        // "只记一次"闩（本线程常驻、长期循环；FIX007.7）
+        static WAIT_FAIL_LOGGED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
         std::thread::spawn(move || loop {
             let rc = unsafe { WaitForSingleObject(handle, INFINITE) };
             if rc == WAIT_OBJECT_0 {
                 on_signal();
             } else {
-                // WAIT_FAILED / WAIT_ABANDONED 等异常：退避后重试，避免空转刷 CPU
+                // FIX007.7：`INFINITE` 不会超时 ⇒ 非 `WAIT_OBJECT_0` 即**故障**（`WAIT_FAILED`：
+                // 句柄失效等）⇒ 只记一次（长期循环里每拍记会刷爆日志），退避后重试
+                crate::warn_diag_once(
+                    &WAIT_FAIL_LOGGED,
+                    &format!("单实例唤起：等待唤前事件异常（rc={rc}）；本次会话内唤起可能不可用"),
+                );
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
         });
@@ -113,7 +121,9 @@ where
 
 // —— 私有 FFI 核（kernel32；零新依赖）——
 
-/// 首个实例的互斥体句柄（`isize` 即 `HANDLE`）：进程存活期一直持有，不主动关闭。
+/// 首个实例的互斥体句柄（`isize` 即 `HANDLE`）——**保活锚点，只写不读是刻意的**（FIX007.8）：
+/// 进程存活期**必须一直持有、禁止 `CloseHandle`**；一旦关闭，闸门即失效（可再开第二个实例），
+/// 且症状要等真双击两次才会暴露 ⇒ **不得当作死代码清理**。
 #[cfg(target_os = "windows")]
 static MUTEX_HANDLE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
@@ -235,17 +245,35 @@ fn acquire_mutex(name: &str) -> MutexOutcome {
     MutexOutcome::First(handle)
 }
 
-/// 给已有实例发"唤前"脉冲（事件未就绪/已消失 ⇒ 静默跳过：唤起是体验层，不阻断退出）。
+/// 给已有实例发"唤前"脉冲。**两种结果都只落档、不阻断退出**（唤起是体验层；白名单登记项）：
+/// - `OpenEventW` 返 0 = **预期竞态**（首实例的唤前事件尚未建好，或首实例已退出）⇒ **不记**
+///   （记了则每次快速双击都刷一条，纯噪音）；
+/// - `SetEvent` 返 0 = 真失败（句柄失效 / 权限）⇒ `warn_diag_once`（FIX007.7：原实现**丢弃了它的
+///   返回值** ⇒ 出现"双击图标没反应"时日志零痕迹、无法诊断）。
 #[cfg(target_os = "windows")]
 fn signal_show_window(identifier: &str) {
+    // "只记一次"闩（本函数在每次双击时都会跑；FIX007.7）
+    static SET_EVENT_FAIL_LOGGED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
     let name = format!("Global\\CapsulePulse-ShowWindow-{identifier}");
     let wide_name = wide(&name);
     let handle = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, wide_name.as_ptr()) };
-    if handle != 0 {
-        unsafe {
-            SetEvent(handle);
-            CloseHandle(handle);
-        }
+    if handle == 0 {
+        return; // 预期竞态（见上说明）：静默
+    }
+    let ok = unsafe { SetEvent(handle) };
+    // `GetLastError` 必须紧跟目标调用读取（其后不得插入其它 API）
+    let last_error = unsafe { GetLastError() };
+    unsafe {
+        CloseHandle(handle);
+    }
+    if ok == 0 {
+        crate::warn_diag_once(
+            &SET_EVENT_FAIL_LOGGED,
+            &format!(
+                "单实例唤起：SetEvent 失败（GetLastError={last_error}）；本次未能唤起已有窗口"
+            ),
+        );
     }
 }
 

@@ -646,13 +646,26 @@ fn save_window_position(app: &AppHandle) {
         return;
     };
     let ctx = app.state::<AppContext>();
-    let Ok(mut settings) = ctx.settings.lock() else {
-        warn_diag("设置锁中毒，窗口位置未保存");
-        return;
+    // FIX007.2：拷出副本 → **锁外**落盘 → 成功后才写回内存（失败仅日志，白名单④纪律不变；
+    // 原实现持锁做文件 IO，会拖住 100ms 链路上取 settings 锁的路径）
+    let lock = ctx.settings.lock();
+    let mut merged = match lock {
+        Ok(settings) => settings.clone(),
+        Err(_) => {
+            warn_diag("设置锁中毒，窗口位置未保存");
+            return;
+        }
     };
-    settings.window_pos = Some(WindowPos { x: pos.x, y: pos.y });
-    if let Err(err) = settings.save(&ctx.settings_path) {
+    merged.window_pos = Some(WindowPos { x: pos.x, y: pos.y });
+    if let Err(err) = merged.save(&ctx.settings_path) {
         warn_diag(&format!("窗口位置保存失败：{err}"));
+        return;
+    }
+    // 写回内存（守卫同样绑具名局部，避免表达式临时值跨越 `ctx` 生命周期）
+    let lock = ctx.settings.lock();
+    match lock {
+        Ok(mut settings) => *settings = merged,
+        Err(_) => warn_diag("设置锁中毒，窗口位置未写回内存"),
     }
 }
 
@@ -1168,7 +1181,7 @@ pub fn run() {
             commands::reminder::spawn_reminder_watcher(&app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .unwrap_or_else(|err| {
             eprintln!("CapsulePulse 启动失败：{err}");
             std::process::exit(1);
