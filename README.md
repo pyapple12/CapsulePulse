@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#english)
 
-[![Version](https://img.shields.io/badge/Version-0.1.9.9-blue.svg)](core/Cargo.toml)
+[![Version](https://img.shields.io/badge/Version-0.2.0.0-blue.svg)](core/Cargo.toml)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6.svg)](#下载)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org)
@@ -32,15 +32,15 @@
 - ⏳ **沙漏与提醒同步** —— 沙漏水位 = 本段连续工作进度，**铃声响起那一刻沙子刚好流完**；阈值可配（步进器 / 手打 / 长按连发），首次响铃报「连续工作 X 分钟」，之后每 5 分钟重发一次
 - 🛟 **崩溃恢复** —— 异常退出后重启：停机 ≤10 分钟无缝续（计时接着走），更久按最后心跳补记下班
 - 🫧 **玻璃 UI** —— 平时纯 alpha 透明（失焦 30% 纱 / 聚焦 0% 桌面直透）；**打开统计板 / 设置板且窗口聚焦时**才启用系统毛玻璃背板；托盘悬浮卡 / 自绘右键菜单 / 确认框同为玻璃形态
-- 🛰 **常驻后台** —— 托盘常驻（悬停出今日概览卡、右键自绘菜单）+ 全局快捷键可自定义（显隐 / 状态切换，最多 3 键）+ 关闭最小化到托盘 + 窗口置顶 / 贴边吸附 / 位置记忆
+- 🛰 **常驻后台** —— 托盘常驻（悬停出今日概览卡、右键自绘菜单）+ 全局快捷键可自定义（显隐 / 状态切换，最多 3 键）+ 关闭最小化到托盘 + **不进任务栏**（只在托盘；`Alt+Shift+S` 或托盘左键唤回）+ 窗口置顶 / 贴边吸附 / 位置记忆
 - 🔔 **系统通知** —— 通知 + 提示音双通道（互不依赖降级）；绿色版也能署名 CapsulePulse 并带正式图标
 - 🎒 **绿色便携** —— 数据全部落在同级 `configs\` 与 `data\`（备份 / 迁移 = 拷走这两个文件夹）
 
 ### 📥 下载
 
-> ⏳ 尚未发布——打包分发排期见 `CapsulePulse_plan.md` Phase 6。
+> 📦 [`CapsulePulse_v0.2.0_win_x64.zip`](https://github.com/pyapple12/CapsulePulse/releases/download/v0.2.0/CapsulePulse_v0.2.0_win_x64.zip) —— 绿色版，解压即用（无需安装）。
 >
-> 发布后此处给出：绿色版 zip 名 / 解压即用说明 / 备份与迁移（拷走 exe 同级 `configs\` + `data\`）。
+> 解压到任意目录 → 双击 `capsule-pulse.exe`；首次运行自动在 exe 同级创建 `configs\` 与 `data\`，备份 / 迁移 = 拷走这两个文件夹。详见 [Release 说明](https://github.com/pyapple12/CapsulePulse/releases/tag/v0.2.0) 与随包 `README.md`。
 
 ### 🧱 技术栈
 
@@ -81,15 +81,23 @@ CapsulePulse/
 ├── core/                      # 🦀 Tauri 2 后端（版本单一来源：Cargo.toml；原框架默认名 src-tauri）
 │   ├── src/
 │   │   ├── lib.rs             # 应用装配：窗口 / 托盘 / 全局热键 / 插件 + 命令注册
-│   │   ├── main.rs            # 薄入口
+│   │   ├── main.rs            # 薄入口（GUI 子系统仅 release 生效）
 │   │   ├── session.rs         # 计时状态机（纯逻辑，可单测）
 │   │   ├── workday.rs         # 工作日状态机 + 事件归约（打卡 / 图谱纯逻辑，可单测）
 │   │   ├── storage.rs         # SQLite 仓储（PL027 起 events 单表为唯一事实源 + runtime 运行态缓存 + days 按天汇总）
 │   │   ├── period.rs          # 统计周期边界纯函数（本地零点 / 周一零点）
 │   │   ├── reminder.rs        # 提醒评估器（阈值触发 + 5 分钟重发）
 │   │   ├── settings.rs        # 设置持久化（JSON 原子写）
+│   │   ├── hotkey.rs          # 全局热键组合串解析与规范化（纯函数）
+│   │   ├── hover.rs           # 托盘悬浮概览归约（纯函数）
+│   │   ├── menu.rs            # 托盘右键自绘菜单（锚定计算 + 点外收起）
+│   │   ├── snap.rs            # 贴边吸附判定（纯函数）
 │   │   ├── paths.rs           # 运行时数据双落址（configs/ + data/）
 │   │   ├── diag.rs            # 诊断日志（data/pulse.log）
+│   │   ├── glass_backdrop.rs  # 窗口框架与材质（Win11 描边隐藏 / 系统圆角 / 按需背板）
+│   │   ├── window_icon.rs     # 窗口图标整定（按 DPI 从 exe 内嵌资源取帧）
+│   │   ├── aumid.rs           # 通知署名注册（HKCU 的 AppUserModelId 三项）
+│   │   ├── single_instance.rs # 单实例闸门（命名互斥体 + 唤前事件）
 │   │   └── commands/          # Tauri 命令层（薄封装；核心可脱离 Tauri 直测）
 │   ├── tests/                 # 集成测试（存储探针：真实文件库往返）
 │   └── tauri.conf.json        # 窗口 / 打包配置
@@ -144,15 +152,15 @@ A glassmorphic work-time board — clock in to open a day, in-session time count
 - ⏳ **Hourglass in sync with the reminder** — the water level is the current segment's progress toward the threshold, so **the sand runs out exactly when the chime rings**; threshold configurable (stepper / typed / press-and-hold), first ring reports "worked X minutes", then repeats every 5 minutes
 - 🛟 **Crash recovery** — after an abnormal exit: downtime ≤10 min resumes seamlessly (the timer keeps going), longer downtime books a clock-out at the last heartbeat
 - 🫧 **Glass UI** — fully transparent by default (30 % veil when unfocused, 0 % — desktop straight through — when focused); the system frosted backdrop is used **only while a stats/settings board is open and the window is focused**; the tray hover card, custom right-click menu and dialogs share the same glass language
-- 🛰 **Tray-native** — lives in the tray (hover for a today overview card, right-click for a custom menu) + customisable global hotkeys (show-hide / state toggle, at most 3 keys) + closing hides it + always on top / snap to edge / position memory
+- 🛰 **Tray-native** — lives in the tray (hover for a today overview card, right-click for a custom menu) + customisable global hotkeys (show-hide / state toggle, at most 3 keys) + closing hides it + **no taskbar entry** (tray-only; bring it back with Alt+Shift+S or a left-click on the tray icon) + always on top / snap to edge / position memory
 - 🔔 **System notification** — notification and chime as two independent channels (each degrades gracefully); even the portable build is signed as CapsulePulse with its real icon
 - 🎒 **Portable** — all data stays in `configs\` + `data\` beside the exe (backup/migrate = copy those two folders)
 
 ### 📥 Download
 
-> ⏳ Not released yet — packaging is scheduled as Phase 6 in `CapsulePulse_plan.md`.
+> 📦 [`CapsulePulse_v0.2.0_win_x64.zip`](https://github.com/pyapple12/CapsulePulse/releases/download/v0.2.0/CapsulePulse_v0.2.0_win_x64.zip) — portable build, unzip and run (no installer).
 >
-> Once released, this section will list the portable zip name, unzip-and-run steps, and backup/migration (copy `configs\` + `data\` next to the exe).
+> Unzip anywhere → double-click `capsule-pulse.exe`; the first launch creates `configs\` and `data\` next to the exe (backup / migration = copy those two folders). See the [release notes](https://github.com/pyapple12/CapsulePulse/releases/tag/v0.2.0) and the bundled `README.md` for details.
 
 ### 🧱 Built With
 
@@ -193,15 +201,23 @@ CapsulePulse/
 ├── core/                      # 🦀 Tauri 2 backend (version source of truth: Cargo.toml; formerly src-tauri)
 │   ├── src/
 │   │   ├── lib.rs             # app wiring: window / tray / global hotkeys / plugins + command registry
-│   │   ├── main.rs            # thin entry point
+│   │   ├── main.rs            # thin entry point (GUI subsystem, release only)
 │   │   ├── session.rs         # timer state machine (pure logic, unit-tested)
 │   │   ├── workday.rs         # workday state machine + event reduction (clock-in/graph pure logic)
 │   │   ├── storage.rs         # SQLite repository (since PL027: single `events` table as source of truth + `runtime` cache + per-day rollups)
 │   │   ├── period.rs          # period boundary pure functions (local midnight / Monday midnight)
 │   │   ├── reminder.rs        # reminder evaluator (threshold trigger + 5-minute re-fire)
 │   │   ├── settings.rs        # settings persistence (atomic JSON write)
+│   │   ├── hotkey.rs          # global-hotkey combo parsing & normalisation (pure functions)
+│   │   ├── hover.rs           # tray hover overview reduction (pure functions)
+│   │   ├── menu.rs            # custom right-click tray menu (anchoring + click-outside dismissal)
+│   │   ├── snap.rs            # snap-to-edge detection (pure functions)
 │   │   ├── paths.rs           # runtime dual-location paths (configs/ + data/)
 │   │   ├── diag.rs            # diagnostic log (data/pulse.log)
+│   │   ├── glass_backdrop.rs  # window frame & material (Win11 border hide / rounded corners / on-demand backdrop)
+│   │   ├── window_icon.rs     # window icon tuning (per-DPI frame from the embedded exe resource)
+│   │   ├── aumid.rs           # notification-identity registration (HKCU AppUserModelId)
+│   │   ├── single_instance.rs # single-instance gate (named mutex + show-window event)
 │   │   └── commands/          # Tauri command layer (thin shell; cores are Tauri-free & directly testable)
 │   ├── tests/                 # integration tests (storage probe: real-file round trip)
 │   └── tauri.conf.json        # window / bundle config

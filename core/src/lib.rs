@@ -30,6 +30,7 @@ mod window_icon;
 
 pub(crate) mod aumid;
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -47,15 +48,22 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent,
 };
 
-/// 运行期警告双写：eprintln（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
+/// 运行期警告双写：[`console`]（dev 控制台可见）+ diag 落档（release GUI 无 stderr，
 /// 文件日志是唯一落点——FIX003.8）。**全项目失败双写统一走本助手**（含**启动期致命退出路径**，
 /// 见 `run()` 里**五处** `exit(1)` 前的调用；热路径另配 [`warn_diag_once`] 上闩——FIX008.15 / FIX009.3 收口）；
 /// 例外只有**刻意区分通道**的三处：`glass_backdrop::apply_round_corners` 的句柄与设置失败（**只打控制台**——
 /// Win10 无该属性、失败属预期，落 diag 会每次启动写常驻噪音）与 `hide_active_border` 的句柄失败（**只落档**——
 /// 同因，控制台无收益）；PANIC hook 走 diag 单写 + 默认 hook 的 stderr（等价双写）。
 pub(crate) fn warn_diag(msg: &str) {
-    eprintln!("{msg}");
+    console(msg);
     diag::log(msg);
+}
+
+/// 控制台单写（**非 panicking**）：GUI 子系统 / 无控制台时写 stderr 必失败，吞掉即可——
+/// 诊断主通道是 `diag` 的文件落档，本函数只服务"dev 或从终端直启时肉眼可见"。
+/// 不得用 `eprintln!`（写失败会 panic，违 AGENTS"日志自身不得引发二次故障"）。
+pub(crate) fn console(msg: &str) {
+    let _ = writeln!(std::io::stderr(), "{msg}");
 }
 
 /// 运行期警告双写**只记一次**（FIX006.7）：面向热路径（100ms 守候循环）与终态失败（锁中毒

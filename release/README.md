@@ -38,7 +38,8 @@
 ### 托盘与快捷键
 
 - 关闭窗口 = **缩回托盘**（不退出）；托盘图标**悬停**出今日概览悬浮卡（三值 / 剩余 / 下次提醒倒计时）；**右键**出自绘菜单（聚焦主窗 / 切换状态 / 置顶 / 贴边 / 退出）；
-- 默认全局快捷键：**Alt+Shift+S** 显隐主窗、**Alt+Shift+P** 切换工作 / 休息（可在设置板改）。
+- 默认全局快捷键：**Alt+Shift+S** 显隐主窗、**Alt+Shift+P** 切换工作 / 休息（可在设置板改）；
+- 应用**不出现在任务栏**（只在托盘）：`Alt+Shift+S` 或**左键点托盘图标**把主窗唤回前台；关闭窗口依旧是缩回托盘。
 
 ### 自动下班与崩溃恢复
 
@@ -70,6 +71,8 @@ Windows 10 / 11（64 位）。玻璃观感依赖系统合成器：**平时窗口
 - 窗口置顶、贴边吸附、位置记忆、双击标题缩回托盘
 - 按需毛玻璃：打开统计板 / 设置板且窗口聚焦时才启用系统背板，平时纯透明
 - 通知署名修复：绿色单 exe 也能署名 CapsulePulse + 正式图标
+- **不进任务栏**（只在托盘，`Alt+Shift+S` / 托盘左键唤回）；release 版也不再弹控制台黑窗
+- 崩溃恢复精修：无缝续把停机前那段时长也算进本段 ⇒ 重启后沙漏水位与提醒倒计时**接着走**（不再从零重启）
 
 ---
 
@@ -117,7 +120,8 @@ Open with the gear (top-right); seven rows apply instantly: reminder threshold (
 ### Tray and hotkeys
 
 - Closing the window **hides it to the tray** (it does not quit); **hover** the tray icon for a today overview card (totals / remaining / next reminder countdown); **right-click** for a custom menu (focus main window / toggle state / always on top / snap to edge / quit);
-- Default global hotkeys: **Alt+Shift+S** show/hide, **Alt+Shift+P** toggle work / rest (both changeable in settings).
+- Default global hotkeys: **Alt+Shift+S** show/hide, **Alt+Shift+P** toggle work / rest (both changeable in settings);
+- The app has **no taskbar entry** (tray-only): bring the window back with `Alt+Shift+S` or a **left-click on the tray icon**; closing the window still hides it to the tray.
 
 ### Auto clock-out and crash recovery
 
@@ -149,6 +153,8 @@ Windows 10 / 11 (64-bit). The glass look depends on the system compositor: the w
 - Always on top, snap to edge, window position memory, double-click the title to hide to tray
 - On-demand frosted backdrop: system backdrop only while a board is open and the window is focused; otherwise fully transparent
 - Notification signature fixed: the portable single exe is signed as CapsulePulse with its real icon
+- **No taskbar entry** (tray-only; bring it back via `Alt+Shift+S` or a left-click on the tray icon); the release build no longer opens a console window either
+- Crash-recovery refinement: a seamless resume now counts the pre-downtime portion of the current segment, so the hourglass level and the reminder countdown **continue** instead of restarting from zero
 
 ---
 

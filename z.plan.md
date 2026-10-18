@@ -90,6 +90,7 @@
 
 > 豁免唯一权威源：已定案项审计时（audit-project）不再重复报告。新定案条目由归档环节（audit-report）经用户确认后追加。分级：①**永久豁免**——不再报告不再讨论；②**条件豁免**——标注触发条件，条件变化时重新评估。
 > 2026-09-13 全量整理（A003 收口后）：三轮审计（A001/A002/A003）观察项去重归并于此——失效项销项（A001-O3 window-vibrancy 随依赖移除；restart 双锁窗口随 FIX003.9 消除；eprintln 半收敛已完成）、重复项归并（A002/A003 对 O4/O6 的重复报告删除），三份审计报告中的观察项节同步删除（原位置留归并指引）。整理时逐项重审定案，含 A002"其余"合并行的 4 小项与托盘 hide 焦点语义。
+> **2026-10-18 销项**：条件豁免 **#4**（`main.rs` 无 `windows_subsystem`）已落地关闭——`main.rs` 增 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`（照 CT 写法：**release** 走 GUI 子系统免控制台黑窗，**debug / test 保留 console 子系统**作 stderr 日志通道）；**该号保留为墓碑、编号不重排**（既有条目与各审计附录以号为锚，防引用漂移）。
 
 ### ① 永久豁免（37 项）
 
@@ -131,12 +132,12 @@
 36. **`design/` 原型观察项 7 条**（来源 A004，2026-10-04 归档）：暂停时段不入账 / 电量按工作时长 / 标题粒子构建时快照 / a11y 三处 / `--k-lens` 无写入方 / 10Hz 全量刷新 / 过去日彗星仍发射——`design/` 原型自 V0.1.2.5 冻结，**用户定案留作参考（不删不动）**，且后续审计已不覆盖该目录 ⇒ 整包永久豁免。
 37. **设置保存失败时 `.tmp` 清理失败多一条诊断**（来源 A005-O-A，`core/src/settings.rs:150-155`）：仅"磁盘 / 目录故障"路径可达，多一条日志噪音；主错误照常上抛 ⇒ 保持现状。
 
-### ② 条件豁免（29 项）
+### ② 条件豁免（28 项；原 #4 已销项，保留为墓碑）
 
 1. **capability 偏宽**（A002→A003，default.json:5）：notification:default 前端零消费（通知走 Rust 侧不经 ACL）+ core:default 范围；打包期随能力清单收窄。
 2. **未配 CSP**（A002→A003，tauri.conf.json）：本地内嵌资产无远程内容；打包期配置。
 3. **窗口 label 依赖默认值 "main"**（A002→A003）：代码 3 处 + capabilities 1 处隐式引用；打包期显式化。
-4. **main.rs 无 windows_subsystem**（A003）：release 构建弹控制台黑窗；打包期添加（diag.rs:4 已登记评估点），落地后关键失败路径已由 warn_diag 双写兜底。
+4. **（已销项）`main.rs` 无 `windows_subsystem`**（A003；2026-10-18 落地关闭）：`core/src/main.rs` 已增 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`（照 CT 写法：**release** 走 GUI 子系统免控制台黑窗，**debug / test 保留 console 子系统**作 stderr 日志通道）⇒ 本条豁免已关闭、内容不再适用；**编号保留为墓碑**（各审计附录与 §一 均按号引用，重排会全体错位）。
 5. **diag 日志无轮转/上限**（A003）：写入点全为低频失败路径；打包期随长期运行场景一并评估。
 6. **周边界 DST 偏差**（A001-O1，3 处同根：period.rs week_start_secs / commands/workday.rs day_bounds 固定 86400 / StatsView dayLabel 固定 86400000ms）：含 DST 切换时区有 1 小时偏差；跨平台立项或面向 DST 时区分发前补注入时区用例（需验证）。
 7. **前端 listen 卸载竞态**（A001-O7）：根组件生命周期 = 应用生命周期，当前无可达路径；App.vue 不再是永不卸载的根组件时重新评估（需验证）。
@@ -497,7 +498,7 @@
 - `P3-12` | App.vue:339 | `--r-ctrl: 13px` 孤儿变量，全 ui/ 零消费 | 已修（删一行）
 - `P3-13` | StatsView.vue:32-36,88,123 + App.vue:97-112 | ① week_detail 失败仅 console，周卡静默消失；② 首拉失败红条与"本日无打卡记录"同屏；③ session_stats 失败仅 console 冻结旧值 | 已修（①② 并入 loadError；③ 登记豁免，见 §四 永久 #14）
 
-**参考级观察项**：观察项节已归并 §四逐项定案（A003 来源见 §四 永久 #4 DWM 属性魔数内联 / #11 .arrow 第三按钮变体 / #13 pointermove 每帧 querySelectorAll / #14 session_* 失败静默冻结旧值 / #15 DockNav role="tab" 无 tablist 父级 / #16 `saturate(1.6)` 配方遗产 / #17 托盘 hide 时 Focused(false) 语义未实证；条件 #4 main.rs 无 windows_subsystem / #5 diag 无轮转 / #13 pause 回滚窗口理论竞态）；原报告不再保留平行副本。
+**参考级观察项**：观察项节已归并 §四逐项定案（A003 来源见 §四 永久 #4 DWM 属性魔数内联 / #11 .arrow 第三按钮变体 / #13 pointermove 每帧 querySelectorAll / #14 session_* 失败静默冻结旧值 / #15 DockNav role="tab" 无 tablist 父级 / #16 `saturate(1.6)` 配方遗产 / #17 托盘 hide 时 Focused(false) 语义未实证；条件 #4（`main.rs` 无 `windows_subsystem`——**2026-10-18 已销项**）/ #5 diag 无轮转 / #13 pause 回滚窗口理论竞态）；原报告不再保留平行副本。
 
 **亮点**
 

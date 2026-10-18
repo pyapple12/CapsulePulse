@@ -78,7 +78,7 @@ pub fn apply_round_corners(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "windows")]
     {
         let Ok(hwnd) = window.hwnd() else {
-            eprintln!("窗口句柄获取失败（系统圆角未设置）");
+            crate::console("窗口句柄获取失败（系统圆角未设置）");
             return;
         };
         let pref = DWMWCP_ROUND;
@@ -86,7 +86,9 @@ pub fn apply_round_corners(window: &tauri::WebviewWindow) {
             DwmSetWindowAttribute(hwnd.0 as isize, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, 4)
         };
         if hr != 0 {
-            eprintln!("窗口系统圆角设置失败 hr={hr:#x}（Win10 无此属性，属预期；忽略）");
+            crate::console(&format!(
+                "窗口系统圆角设置失败 hr={hr:#x}（Win10 无此属性，属预期；忽略）"
+            ));
         }
     }
     #[cfg(not(target_os = "windows"))]
