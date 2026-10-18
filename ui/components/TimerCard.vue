@@ -682,7 +682,8 @@ onUnmounted(() => {
       <div class="face">
         <p class="v-index">II</p>
         <p class="h-index">II</p>
-        <!-- eslint-disable-next-line vue/no-v-html -->
+        <!-- 表盘弧线经 v-html 注入（内容为组件内**自产** SVG 串、无外部输入；PATCH014.9 取代
+             原先"本仓无 eslint"的死指令注释） -->
         <svg class="face-arcs" viewBox="0 0 180 180" aria-hidden="true">
           <g v-html="dialArcsSvg"></g>
         </svg>

@@ -69,6 +69,9 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
     case "take_recovery_notice":
       // PL027.8：一次性崩溃恢复提示——基座恒返回 null（无缝续静默路径）
       return null satisfies RecoveryNotice | null;
+    case "take_auto_out_notice":
+      // PATCH014.7：一次性"即将自动下班"待决探针——基座恒返回 null（无待决通知）
+      return null satisfies number | null;
     case "day_detail": {
       // 单位对齐真实后端：时间戳一律秒（SessionStatus.total_ms 例外为毫秒）
       const start = Math.floor(todayStart.getTime() / 1000);
@@ -177,6 +180,7 @@ function routeCommand(cmd: string, args?: Record<string, unknown>): unknown {
     case "set_board_backdrop":
     case "tray_menu_action":
     case "tray_menu_resize":
+    case "tray_hover_resize":
       return null;
     /* 会话链（PATCH002.2）：与后端同语义——打卡即工作、工作/休息幂等切换、重置收段归零回休息 */
     case "clock_in":

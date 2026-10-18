@@ -28,7 +28,7 @@ mod paths;
 mod single_instance;
 mod window_icon;
 
-pub mod aumid;
+pub(crate) mod aumid;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;

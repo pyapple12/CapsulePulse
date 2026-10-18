@@ -16,7 +16,7 @@ use crate::storage::{MigrationReport, RuntimeMode, RuntimeState};
 use crate::workday::{
     auto_out_pending, auto_out_step, decide_recovery, duty_windows_for_day, nested_clock_in_fixes,
     reduce_day, AutoOutStep, DaySummary, EventKind, RecoveryDecision, RecoveryInput, WorkdayError,
-    WorkdayState, OVERTIME_CAP_HOURS,
+    WorkdayState, OVERTIME_CAP_HOURS, SECS_PER_HOUR,
 };
 
 /// 上班打卡：流水入馆（`clock_in` + `segment_start`，单事务），再转移状态；会话归零并**立即进入
@@ -41,7 +41,7 @@ pub(super) fn clock_in_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(
     let used_before = bc.used_total_secs;
     // 到顶守卫（PATCH005.3）：今日已累计到 12h 硬顶 → 本数据日不再受理打卡
     // （用户定案：前端 pill 置灰点不开；后端再兜一层，防 devtools / DEV 基座绕过）。
-    if used_before >= i64::from(OVERTIME_CAP_HOURS) * 3_600 {
+    if used_before >= i64::from(OVERTIME_CAP_HOURS) * SECS_PER_HOUR {
         return Err(CommandError::DayBudgetExhausted(OVERTIME_CAP_HOURS));
     }
     // 先落库、成功后才推进内存态（PATCH005.12 原子性）：写库失败（如 SQLITE_BUSY）时必须
@@ -137,7 +137,7 @@ pub(super) fn day_summary_inner<C: Clock>(
     now_secs: i64,
 ) -> Result<DaySummary, CommandError> {
     let (day_start, day_end) = day_bounds(offset, now_secs)?;
-    let window_fetch_end = day_end + i64::from(OVERTIME_CAP_HOURS) * 3_600 + 1;
+    let window_fetch_end = day_end + i64::from(OVERTIME_CAP_HOURS) * SECS_PER_HOUR + 1;
     let duty_events = poison("存储", ctx.storage.lock())?
         .events_between(day_start, window_fetch_end.max(day_start + 1))?;
     let (windows, open_tail) = duty_windows_for_day(&duty_events, day_start, day_end, now_secs);
@@ -156,7 +156,7 @@ pub(super) fn day_summary_inner<C: Clock>(
     if offset == 0 || open_tail {
         summary.used_secs = crate::workday::day_used_secs(&windows);
         // FIX006.4：12h 硬顶判定下沉后端（前端只读结果，不再自算）
-        summary.cap_reached = summary.used_secs >= i64::from(OVERTIME_CAP_HOURS) * 3_600;
+        summary.cap_reached = summary.used_secs >= i64::from(OVERTIME_CAP_HOURS) * SECS_PER_HOUR;
         if open_tail {
             if let Some(&(shift_start, _)) = windows.last() {
                 let bc = day_budget_context(ctx, shift_start, now_secs)?;
@@ -204,12 +204,12 @@ pub(super) fn week_detail_inner<C: Clock>(
         .map(|i| {
             let day_offset = monday + i;
             let (day_start, _) = day_bounds(day_offset, now_secs)?;
+            // 周卡日标签（`%m-%d`）仍需本地时间对象；日键走 `day_key` 单一来源
             let start_dt = Local
                 .timestamp_opt(day_start, 0)
                 .single()
                 .ok_or(CommandError::Clock)?;
-            let rollup = poison("存储", ctx.storage.lock())?
-                .day_get(&start_dt.format("%Y-%m-%d").to_string())?;
+            let rollup = poison("存储", ctx.storage.lock())?.day_get(&day_key(day_start)?)?;
             let (work_secs, duty_secs) = match rollup {
                 Some(row) => (row.work_secs, row.duty_secs),
                 None => {
@@ -262,6 +262,17 @@ pub(super) fn local_day_start(at: i64) -> Result<i64, CommandError> {
     Ok(period::day_start_secs(&dt))
 }
 
+/// 数据日键：本地日零点秒 → `%Y-%m-%d`（`days` 表主键口径的**单一来源**，PATCH014.11）——
+/// 与 `local_day_start` 同宗（先取本地日零点、再格式化）；时钟/时区异常严格报错，不静默兜底。
+fn day_key(day_start: i64) -> Result<String, CommandError> {
+    Ok(Local
+        .timestamp_opt(day_start, 0)
+        .single()
+        .ok_or(CommandError::Clock)?
+        .format("%Y-%m-%d")
+        .to_string())
+}
+
 /// 当前数据日偏移（PATCH005.4 **单一来源**）：在岗 → 该班打卡日相对 `now` 所在日历日的天数偏移
 /// （0 = 同日、−1 = 跨零点夜班锚定昨天；未在岗 → 0）。判据 = **有未闭合的班**——时钟与统计据此
 /// 锚定"进行中的数据日"，跨零点夜班只要没下班就不切换（`now` 由调用方给出，与本次取数同刻，
@@ -311,12 +322,7 @@ pub(crate) fn seal_days_inner<C: Clock>(
     for step in 1..=span {
         let offset = -step;
         let (day_start, _) = day_bounds(offset, now_secs)?;
-        let date = Local
-            .timestamp_opt(day_start, 0)
-            .single()
-            .ok_or(CommandError::Clock)?
-            .format("%Y-%m-%d")
-            .to_string();
+        let date = day_key(day_start)?;
         if poison("存储", ctx.storage.lock())?
             .day_get(&date)?
             .is_some()
@@ -448,12 +454,7 @@ fn unsealed_past_days<C: Clock>(
     let mut days = Vec::new();
     for step in 1..=span {
         let (day_start, _) = day_bounds(-step, now_secs)?;
-        let date = Local
-            .timestamp_opt(day_start, 0)
-            .single()
-            .ok_or(CommandError::Clock)?
-            .format("%Y-%m-%d")
-            .to_string();
+        let date = day_key(day_start)?;
         if poison("存储", ctx.storage.lock())?
             .day_get(&date)?
             .is_none()
@@ -549,7 +550,7 @@ pub(crate) const BEAT_INTERVAL_SECS: u64 = 60;
 /// 且**不取 `workday` 锁**，避免被"打卡/下班"这类持有该锁的调用方重入死锁）、
 /// 会话态（工作·休息 / 段起点 / 累计）、自动下班基准；`last_beat_at = at`
 /// （崩溃恢复判定"停机多久"的唯一依据）。**未上班不写**（无在岗段可恢复）；
-/// **失败只落档不阻断业务**（容错白名单：缓存可由流水重建）。
+/// **失败双写（控制台 + `diag` 落档）、不阻断业务**（容错白名单：缓存可由流水重建）。
 pub(crate) fn beat_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(), CommandError> {
     let duty_clock_in_at = poison("存储", ctx.storage.lock())?.open_duty_clock_in()?;
     let Some(duty_clock_in_at) = duty_clock_in_at else {
@@ -586,7 +587,7 @@ pub(crate) fn beat_inner<C: Clock>(ctx: &AppContext<C>, at: i64) -> Result<(), C
 }
 
 /// 心跳线程（PL027.3）：每 60 秒刷新一次运行态缓存（线程常驻，未上班时空转）。
-/// 无调用方兜底——出错只落档、绝不 panic（与自动下班兜底线程同款纪律）。
+/// 无调用方兜底——出错双写（控制台 + `diag` 落档）、绝不 panic（与自动下班兜底线程同款纪律）。
 pub(crate) fn spawn_beat_thread(app: &AppHandle) {
     // FIX009.4：本线程常驻（60s/拍）⇒ 两处失败日志各上一口闩——终态失败（锁中毒，应用内不可
     // 恢复）会让每拍必失败，逐拍落档无界增长；与其余五个守候线程同一条纪律（FIX006.7 家族）
@@ -615,7 +616,7 @@ pub(crate) fn spawn_beat_thread(app: &AppHandle) {
     });
 }
 
-/// 状态变化后顺手刷新心跳（PL027.3）：失败只落档、不影响动作本身。
+/// 状态变化后顺手刷新心跳（PL027.3）：失败双写（控制台 + `diag` 落档）、不影响动作本身。
 pub(crate) fn beat_after_action<C: Clock>(ctx: &AppContext<C>) {
     let at = match now_secs(ctx) {
         Ok(at) => at,
@@ -629,7 +630,7 @@ pub(crate) fn beat_after_action<C: Clock>(ctx: &AppContext<C>) {
     }
 }
 
-/// 启动迁移的失败处置：**不阻断启动**（新代码只读流水，旧表留着无害），仅落档、下次重试。
+/// 启动迁移的失败处置：**不阻断启动**（新代码只读流水，旧表留着无害）；失败双写（控制台 + `diag` 落档）、下次启动重试。
 pub(crate) fn migrate_on_start<C: Clock>(ctx: &AppContext<C>, now_secs: i64) {
     match migrate_inner(ctx, now_secs) {
         Ok(Some(report)) => {
@@ -816,7 +817,7 @@ pub(super) fn day_budget_context<C: Clock>(
     let day_end = day_start + 86_400;
     let events = poison("存储", ctx.storage.lock())?.events_between(
         day_start,
-        day_end + i64::from(OVERTIME_CAP_HOURS) * 3_600 + 1,
+        day_end + i64::from(OVERTIME_CAP_HOURS) * SECS_PER_HOUR + 1,
     )?;
     let steps = events
         .iter()

@@ -86,6 +86,10 @@ pub const OVERTIME_CAP_HOURS: u32 = 12;
 /// （不是技术硬顶），前端经 `ui/types.ts` 镜像（跨进程不能 import）。
 pub const AUTO_OUT_MIN_HOURS: u32 = 4;
 
+/// 自动下班小时数的**默认值**（小时，PATCH014.2）：首启 / 字段缺失回退用；`settings` 的
+/// `default_auto_out_hours` 引用本值（不再裸写 `8`），与上下限常量同处一族。
+pub const AUTO_OUT_DEFAULT_HOURS: u32 = 8;
+
 /// 工作日状态机错误：非法转移严格报错（AGENTS 错误策略主线），不静默忽略。
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum WorkdayError {
@@ -156,8 +160,12 @@ impl WorkdayState {
 
 /// 自动下班到点时刻：上班 + N 小时（"账目准时"基准的单一算法；PL025.8 打卡武装与加班拉满共用）。
 pub fn auto_out_at(clock_in_at: i64, hours: u32) -> i64 {
-    clock_in_at + i64::from(hours) * 3_600
+    clock_in_at + i64::from(hours) * SECS_PER_HOUR
 }
+
+/// 一小时的秒数（PATCH014.10）：小时 ↔ 秒换算的**单一来源**（本模块与 `hover` /
+/// `commands/workday` 共用；测试内的 `HOUR` 别名亦引用本值），免 `3_600` 字面量四散。
+pub const SECS_PER_HOUR: i64 = 3_600;
 
 /// 每次加班的步进（小时，PATCH005.3）：基准之上每点一次「加班」+4h，硬顶 [`OVERTIME_CAP_HOURS`]。
 pub const OVERTIME_STEP_HOURS: u32 = 4;
@@ -180,7 +188,7 @@ pub fn day_used_secs(windows: &[(i64, i64)]) -> i64 {
 
 /// 本班剩余预算（秒，PATCH005.3 纯函数）：今日上限 − 本班打卡前的今日已累计，不为负。
 pub fn shift_remaining_secs(budget_hours: u32, used_before_shift_secs: i64) -> i64 {
-    (i64::from(budget_hours) * 3_600 - used_before_shift_secs).max(0)
+    (i64::from(budget_hours) * SECS_PER_HOUR - used_before_shift_secs).max(0)
 }
 
 /// 本班到点时刻（PATCH005.3 纯函数）：本班打卡 + 本班剩余——自动下班武装与前端"轴末"同一口径。
@@ -610,9 +618,10 @@ pub fn reduce_day(
 mod tests {
     use super::*;
 
-    /// 时间简写：基准日零点 + 秒偏移（纯整数，无时区耦合）。
-    const DAY: i64 = 864_000;
-    const HOUR: i64 = 3_600;
+    /// 时间简写：测试基准时刻（PATCH014.4 更名；原名与"一天"同形但**名不副实**——它是
+    /// 10 天偏移 864_000 秒的固定锚点，非"一天"）+ 秒偏移（纯整数，无时区耦合）。
+    const BASE_TS: i64 = 864_000;
+    const HOUR: i64 = SECS_PER_HOUR;
 
     /// FIX009.7：关闭类判据单一来源——三个关闭事件为真、其余五个为假（**新增变体时
     /// `is_duty_close` 的穷举 match 会编译失败** ⇒ 强制作者当场决策）。
@@ -695,11 +704,12 @@ mod tests {
     #[test]
     fn duty_windows_single_shift() {
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::ClockIn),
-            ev(DAY + 17 * HOUR, EventKind::ClockOut),
+            ev(BASE_TS + 9 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 17 * HOUR, EventKind::ClockOut),
         ];
-        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 20 * HOUR);
-        assert_eq!(w, vec![(DAY + 9 * HOUR, DAY + 17 * HOUR)]);
+        let (w, open) =
+            duty_windows_for_day(&events, BASE_TS, BASE_TS + 86_400, BASE_TS + 20 * HOUR);
+        assert_eq!(w, vec![(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)]);
         assert!(!open);
     }
 
@@ -707,14 +717,15 @@ mod tests {
     #[test]
     fn duty_windows_cross_midnight_belongs_to_clock_in_day() {
         let events = [
-            ev(DAY + 20 * HOUR, EventKind::ClockIn),
-            ev(DAY + 26 * HOUR, EventKind::AutoClockOut),
+            ev(BASE_TS + 20 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 26 * HOUR, EventKind::AutoClockOut),
         ];
-        let now = DAY + 30 * HOUR;
-        let (today, open_today) = duty_windows_for_day(&events, DAY, DAY + 86_400, now);
-        assert_eq!(today, vec![(DAY + 20 * HOUR, DAY + 26 * HOUR)]);
+        let now = BASE_TS + 30 * HOUR;
+        let (today, open_today) = duty_windows_for_day(&events, BASE_TS, BASE_TS + 86_400, now);
+        assert_eq!(today, vec![(BASE_TS + 20 * HOUR, BASE_TS + 26 * HOUR)]);
         assert!(!open_today);
-        let (next, open_next) = duty_windows_for_day(&events, DAY + 86_400, DAY + 2 * 86_400, now);
+        let (next, open_next) =
+            duty_windows_for_day(&events, BASE_TS + 86_400, BASE_TS + 2 * 86_400, now);
         assert!(next.is_empty(), "次日无打卡 → 无窗口");
         assert!(!open_next);
     }
@@ -722,10 +733,10 @@ mod tests {
     /// 未关班闭于 now 且标记在岗（在岗中的今日视图）。
     #[test]
     fn duty_windows_open_tail_closes_at_now() {
-        let events = [ev(DAY + 9 * HOUR, EventKind::ClockIn)];
-        let now = DAY + 12 * HOUR;
-        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, now);
-        assert_eq!(w, vec![(DAY + 9 * HOUR, now)]);
+        let events = [ev(BASE_TS + 9 * HOUR, EventKind::ClockIn)];
+        let now = BASE_TS + 12 * HOUR;
+        let (w, open) = duty_windows_for_day(&events, BASE_TS, BASE_TS + 86_400, now);
+        assert_eq!(w, vec![(BASE_TS + 9 * HOUR, now)]);
         assert!(open, "末班未关 = 在岗中");
     }
 
@@ -733,9 +744,10 @@ mod tests {
     /// 只剩上一班，"当前班起点 = 末个班间空档之后"的推法会退回到当天首块（表盘底轨锚错）。
     #[test]
     fn duty_windows_open_tail_keeps_min_one_second() {
-        let events = [ev(DAY + 9 * HOUR, EventKind::ClockIn)];
-        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 9 * HOUR);
-        assert_eq!(w, vec![(DAY + 9 * HOUR, DAY + 9 * HOUR + 1)]);
+        let events = [ev(BASE_TS + 9 * HOUR, EventKind::ClockIn)];
+        let (w, open) =
+            duty_windows_for_day(&events, BASE_TS, BASE_TS + 86_400, BASE_TS + 9 * HOUR);
+        assert_eq!(w, vec![(BASE_TS + 9 * HOUR, BASE_TS + 9 * HOUR + 1)]);
         assert!(open, "同秒也是在岗中");
     }
 
@@ -755,12 +767,12 @@ mod tests {
     #[test]
     fn day_used_secs_sums_duty_windows() {
         assert_eq!(day_used_secs(&[]), 0);
-        assert_eq!(day_used_secs(&[(DAY, DAY + 4 * HOUR)]), 4 * HOUR);
+        assert_eq!(day_used_secs(&[(BASE_TS, BASE_TS + 4 * HOUR)]), 4 * HOUR);
         // 同日两班：09–12（3h）+ 13–14（1h）= 4h；中间 12–13 空档不算
         assert_eq!(
             day_used_secs(&[
-                (DAY + 9 * HOUR, DAY + 12 * HOUR),
-                (DAY + 13 * HOUR, DAY + 14 * HOUR)
+                (BASE_TS + 9 * HOUR, BASE_TS + 12 * HOUR),
+                (BASE_TS + 13 * HOUR, BASE_TS + 14 * HOUR)
             ]),
             4 * HOUR
         );
@@ -778,19 +790,28 @@ mod tests {
     /// 本班到点时刻 = 本班打卡 + 剩余（前端"轴末 / 下班 HH:MM"同一口径）；零头 10 分钟照武装。
     #[test]
     fn shift_deadline_is_clock_in_plus_remaining() {
-        let clock_in = DAY + 13 * HOUR;
-        assert_eq!(shift_deadline(clock_in, 2 * HOUR), DAY + 15 * HOUR);
+        let clock_in = BASE_TS + 13 * HOUR;
+        assert_eq!(shift_deadline(clock_in, 2 * HOUR), BASE_TS + 15 * HOUR);
         assert_eq!(shift_deadline(clock_in, 600), clock_in + 600, "零头照武装");
     }
 
     /// 加班裁决：到顶（上限已 12h）或跨日（now 日历日 ≠ 打卡日）→ 拒（只给下班）；否则允许。
     #[test]
     fn overtime_decision_blocks_at_cap_and_across_midnight() {
-        assert_eq!(overtime_decision(DAY, DAY, 6), OvertimeDecision::Allow);
-        assert_eq!(overtime_decision(DAY, DAY, 10), OvertimeDecision::Allow);
-        assert_eq!(overtime_decision(DAY, DAY, 12), OvertimeDecision::AtCap);
         assert_eq!(
-            overtime_decision(DAY + 86_400, DAY, 6),
+            overtime_decision(BASE_TS, BASE_TS, 6),
+            OvertimeDecision::Allow
+        );
+        assert_eq!(
+            overtime_decision(BASE_TS, BASE_TS, 10),
+            OvertimeDecision::Allow
+        );
+        assert_eq!(
+            overtime_decision(BASE_TS, BASE_TS, 12),
+            OvertimeDecision::AtCap
+        );
+        assert_eq!(
+            overtime_decision(BASE_TS + 86_400, BASE_TS, 6),
             OvertimeDecision::AcrossMidnight,
             "22:00 开、次日到点：跨日不给加班"
         );
@@ -800,16 +821,17 @@ mod tests {
     #[test]
     fn duty_windows_normalizes_nested_clock_in() {
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::ClockIn),
-            ev(DAY + 10 * HOUR, EventKind::ClockIn),
-            ev(DAY + 11 * HOUR, EventKind::ClockOut),
+            ev(BASE_TS + 9 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 10 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 11 * HOUR, EventKind::ClockOut),
         ];
-        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 12 * HOUR);
+        let (w, open) =
+            duty_windows_for_day(&events, BASE_TS, BASE_TS + 86_400, BASE_TS + 12 * HOUR);
         assert_eq!(
             w,
             vec![
-                (DAY + 9 * HOUR, DAY + 10 * HOUR),
-                (DAY + 10 * HOUR, DAY + 11 * HOUR)
+                (BASE_TS + 9 * HOUR, BASE_TS + 10 * HOUR),
+                (BASE_TS + 10 * HOUR, BASE_TS + 11 * HOUR)
             ],
             "前班在新打卡刻结束，窗口不重叠"
         );
@@ -820,18 +842,19 @@ mod tests {
     #[test]
     fn duty_windows_orphan_close_and_multi_shift_order() {
         let events = [
-            ev(DAY + 8 * HOUR, EventKind::ClockOut),
-            ev(DAY + 11 * HOUR, EventKind::ClockIn),
-            ev(DAY + 12 * HOUR, EventKind::ClockOut),
-            ev(DAY + 14 * HOUR, EventKind::ClockIn),
-            ev(DAY + 15 * HOUR, EventKind::CrashClockOut),
+            ev(BASE_TS + 8 * HOUR, EventKind::ClockOut),
+            ev(BASE_TS + 11 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 12 * HOUR, EventKind::ClockOut),
+            ev(BASE_TS + 14 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 15 * HOUR, EventKind::CrashClockOut),
         ];
-        let (w, open) = duty_windows_for_day(&events, DAY, DAY + 86_400, DAY + 16 * HOUR);
+        let (w, open) =
+            duty_windows_for_day(&events, BASE_TS, BASE_TS + 86_400, BASE_TS + 16 * HOUR);
         assert_eq!(
             w,
             vec![
-                (DAY + 11 * HOUR, DAY + 12 * HOUR),
-                (DAY + 14 * HOUR, DAY + 15 * HOUR)
+                (BASE_TS + 11 * HOUR, BASE_TS + 12 * HOUR),
+                (BASE_TS + 14 * HOUR, BASE_TS + 15 * HOUR)
             ],
             "孤儿下班不产窗口；两班升序"
         );
@@ -894,12 +917,12 @@ mod tests {
     /// 全程连续工作：duty = work、rest 为零、单块 Work（打卡/下班事件只留痕，不参与窗口推导）。
     #[test]
     fn continuous_work_has_no_rest() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::ClockIn),
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 17 * HOUR, EventKind::SegmentEnd),
-            ev(DAY + 17 * HOUR, EventKind::ClockOut),
+            ev(BASE_TS + 9 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 17 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 17 * HOUR, EventKind::ClockOut),
         ];
         let sum = reduce_day(&windows, &events, false);
         assert_eq!(sum.duty_secs, 8 * HOUR);
@@ -907,19 +930,19 @@ mod tests {
         assert_eq!(sum.rest_secs, 0);
         assert_eq!(sum.blocks.len(), 1);
         assert_eq!(sum.blocks[0].kind, BlockKind::Work);
-        assert_eq!(sum.blocks[0].start, DAY + 9 * HOUR);
-        assert_eq!(sum.blocks[0].end, DAY + 17 * HOUR);
-        assert_eq!(sum.duty_started_at, Some(DAY + 9 * HOUR));
-        assert_eq!(sum.duty_ended_at, Some(DAY + 17 * HOUR));
+        assert_eq!(sum.blocks[0].start, BASE_TS + 9 * HOUR);
+        assert_eq!(sum.blocks[0].end, BASE_TS + 17 * HOUR);
+        assert_eq!(sum.duty_started_at, Some(BASE_TS + 9 * HOUR));
+        assert_eq!(sum.duty_ended_at, Some(BASE_TS + 17 * HOUR));
     }
 
     /// 段间空隙 = 休息块：工作 3h + 休息 5h，区块按时间序 Work→Rest。
     #[test]
     fn duty_gap_becomes_rest_block() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd),
         ];
         let sum = reduce_day(&windows, &events, false);
         assert_eq!(sum.duty_secs, 8 * HOUR);
@@ -928,19 +951,19 @@ mod tests {
         assert_eq!(sum.blocks.len(), 2);
         assert_eq!(sum.blocks[0].kind, BlockKind::Work);
         assert_eq!(sum.blocks[1].kind, BlockKind::Rest);
-        assert_eq!(sum.blocks[1].start, DAY + 12 * HOUR);
-        assert_eq!(sum.blocks[1].end, DAY + 17 * HOUR);
+        assert_eq!(sum.blocks[1].start, BASE_TS + 12 * HOUR);
+        assert_eq!(sum.blocks[1].end, BASE_TS + 17 * HOUR);
     }
 
     /// 多段多间隙：三值与四区块（单窗口内 Work/Rest 交替；班间空档不产出区块）按序产出。
     #[test]
     fn multiple_segments_alternate_blocks() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 10 * HOUR, EventKind::SegmentEnd),
-            ev(DAY + 11 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 10 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 11 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd),
         ];
         let sum = reduce_day(&windows, &events, false);
         assert_eq!(sum.duty_secs, 8 * HOUR);
@@ -961,14 +984,14 @@ mod tests {
     /// 未下班（在岗中）：窗口闭于 now（**不按自然日截断**——跨零点尾巴随窗口带入）。
     #[test]
     fn open_duty_closes_at_now() {
-        let windows = [(DAY + 9 * HOUR, DAY + 10 * HOUR)];
-        let events = [ev(DAY + 9 * HOUR, EventKind::SegmentStart)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 10 * HOUR)];
+        let events = [ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart)];
         let sum = reduce_day(&windows, &events, true);
         assert_eq!(sum.duty_secs, HOUR);
         assert_eq!(sum.work_secs, HOUR);
         assert_eq!(sum.duty_ended_at, None, "末窗仍在岗");
         // 跨零点不切分：窗口可越过自然日边界（时钟走了 31h）
-        let long = [(DAY + 9 * HOUR, DAY + 40 * HOUR)];
+        let long = [(BASE_TS + 9 * HOUR, BASE_TS + 40 * HOUR)];
         let sum = reduce_day(&long, &events, true);
         assert_eq!(sum.duty_secs, 31 * HOUR, "窗口越过日界也不裁剪");
         assert_eq!(sum.duty_ended_at, None);
@@ -977,17 +1000,21 @@ mod tests {
     /// 跨零点班归打卡日（PL025.6 定案）：同窗口全量归本日；次日无该日打卡行 → 无窗口即无数据。
     #[test]
     fn cross_midnight_stays_on_clock_in_day() {
-        let windows = [(DAY + 23 * HOUR, DAY + 31 * HOUR)];
+        let windows = [(BASE_TS + 23 * HOUR, BASE_TS + 31 * HOUR)];
         let events = [
-            ev(DAY + 23 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 27 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 23 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 27 * HOUR, EventKind::SegmentEnd),
         ];
         let day = reduce_day(&windows, &events, false);
         assert_eq!(day.duty_secs, 8 * HOUR);
         assert_eq!(day.work_secs, 4 * HOUR);
         assert_eq!(day.rest_secs, 4 * HOUR);
-        assert_eq!(day.duty_started_at, Some(DAY + 23 * HOUR));
-        assert_eq!(day.duty_ended_at, Some(DAY + 31 * HOUR), "终点越过日界保留");
+        assert_eq!(day.duty_started_at, Some(BASE_TS + 23 * HOUR));
+        assert_eq!(
+            day.duty_ended_at,
+            Some(BASE_TS + 31 * HOUR),
+            "终点越过日界保留"
+        );
         let next = reduce_day(&[], &events, false);
         assert_eq!(next.duty_secs, 0, "跨零点尾巴不在次日出现");
         assert!(next.blocks.is_empty());
@@ -996,10 +1023,10 @@ mod tests {
     /// 自动下班回填：段末与下班都记在回填时刻，图谱工作块恰好闭于回填点。
     #[test]
     fn auto_out_backfill_clips_to_out_at() {
-        let out_at = DAY + 17 * HOUR;
-        let windows = [(DAY + 9 * HOUR, out_at)];
+        let out_at = BASE_TS + 17 * HOUR;
+        let windows = [(BASE_TS + 9 * HOUR, out_at)];
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
             ev(out_at, EventKind::SegmentEnd),
             ev(out_at, EventKind::AutoClockOut),
         ];
@@ -1014,7 +1041,7 @@ mod tests {
     /// 零长在岗窗口（误触上下班同一秒）不产出区块也不计三值。
     #[test]
     fn zero_length_duty_is_dropped() {
-        let windows = [(DAY + 9 * HOUR, DAY + 9 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 9 * HOUR)];
         let sum = reduce_day(&windows, &[], false);
         assert_eq!(sum.duty_secs, 0);
         assert!(sum.blocks.is_empty());
@@ -1024,7 +1051,7 @@ mod tests {
     /// 在岗但全程未计时：整段皆为休息（三值语义：休息 = 在岗 − 工作）。
     #[test]
     fn duty_without_segments_is_all_rest() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
         let sum = reduce_day(&windows, &[], false);
         assert_eq!(sum.duty_secs, 8 * HOUR);
         assert_eq!(sum.work_secs, 0);
@@ -1037,19 +1064,19 @@ mod tests {
     #[test]
     fn multiple_duty_windows_per_day() {
         let windows = [
-            (DAY + 9 * HOUR, DAY + 10 * HOUR),
-            (DAY + 11 * HOUR, DAY + 12 * HOUR),
+            (BASE_TS + 9 * HOUR, BASE_TS + 10 * HOUR),
+            (BASE_TS + 11 * HOUR, BASE_TS + 12 * HOUR),
         ];
         let events = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 10 * HOUR, EventKind::SegmentEnd),
-            ev(DAY + 11 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 10 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 11 * HOUR, EventKind::SegmentStart),
         ];
         let sum = reduce_day(&windows, &events, true);
         assert_eq!(sum.duty_secs, 2 * HOUR);
         assert_eq!(sum.work_secs, 2 * HOUR);
         assert_eq!(sum.rest_secs, 0);
-        assert_eq!(sum.duty_started_at, Some(DAY + 9 * HOUR));
+        assert_eq!(sum.duty_started_at, Some(BASE_TS + 9 * HOUR));
         assert_eq!(sum.duty_ended_at, None, "末窗未关（在岗中）");
         assert_eq!(sum.blocks.len(), 2, "两班各一块");
     }
@@ -1057,8 +1084,8 @@ mod tests {
     /// PL025.6 新增：孤儿段末（无起点的 segment_end）丢弃——不再从窗口起点起算（防过计）。
     #[test]
     fn orphan_segment_end_is_dropped() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
-        let events = [ev(DAY + 12 * HOUR, EventKind::SegmentEnd)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
+        let events = [ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd)];
         let sum = reduce_day(&windows, &events, false);
         assert_eq!(sum.duty_secs, 8 * HOUR);
         assert_eq!(sum.work_secs, 0, "孤儿段末不产生工作块");
@@ -1069,10 +1096,10 @@ mod tests {
     #[test]
     fn unclosed_segment_closes_at_last_window_end() {
         let windows = [
-            (DAY + 9 * HOUR, DAY + 12 * HOUR),
-            (DAY + 14 * HOUR, DAY + 18 * HOUR),
+            (BASE_TS + 9 * HOUR, BASE_TS + 12 * HOUR),
+            (BASE_TS + 14 * HOUR, BASE_TS + 18 * HOUR),
         ];
-        let events = [ev(DAY + 9 * HOUR, EventKind::SegmentStart)];
+        let events = [ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart)];
         let sum = reduce_day(&windows, &events, false);
         assert_eq!(sum.duty_secs, 7 * HOUR);
         assert_eq!(sum.work_secs, 7 * HOUR, "未收段跨窗口裁剪后全覆盖");
@@ -1091,15 +1118,15 @@ mod tests {
     /// 加班事件不参与归约：与不加该事件的三值、区块完全一致。
     #[test]
     fn overtime_event_is_ignored_by_reduce() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
         let base = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd),
         ];
         let with_overtime = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 12 * HOUR, EventKind::Overtime),
-            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 12 * HOUR, EventKind::Overtime),
+            ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd),
         ];
         let plain = reduce_day(&windows, &base, false);
         let overtime = reduce_day(&windows, &with_overtime, false);
@@ -1129,16 +1156,16 @@ mod tests {
     /// PL027.2：两类新事件不参与归约——三值与区块与不含它们时完全一致。
     #[test]
     fn reset_and_crash_events_are_ignored_by_reduce() {
-        let windows = [(DAY + 9 * HOUR, DAY + 17 * HOUR)];
+        let windows = [(BASE_TS + 9 * HOUR, BASE_TS + 17 * HOUR)];
         let base = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd),
         ];
         let extra = [
-            ev(DAY + 9 * HOUR, EventKind::SegmentStart),
-            ev(DAY + 11 * HOUR, EventKind::SessionReset),
-            ev(DAY + 12 * HOUR, EventKind::SegmentEnd),
-            ev(DAY + 13 * HOUR, EventKind::CrashClockOut),
+            ev(BASE_TS + 9 * HOUR, EventKind::SegmentStart),
+            ev(BASE_TS + 11 * HOUR, EventKind::SessionReset),
+            ev(BASE_TS + 12 * HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 13 * HOUR, EventKind::CrashClockOut),
         ];
         let plain = reduce_day(&windows, &base, false);
         let with_extra = reduce_day(&windows, &extra, false);
@@ -1152,38 +1179,38 @@ mod tests {
     #[test]
     fn nested_clock_in_fixes_close_previous_duty() {
         let events = [
-            ev(DAY, EventKind::ClockIn),
-            ev(DAY, EventKind::SegmentStart),
-            ev(DAY + HOUR, EventKind::ClockIn),
-            ev(DAY + 2 * HOUR, EventKind::ClockOut),
+            ev(BASE_TS, EventKind::ClockIn),
+            ev(BASE_TS, EventKind::SegmentStart),
+            ev(BASE_TS + HOUR, EventKind::ClockIn),
+            ev(BASE_TS + 2 * HOUR, EventKind::ClockOut),
         ];
         assert_eq!(
             nested_clock_in_fixes(&events),
             vec![
-                (DAY + HOUR - 1, EventKind::SegmentEnd),
-                (DAY + HOUR - 1, EventKind::ClockOut)
+                (BASE_TS + HOUR - 1, EventKind::SegmentEnd),
+                (BASE_TS + HOUR - 1, EventKind::ClockOut)
             ],
             "补段末 + 补下班（新打卡前一秒，保证重扫收敛）"
         );
 
         let clean = [
-            ev(DAY, EventKind::ClockIn),
-            ev(DAY, EventKind::SegmentStart),
-            ev(DAY + HOUR, EventKind::SegmentEnd),
-            ev(DAY + HOUR, EventKind::ClockOut),
-            ev(DAY + 2 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS, EventKind::ClockIn),
+            ev(BASE_TS, EventKind::SegmentStart),
+            ev(BASE_TS + HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + HOUR, EventKind::ClockOut),
+            ev(BASE_TS + 2 * HOUR, EventKind::ClockIn),
         ];
         assert!(nested_clock_in_fixes(&clean).is_empty(), "干净流水零纠正");
 
         let duty_only = [
-            ev(DAY, EventKind::ClockIn),
-            ev(DAY, EventKind::SegmentStart),
-            ev(DAY + HOUR, EventKind::SegmentEnd),
-            ev(DAY + 2 * HOUR, EventKind::ClockIn),
+            ev(BASE_TS, EventKind::ClockIn),
+            ev(BASE_TS, EventKind::SegmentStart),
+            ev(BASE_TS + HOUR, EventKind::SegmentEnd),
+            ev(BASE_TS + 2 * HOUR, EventKind::ClockIn),
         ];
         assert_eq!(
             nested_clock_in_fixes(&duty_only),
-            vec![(DAY + 2 * HOUR - 1, EventKind::ClockOut)],
+            vec![(BASE_TS + 2 * HOUR - 1, EventKind::ClockOut)],
             "段已收 → 只补下班"
         );
     }
@@ -1191,9 +1218,9 @@ mod tests {
     /// 兜底决策：无基准 → 停；未到点 → 睡（上限 60s）；到点 → 以基准时刻执行；换代 → 让位。
     #[test]
     fn auto_out_step_matrix() {
-        let due = DAY + 8 * HOUR;
+        let due = BASE_TS + 8 * HOUR;
         assert_eq!(
-            auto_out_step(None, 1, 1, DAY),
+            auto_out_step(None, 1, 1, BASE_TS),
             AutoOutStep::Stop,
             "无在岗基准即停"
         );
@@ -1227,7 +1254,7 @@ mod tests {
     /// 待决窗口：59s 内待决、恰 60s 待决、61s 未到、已过点不待决、无基准不待决。
     #[test]
     fn auto_out_pending_boundaries() {
-        let due = DAY + 8 * HOUR;
+        let due = BASE_TS + 8 * HOUR;
         assert_eq!(auto_out_pending(Some(due), due - 61), None);
         assert_eq!(auto_out_pending(Some(due), due - 60), Some(due));
         assert_eq!(auto_out_pending(Some(due), due - 1), Some(due));

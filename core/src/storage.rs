@@ -628,7 +628,7 @@ impl Storage {
 
     /// 测试辅助：旧的"开班 + 事件"夹具形态——只写流水（返回占位 id 0）。
     #[cfg(test)]
-    pub fn workday_open_with_events(
+    pub(crate) fn workday_open_with_events(
         &self,
         at: i64,
         kinds: &[crate::workday::EventKind],
@@ -641,7 +641,7 @@ impl Storage {
 
     /// 测试辅助：旧的"关班 + 事件"夹具形态——只写流水。
     #[cfg(test)]
-    pub fn workday_close_with_event(
+    pub(crate) fn workday_close_with_event(
         &self,
         _id: i64,
         at: i64,
@@ -652,13 +652,13 @@ impl Storage {
 
     /// 测试辅助：由流水配对（`segment_start` → `segment_end`）求"已落库段数"（零长段不计）。
     #[cfg(test)]
-    pub fn session_count(&self) -> Result<i64, StorageError> {
+    pub(crate) fn session_count(&self) -> Result<i64, StorageError> {
         Ok(self.session_pairs()?.len() as i64)
     }
 
     /// 测试辅助：由流水配对求和"累计秒"（= 旧 sessions 求和语义）。
     #[cfg(test)]
-    pub fn all_total(&self) -> Result<i64, StorageError> {
+    pub(crate) fn all_total(&self) -> Result<i64, StorageError> {
         Ok(self.session_pairs()?.iter().map(|(s, e)| e - s).sum())
     }
 

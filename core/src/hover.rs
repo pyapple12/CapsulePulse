@@ -290,10 +290,11 @@ pub struct ShiftBands {
 /// # 返回
 /// `(段带, 带末相对本班打卡的偏移秒数)`。
 pub fn shift_band(elapsed_secs: i64, base_hours: u32, used_before_secs: i64) -> (Band, i64) {
-    let step = i64::from(crate::workday::OVERTIME_STEP_HOURS) * 3_600;
+    let step = i64::from(crate::workday::OVERTIME_STEP_HOURS) * crate::workday::SECS_PER_HOUR;
     // 锚点：带长不为负（夹零）；总账可用：12h 硬顶扣掉本班之前已用（**不夹**）
-    let d0_secs = (i64::from(base_hours) * 3_600 - used_before_secs).max(0);
-    let total = i64::from(crate::workday::OVERTIME_CAP_HOURS) * 3_600 - used_before_secs;
+    let d0_secs = (i64::from(base_hours) * crate::workday::SECS_PER_HOUR - used_before_secs).max(0);
+    let total = i64::from(crate::workday::OVERTIME_CAP_HOURS) * crate::workday::SECS_PER_HOUR
+        - used_before_secs;
     let first_end = (d0_secs + step).min(total);
     if elapsed_secs < d0_secs {
         (Band::Base, d0_secs)
@@ -340,7 +341,7 @@ mod tests {
     }
 
     fn hours(n: i64) -> i64 {
-        n * 3_600
+        n * crate::workday::SECS_PER_HOUR
     }
 
     /// 段带边界（已用 0 ⇒ `d0` = 基准 = 6h）：本班 `[0,6h)` / 1st `[6h,10h)` / 2nd `[10h,12h)`，

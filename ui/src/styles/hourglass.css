@@ -5,7 +5,7 @@
    工作 = 匀速漏沙至阈值；漏完即停不翻转；暂停 = 翻转 + 从当前水位快漏
    ============================================================ */
 .hourglass {
-  --hg-dur: 3000s; /* 沙粒缓慢下移的周期（随提醒阈值；JS 在阈值变更时写入） */
+  --hg-dur: 3000s; /* 沙粒缓慢下移的周期（随提醒阈值；JS 在阈值变更时写入；引用处不再重复写 fallback——FIX010 收尾清理） */
   --hg-flip: 0.6s; /* 翻转时长；落沙等翻转完再开始 */
   --hg-delay: 0.6s; /* 落沙动画延迟（FIX010.9：原先是"把 0.6s 藏在 var() 的 fallback 里"的三处散写、而变量本身全仓无定义 ⇒ 升级为**真参数**，唯一定义处在此；要按状态改只改这一处或由 JS 写入） */
   --hg-w: 1; /* 水位（PATCH010.7）：0 = 上满下空、1 = 沉底；**默认 1 = 沉底**（不依赖任何状态类） */
@@ -74,11 +74,11 @@
 }
 .hourglass.flowing .loader__sand-grain-left {
   opacity: 1;
-  animation: hg-sand-grain-left var(--hg-dur, 3000s) linear var(--hg-delay) both;
+  animation: hg-sand-grain-left var(--hg-dur) linear var(--hg-delay) both;
 }
 .hourglass.flowing .loader__sand-grain-right {
   opacity: 1;
-  animation: hg-sand-grain-right var(--hg-dur, 3000s) linear var(--hg-delay) both;
+  animation: hg-sand-grain-right var(--hg-dur) linear var(--hg-delay) both;
 }
 /* 装饰弧与高光不随周期缓慢淡入（否则看似"加载中"）：环直接隐藏，高光保持静态反光 */
 .hourglass .loader__motion-thick,

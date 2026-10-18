@@ -134,9 +134,10 @@ const NO_CLOSE_ON_PRESS =
   "#stats-board, #settings-board, .overlay, .sideButton, .topbar, .glass-bar";
 
 // —— design flyBoard（PL019.2）：把开板按钮中心换算成板内坐标写入 transform-origin，
-// 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = boards.css 板位常量（design 同名）——
+// 开板即自该按钮处缩放飞出；BOARD_TOP/LEFT = 板在窗内的偏移，**须与 boards.css 的
+// #settings-board / #stats-board 的 top / left 同值**，否则飞出原点偏位（PATCH014.1：12 → 14）——
 const BOARD_TOP = 54;
-const BOARD_LEFT = 12;
+const BOARD_LEFT = 14;
 const winEl = ref<HTMLElement | null>(null);
 // 顶栏把手（PATCH001.2：阈值拖拽挂点，同时是双击缩回托盘的点击目标）
 const topbarEl = ref<HTMLElement | null>(null);

@@ -548,8 +548,9 @@ function renderWeek(): void {
   // PL026.1 尺度下限：分母取"当周峰值"与"总日均"的较大者——当周偏弱时柱整体变矮（相对总日均
   // 的真实表达），均线也不再被夹到 100%（此前 min(100,…) 会让它顶格当"最高点"，看不出高出多少）
   const weekPeak = Math.max(...days.map((d) => d.work + d.rest), 1);
-  const avgWork = avgWorkMin.value;
-  const scaleMax = Math.max(weekPeak, avgWork, 1);
+  // 均线取值（单位：**分**；本函数内快照一次，PATCH014.3 更名以免与 :701 的秒口径 computed 同名遮蔽）
+  const avgWorkMinValue = avgWorkMin.value;
+  const scaleMax = Math.max(weekPeak, avgWorkMinValue, 1);
 
   const W = svg.clientWidth;
   const H = svg.clientHeight;
@@ -588,7 +589,7 @@ function renderWeek(): void {
   // 均线（design 1:1；高度 = 总日均占尺度分母的比例——PL026.1 起分母 = max(当周峰值, 总日均)，
   // 故不再需要越顶夹取；当周偏弱时均线自然成为最高点且高度真实可读）
   if (wcAvgLine.value) {
-    wcAvgLine.value.style.bottom = `${((avgWork / scaleMax) * 100).toFixed(1)}%`;
+    wcAvgLine.value.style.bottom = `${((avgWorkMinValue / scaleMax) * 100).toFixed(1)}%`;
   }
 
   // 选中环闪现：查看日偏移变化时触发（design flashSel 1:1）——

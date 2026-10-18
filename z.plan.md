@@ -39,6 +39,7 @@
 
 ### PATCH 小修方案
 
+- **PATCH014 审计观察项可修项清理**（2026-10-18 立项并当日收口，V0.1.9.9；来源 = 审计观察项全量整理后的丙类 11 条——`.1` `BOARD_LEFT` 12→14 对齐 CSS 现行几何（开板飞出原点偏 2px）/ `.2` 自动下班默认值提常量 `AUTO_OUT_DEFAULT_HOURS` / `.3` `StatsView` 周卡均线局部变量改名（异单位同名遮蔽）/ `.4` 测试基准常量 `DAY`→`BASE_TS`（名不副实）/ `.5` `pub(crate) mod aumid`（零外部消费者）/ `.6` `cfg(test)` 助手四处收 `pub(crate)` / `.7` DEV 基座补两条命令路由 / `.8` 表盘冒号色改走 `var(--work)` 令牌 / `.9` 删两处无主 `eslint-disable`（`v-html` 处改记用途说明）/ `.10` `SECS_PER_HOUR` 单一来源（改引 9 处生产算术）/ `.11` 抽 `day_key` 日零时刻键助手；静态探针 11 项改前全红 → 改后全绿，`cargo test` 223 与改前同数 ⇒ 零行为变化）→ 附录 PATCH014
 - **PATCH013 窗口 / 任务栏图标"发糊"根因修复**（2026-10-17 立项并当日收口，V0.1.9.3；ICO 首帧被当作唯一窗口图标 ⇒ 改按 exe 内嵌多帧资源取尺寸（`window_icon.rs`）；图标生成脚本迁入 `core/icons/`）→ 附录 PATCH013
 - **PATCH012 发版准备（通知署名 / 打包与发布链 / 文案与图谱整定）**（2026-10-17 立项并当日收口，V0.1.9.1；① **通知署名**：绿色单 exe 首启写 HKCU 的 `AppUserModelId` 三项（`DisplayName`/`IconBackgroundColor`/`IconUri`）+ 内嵌图标解出到 `data/`——手写 advapi32 FFI、零新依赖（`core/src/aumid.rs`）；② **打包配置**：补 `beforeBuildCommand`（免嵌旧 dist）+ `bundle.icon` 五件套 + 设计稿图标（含 `source.png` 与 7 帧多尺寸 ico）；③ **发布链**：新增 `release/README.md`（中英双语随包说明）+ AGENTS「发布注意事项」章节 + CI workflow（`windows-latest` 门禁）+ `.gitignore` 补 release 二进制与 `*.psd`；④ **文案整定**：打卡框标题居中与新文案（`(・∀・) EXCITED 上班啦！` / `打卡下班喽！`+`＼(＾▽＾)／ YAY, Party!!!`）、自动下班框去「并记账」、明细「至今」移入时间列并等宽右缘对齐、提醒文案首次带阈值·重发换句式·payload 改完整文案；⑤ **图谱节点 z 序**：在岗时"最新的非 D 节点"置顶；目测见 `.temp/pl027-visual-standards.md` 附录 H）→ 附录 PATCH012
 - **PATCH011 拖拽期间屏蔽焦点抖动**（2026-10-16 立项并当日收口，V0.1.6.2；板开合驱动背板的拖拽闪烁修复——取证坐实抖动源 = 原生拖拽循环的成对 `Focused(false/true)`（临时探针三步对照：点不抖 / 开板不抖 / 拖必抖），修法 = 拖拽期间视作聚焦（`drag-end` 由贴边吸附状态机收尾点发出 + 10s 安全阀））→ 附录 PATCH011
@@ -90,16 +91,11 @@
 > 豁免唯一权威源：已定案项审计时（audit-project）不再重复报告。新定案条目由归档环节（audit-report）经用户确认后追加。分级：①**永久豁免**——不再报告不再讨论；②**条件豁免**——标注触发条件，条件变化时重新评估。
 > 2026-09-13 全量整理（A003 收口后）：三轮审计（A001/A002/A003）观察项去重归并于此——失效项销项（A001-O3 window-vibrancy 随依赖移除；restart 双锁窗口随 FIX003.9 消除；eprintln 半收敛已完成）、重复项归并（A002/A003 对 O4/O6 的重复报告删除），三份审计报告中的观察项节同步删除（原位置留归并指引）。整理时逐项重审定案，含 A002"其余"合并行的 4 小项与托盘 hide 焦点语义。
 
-### ① 永久豁免（23 项）
-
-**A001 定案维持（3 项）：**
+### ① 永久豁免（37 项）
 
 1. **存储探针保留**（来源 A001-O4，2026-09-09 定案）：`core/tests/storage_probe.rs` 为 rusqlite bundled 工具链冒烟资产，定案保留，去留悬置就此了结；仅当 rusqlite 依赖移除时随之退役。
 2. **configs/ 目录语义**（来源 A001-O5，2026-09-09 定案；**2026-09-10 翻案重订**）：原案"用户参数落 ~/.capsule-pulse/、configs 留给固定参数"已废止——用户拍板杜绝机器用户目录，运行时数据双落址：config.json 落 configs/、pulse.db 落 data/（dev=项目根 / release=exe 同级，2026-09-10 热更新定案）。
 3. **提醒重发间隔 5 分钟硬编码**（来源 A001-O6，2026-09-09 定案；A003 重复报告已归并）：`ReminderConfig::from_minutes` 内 repeat=300s 为 2026-09-09 用户定案值，有注释依据、无外部调参场景；远期若做多档位/可配置重发属新需求设计，非审计问题。
-
-**2026-09-13 整理定案（18 项）：**
-
 4. **DWM 属性魔数内联**（A003）：DWMWA=38、DWMSBT=3/1 无官方 Rust 绑定可引（引 windows crate 违反零新依赖定案），extern 直连行内注释有依据。
 5. **未知菜单 id 静默 + 窗口缺失分支静默**（A002→A003）：菜单 id 闭环构造、主窗口 setup 硬校验且从不销毁——架构保证不可达的防御分支。
 6. **clock_in 先 reset 后写库**（A002→A003）：Off 态 session 恒 Idle，reset 幂等空操作，注释已声明语义。
@@ -118,36 +114,35 @@
 19. **`:key` 索引键**（A002"其余"拆分）：v-for 列表（blocks/week）静态无重排，索引键无缺陷。
 20. **`v-model.number` 空串**（A002"其余"拆分）：Rust 侧校验兜底（1–240 / 1–72 严格夹取）。
 21. **命令命名三风格并存**（A002"其余"拆分）：改名连带全量 invoke + generate_handler，高风险低收益；破坏性 API 变更时机（若有）另议。
-
-**FIX008 定案（1 项）：**
-
 22. **`session_status`（async）直调窗口三连 vs 单实例 `run_on_main_thread` 的写法分叉**（来源 A008-P2-3，FIX008.3；2026-10-17 实测定案）：原判据是"单实例路径注释称直调必失败 ⇒ async 这处可能静默降级"。**2026-10-17 实测否掉该推断**：造景使"到点前 60s 待决"成立（打卡后本班剩余 70 秒）⇒ **主窗被成功前置（用户目击 APP 聚焦 + 弹出即将自动下班框）**，且 `data/pulse.log` **零新增**窗口失败；全日志的 `failed to send message to the webview` 全部是同日 02:52–02:55 的老记录，且**成对伴随** `hover 守候：可见性查询失败` / `菜单窗可见性查询失败` ⇒ 更可能是 **webview 当时不可用**，而非"线程不对"。**定案：两处写法各自保留、不统一、不再重复报告**——单实例那处的 `run_on_main_thread` 无害（失败只落一条日志），还能在 webview 缺失期挡住无意义调用；`session_status` 处保持直调（实测可用）。两处注释各补一句实测记录，防后来者"顺手统一"。
-
 23. **`days` 按天汇总不设"失效 / 重建"入口**（来源 A008-P3-4，FIX008.9；2026-10-17 用户定案**撤回该条**）：审计曾以"文档称'可随时重建'、实现却无入口 + seal 见已有汇总行即跳过"列为 P3，并假设将来会有**人工修库 / 迁移修正 / 归一口径修正 / 编辑历史**这类会改动"过去日流水"的功能 ⇒ 用户定案：**这些功能都不存在、也不会做** ⇒ 不存在"汇总与流水不一致"的现实路径 ⇒ 该条**撤回、不修**（`days` 的口径就是"**只增不改**"）；若将来真出现改动过去日流水的需求，届时另立条目讨论——**不预留入口、不加冗余**。
+24. **`day_budget_hours` 的 u32 理论溢出**（来源 A010-5，`core/src/workday.rs:168-169`）：`basis_hours + OVERTIME_STEP_HOURS * steps` 在 u32 内理论可溢出；需约 10⁹ 次加班事件才可达 ⇒ 纯理论缺口，不修、不加饱和运算。
+25. **迁移只校验 `workdays`、全新库不置 `model_version=2`**（来源 A009-10 / A010-6，`core/src/storage.rs:508-580`、`:663-688`）：旧模型路径仅测试夹具调用、无生产消费者；全新库不落版本号 ⇒ 每次启动重跑一次检测（幂等、代价可忽略）；`session_pairs` 与 `reduce_day` 同构同理。**定案：不修**（无现实路径）。
+26. **`Global\` 命名对象用 NULL DACL**（来源 A008-O8 / A010-12，`core/src/single_instance.rs`、`aumid.rs`）：需"多用户共享机 + 恶意用户抢建"同时成立才构成启动 DoS；对象只当启动闸门、不承载数据，跨用户会话可见性正是需求，模块注释已声明第一性取舍。
+27. **未 `deny_unknown_fields`（未知键静默忽略）**（来源 A008-O6，`core/src/settings.rs`）：与容错白名单「字段缺失回退默认」同体外延；手改配置 / 版本降级回退时前向兼容反而有益（严格报错会把旧版本残留键变成启动失败）。
+28. **`paths.rs` debug 构建烧入 `CARGO_MANIFEST_DIR`**（来源 A006-O2，`core/src/paths.rs:16`）：仅 dev 生效、release 走 exe 同级，属 2026-09-10 双落址定案的既有实现，有注释依据。
+29. **`storage.rs:430` 的 `as u32` 计数**（来源 A006-O5）：计数恒非负，转换安全。
+30. **未在岗电池按墙钟推算、漂移 ≤30s**（来源 A006-O4，`ui/components/TimerCard.vue`）：未在岗时电池仅为展示性口径，影响极小 ⇒ 不为此加逻辑。
+31. **`playChime` 在 `settings == null` 时跳过 `sound_enabled` 门控**（来源 A009-7，`ui/App.vue:229-236`）：该窗口不存在（设置未取到时提醒播放路径不可达）⇒ 无现实路径。
+32. **菜单守候线程无「已在守候」闩**（来源 A010-9，`core/src/menu.rs:122`）：<100ms 内二次右键可并存两条守候，两条均幂等 `hide`、无行为差异。
+33. **六个守候线程 + `migrate_inner` 零测试覆盖**（来源 A008-O9）：需 Tauri / 线程环境，成本高；可测部分（纯函数、归约）已有直测覆盖，守候循环本身属胶水层。
+34. **`hover` / `snap` / `session` 的防御分支与契约依赖**（来源 A008-O7 / A010-4）：`hover.rs` 冗余字段与防御兜底、`snap.rs` 双边命中后判者胜、`session.rs` 的 `undo_pause` 对契约外 `paused_from` 静默返回——均由调用方契约与状态机保证不可达，删改只增风险。
+35. **hover 几何 / 时序常量单点使用**（来源 A006-O3 / A010-2，`core/src/hover.rs:16/18/145-151`；`menu.rs:23` ↔ `hover.rs:146` 两处 100ms）：单一使用点的模块常量，抽公共常量属过度抽象。
+36. **`design/` 原型观察项 7 条**（来源 A004，2026-10-04 归档）：暂停时段不入账 / 电量按工作时长 / 标题粒子构建时快照 / a11y 三处 / `--k-lens` 无写入方 / 10Hz 全量刷新 / 过去日彗星仍发射——`design/` 原型自 V0.1.2.5 冻结，**用户定案留作参考（不删不动）**，且后续审计已不覆盖该目录 ⇒ 整包永久豁免。
+37. **设置保存失败时 `.tmp` 清理失败多一条诊断**（来源 A005-O-A，`core/src/settings.rs:150-155`）：仅"磁盘 / 目录故障"路径可达，多一条日志噪音；主错误照常上抛 ⇒ 保持现状。
 
-### ② 条件豁免（17 项，按触发条件分组）
-
-**触发 = 打包分发（Phase 6，一组销 5 项）：**
+### ② 条件豁免（29 项）
 
 1. **capability 偏宽**（A002→A003，default.json:5）：notification:default 前端零消费（通知走 Rust 侧不经 ACL）+ core:default 范围；打包期随能力清单收窄。
 2. **未配 CSP**（A002→A003，tauri.conf.json）：本地内嵌资产无远程内容；打包期配置。
 3. **窗口 label 依赖默认值 "main"**（A002→A003）：代码 3 处 + capabilities 1 处隐式引用；打包期显式化。
 4. **main.rs 无 windows_subsystem**（A003）：release 构建弹控制台黑窗；打包期添加（diag.rs:4 已登记评估点），落地后关键失败路径已由 warn_diag 双写兜底。
 5. **diag 日志无轮转/上限**（A003）：写入点全为低频失败路径；打包期随长期运行场景一并评估。
-
-**触发 = 跨平台适配（[problems#1]，2 项）：**
-
 6. **周边界 DST 偏差**（A001-O1，3 处同根：period.rs week_start_secs / commands/workday.rs day_bounds 固定 86400 / StatsView dayLabel 固定 86400000ms）：含 DST 切换时区有 1 小时偏差；跨平台立项或面向 DST 时区分发前补注入时区用例（需验证）。
 7. **前端 listen 卸载竞态**（A001-O7）：根组件生命周期 = 应用生命周期，当前无可达路径；App.vue 不再是永不卸载的根组件时重新评估（需验证）。
-
-**触发 = 性能证据（db 体积/查询耗时异常，3 项）：**
-
 8. **sessions/events 无索引**（A001-O2；A005 外延 sessions.started_at 同族）：`total_since` 与今日/本周条件 SUM 全表扫在"一行/暂停"写入速率下成本可忽略（计划书 §2.2 v1 SUM 定案）。
 9. **week_detail 逐日取锁**（A002→A003）：7 天 14 次取锁 + 7 次查询，本地 SQLite 毫秒级、翻页触发低频。
 10. **浮层双层 backdrop-filter 并存**（A002"4 层"表述已随 PL010/011 架构更新 → A003 现状 2 层）：短暂低频态、240px 小面积。
-
-**触发 = 需求演进 / 理论缺口（7 项）：**
-
 11. **跨零点段归属起点日 + as_secs 秒级截断**（A001-O8）：单表 `(started_at, seconds)` schema 固有语义（段不拆分）；引入"跨零点段拆分"需求时重评数据模型。
 12. **原子写无 fsync**（A002→A003，settings.rs:82）：断电窗口 rename 后可能旧内容，纯理论缺口；产品定位升级为关键数据可靠性时重评。
 13. **pause 回滚窗口与 async 自动下班理论竞态**（A003，commands/session.rs:93-110）：需存储失败 + 操作同毫秒多重条件交错；错账实际复现时重评（需验证）。
@@ -155,6 +150,18 @@
 15. **setup 便利层失败经 `?` 升格为启动失败**（A008-P3-5，FIX008.10；2026-10-17 用户定案**登记条件豁免、不修**）：场景——`build_tray(app)?` / `tray-hover` 与 `tray-menu` 的 `.build()?` / `register_global_shortcuts(app)?`（该函数**仅** `settings` 锁中毒会返回 Err——单键注册失败已在内部吞掉、只落一行日志）任一处失败 ⇒ `setup` 整体失败、**应用起不来**，尽管主窗的计时/打卡/统计/提醒本可用；与白名单「装饰 / 便利层不得把用户挡在应用外」的表述相反。**定案：维持现状不修**——用户判定"**启动期硬失败更合理**"（装不起来就整次起不来，问题暴露在最前面，而不是被静默降级掩盖，避免"功能静默缺失"更难查）。**触发 = 出现实机证据**（用户反馈"应用起不来"且 `data/pulse.log` 显示上述三类之一失败）⇒ 届时重评是否改为「落日志 + 跳过该层继续启动」（跳过本身安全：守候线程每拍按 label 取窗、取不到自灭；无托盘时吸附 / 锚定本就降级）。
 16. **托盘窗锚定翻转判据用绝对 0（纵向多屏）**（A008-P3-7，FIX008.12；2026-10-17 用户定案**登记条件豁免、不修**）：场景——`anchor_tray_hover`（lib.rs）与 `anchor_menu`（menu.rs）的"上方放不下就翻到下方"判据写死 `y < 0`（隐含假设"显示器上缘 = 0"）；`anchor_menu` 亦**只钳右缘、不判下缘**。影响——存在**纵向多屏**（有显示器位于主屏**上方** ⇒ 该屏 Y 为负）**且托盘图标出现在那块屏上**（需 Windows 开启"在所有显示器上显示任务栏"）时，卡片 / 菜单**误翻到下方**（可能落到另一块屏），纯观感错位、无功能 / 数据损失；**单显示器下与现状完全等价**。**定案：不修**（触发要两个条件同时成立、后果仅观感；修法要给"每秒都可能走的锚定路径"喂显示器矩形 ⇒ 成本与收益不成比例）。**触发 = 用户实际使用纵向多屏并反馈观感问题** ⇒ 届时按"用 `monitor`/`screen` 矩形判上缘 + 补下缘钳制"修（`anchor_menu` 已持有该入参，可直接单测注入负 Y 矩形）。
 17. **resume 回滚不对称（孤儿 `segment_start`）**（A008-P3-9，FIX008.14；2026-10-17 用户定案**登记条件豁免、不修**）：场景——`resume_session`（commands/session.rs）是"先写 `segment_start`、后清留痕"；若第二步（**fire 锁中毒**）失败 ⇒ `restore_state` 回滚会话态，但**已写的段起点留在流水** ⇒ 下次恢复再写一条 ⇒ `reduce_day` 配对时可能把中间的休息间隙计为工作。**定案：不修**——现顺序把**可达的失败**（存储写）放在**第一步** ⇒ 失败即干净回滚、零残留；孤儿只在 **`fire` 锁中毒（终态、应用内不可恢复）** 时出现，那时本就该重启；而按审计建议换序会把可达失败拖到第二步、制造"重复提醒"（与 FIX008.13 同一条取舍的**另一面**）。**触发 = 出现真实错账**（休息时长被计为工作，且日志显示 `fire` 锁中毒）⇒ 届时重评（给 `last_fired` 加恢复入口，或失败时补偿写 `segment_end`）。
+18. **`busy_timeout(0)` 零等待**（来源 A008-O2 / A010-1，`core/src/storage.rs:156-158`）：单连接 `Mutex<Storage>`、应用内无第二写者（2026-10 定案有意为之）。**触发 = 引入第二写者 / 多进程访问同一 `pulse.db`** ⇒ 届时给 busy timeout 并补并发用例。
+19. **「锁内取副本 → 锁外落盘 → 再锁写回」理论可丢更新**（来源 A008-O1 / A010-10，FIX007.2 的取舍）：四条写路径（`set_hotkey_core` / `set_window_pref_core` / `set_settings_inner` / `save_window_position`）全在主线程串行，实际不可达。**触发 = 该写路径移入后台线程** ⇒ 届时改为单锁内提交（或加版本号比对）。
+20. **低频点用无限定 `warn_diag`（六处）**（来源 A009-17 / A010-11：`core/src/lib.rs` 吸附 / 锚定 / 收起、`core/src/menu.rs` 菜单定位 / 收起等）：均为"每次用户动作至多一条"，刷不起来。**触发 = 其中任一进入秒级循环** ⇒ 届时照热路径上 `warn_diag_once` 口闩。
+21. **提醒守候线程未在岗仍 10Hz 空转、每拍取 3 把锁**（来源 A007-O3，`core/src/commands/reminder.rs:99-117`）：100ms 节拍是与沙漏水位精度的既有承诺（2026-10-17 用户定案恢复精度）；空转成本 = 每拍三次内存锁。**触发 = 实机观察到空转耗电 / 精度口径再改** ⇒ 届时未在岗降频（如 1s）并补用例。
+22. **迁移失败落档含 `{err}`（`VACUUM INTO` 失败消息可能内嵌备份路径）**（来源 A009-12，`core/src/commands/workday.rs:639`）：诊断日志为本地文件、不对外发送。**触发 = 需要提交日志排障 / 隐私敏感场景** ⇒ 届时改只落错误种类或截断。
+23. **依赖 pin 风格不一、三处 `24.0` 同值不同义**（来源 A008-O12，`Cargo.toml:11-18`、`commands/mod.rs:159`、`hover.rs:18`、`menu.rs:22`）：pin 写法（`=` / `^` / 省略）与三处版本号含义各不相同 ⇒ 现状不影响解析结果。**触发 = 依赖升级 / 版本裁剪** ⇒ 届时统一风格并逐处注明含义。
+24. **两套「过去日跨度」实现**（来源 A009-19 尾，`core/src/commands/workday.rs`：`seal_days_inner` 滚动封口 / `unsealed_past_days` 降级现算）：职责互补（一个封口、一个补算），共性是日期跨度推导。**触发 = 该口径再变或重构** ⇒ 届时抽单一入口。
+25. **`--focus-blur` 无消费**（来源 A007-O1，`ui/src/styles/glass.css:34`）：注释明写"随令牌保留"，浮层配方重构时一并评估。**触发 = 令牌清理批次** ⇒ 届时随浮层配方评估去留。
+26. **错误文案子串表与 Rust 文案强耦合**（来源 A007-O6，`ui/App.vue:263-275`）：Rust 改措辞而前端未同步 ⇒ 静默落"保存失败"；注释已声明同步义务。**触发 = Rust 错误文案批量改写** ⇒ 届时同步表或改结构化错误码。
+27. **`?? 0`（1970 基准）兜底**（来源 A007-O5，`ui/components/StatsView.vue` / `ui/components/TimerCard.vue` / `ui/src/components/TrayHover.vue`）：生产不可达（在岗必给 `shift_start`）。**触发 = 后端口径改为"可能不发 `shift_start`"** ⇒ 届时改显式报错。
+28. **前端杂项组**（来源 A008-O14 尾 / A009-6 外延）：`StatsView` 三串 `invoke`（可改 `allSettled`）、`TimerCard` 六函数未导出、`ui/tests/stats-gate.spec.ts:54` 断言面偏宽。**触发 = 需要单测这些函数 / 命令数继续增加** ⇒ 届时抽并发原语、导出函数、收窄断言面。
+29. **死参数 `onDuty` 与 `html`/`body`/`#app` 样式链两份重复**（来源 A009-2 / A009-3）：`onDuty ⊆ autoOutLocked` ⇒ `onDuty || autoOutLocked` 恒等后者（无行为差异）；`ui/src/components/TrayHover.vue:64-79` ↔ `TrayMenu.vue:54-68` 样式链逐字重复。**触发 = 设置板 / 悬浮窗重构** ⇒ 届时删参数（先实测包含关系）、抽样式助手。
 
 ---
 
@@ -515,15 +522,7 @@
 - `P3-5 | index.html:625-628,713 | 设置板「自动下班（小时）」未接线，改动无效（S.autoOutH 恒 8） | 已修（加 change 监听写 S.autoOutH，文案随动）`
 - `P3-6 | README.md:28-38；index.html:656,545；devkit.css:39-40 | 注释/文档漂移（映射表引不存在类名、hint「页签」、注释 WEEK_MOCK、浮钮「可拖拽」） | 已修（随 FIX004 一并更正）`
 
-**参考级观察项**（7 条，均不提升 P 级）
-
-- `index.html:1074-1082 vs 764-798` — 暂停时段不入账（图谱画绿尾但三值/明细/周卡的休息不含暂停）⇒ 原型只验 UI 观感，计时保真由 Rust 侧承担（架构基线）
-- `index.html:1233-1237` — 电量按工作时长而非在岗时长消耗，暂停即停耗 ⇒ 演示语义自洽，无调参场景
-- `index.html:1707-1709,1872-1891` — 标题粒子 rect/zone 为构建时快照，页面滚动后排斥映射错位 ⇒ 常规视口不滚动，需验证级
-- `index.html:339-367；controls.css:106-108；index.html:113` — a11y（图谱箭头无 aria-label、三段式 radio 键盘不可达、沙漏 aria-label 固定「50 分钟」）⇒ 属映射回 `ui/` 时的落地项
-- `glass.css:107-109` — `--k-lens` 无写入方（恒 fallback 1，透镜线常开）⇒ 单次使用无调参场景
-- `index.html:938` — 10Hz `setInterval(render)` 全量刷新、板开不暂停 ⇒ 原型规模无感，性能无承诺
-- `index.html:1174-1176` — 查看过去日时彗星仍发射（过去日图谱带飞行白纹）⇒ UI 观感域，属用户定案
+**参考级观察项**（7 条，2026-10-18 全量整理后**明细删除防重复**）：整包登记 **§四 永久豁免 #36**——`design/` 原型自 V0.1.2.5 冻结、用户定案留作参考（不删不动），且后续审计不覆盖该目录；豁免唯一权威源 = 本文件「四」。
 
 **亮点**
 
@@ -534,7 +533,7 @@
 - 渲染签名（sig）机制避免无谓 DOM 重建
 - 样式拆分后职责边界清晰，每文件头部有职责注释、加载顺序固定
 
-**备注**：上一轮复核：无（design/ 首轮，A001–A003 不覆盖 `design/`）。观察项处置：确认环节未收到用户答复，按默认执行——7 条均不提升，属 design 范围观察项、暂不并入 §四豁免定案清单。容错白名单新增：无（原型纯展示层）。过程叙述（探针、live、截图）见 `x.progress.md` FIX004 组与 `.temp/fix004-verification.md`。
+**备注**：上一轮复核：无（design/ 首轮，A001–A003 不覆盖 `design/`）。观察项处置：确认环节未收到用户答复，按默认执行——7 条均不提升，属 design 范围观察项（2026-10-18 全量整理后并入 §四 永久 #36）。容错白名单新增：无（原型纯展示层）。过程叙述（探针、live、截图）见 `x.progress.md` FIX004 组与 `.temp/fix004-verification.md`。
 
 ## 附录 A005：全量代码审计报告（第4轮，2026-10-05）
 
@@ -550,18 +549,7 @@
 - `P3-6 | core/src/storage.rs:41-44 | open_in_memory 生产零调用、doc 标「测试专用」但未隔离 | 已修（加 #[cfg(test)]）`
 - `P3-7 | core/src/commands/mod.rs:124,130 | FakeClock 的 new/advance 为 pub 且无 /// | 已修（各补中文文档注释）`
 
-**参考级观察项**（10 条，按默认不提升）
-
-- `core/src/settings.rs:82-90` — save 写失败时 tmp 多半不存在、remove_file 报 NotFound ⇒ diag 噪音 ⇒ 仅失败路径诊断噪音，主错误照常上抛
-- `core/src/workday.rs:203` — 同日两个孤儿 clock_out 重叠 duty 窗口 ⇒ duty_secs 双计 ⇒ 仅外部改库可达，需验证级
-- `core/src/storage.rs:115-121` — sessions.started_at 无索引、条件 SUM 全表扫 ⇒ 已并入 §四 永久 #8（「sessions/events 无索引」）
-- `core/src/diag.rs:11-19 + paths.rs:38-42` — 每次 diag::log 解析路径 + create_dir_all ⇒ 低频失败通道、无轮转已豁免
-- `ui/App.vue:24 + StatsView.vue:73-75` — 停留统计页数据不随时间更新（仅三个触发口；注释「30s 兜底」口径略宽）⇒ 切页即重拉兜底，无产品承诺
-- `ui/App.vue:214-220` — isFocused 查询失败退回默认纱态 ⇒ 白名单⑦理由完全覆盖，装饰层自愈
-- `ui/components/TimerCard.vue:40-42` — session_status 失败仅 console、计时静默冻结 ⇒ 已并入 §四 永久 #14（「session_\* 快照命令」）
-- `ui/components/SettingsPanel.vue:22,30` — number input min/max 与 Rust validate 双维护 ⇒ HTML 属性仅 UI 提示，Rust 校验权威
-- `core/src/commands/reminder.rs:22 vs lib.rs:267` — reminder-due emit 失败严格报错 vs window-focus 落日志，双策略并存 ⇒ A003 P3-8 已裁定上下文不同，维持原判
-- `core/src/lib.rs:106` — 托盘文案「开始/暂停」实际覆盖三态 ⇒ 纯文案级惯例表意
+**参考级观察项**（10 条，2026-10-18 全量整理后**明细删除防重复**）：去向按原列表顺序记作 `O-A`–`O-J`——`O-A` → §四 永久 #37；`O-B` → §四 永久 #7；`O-C` → §四 条件 #8；`O-D` → §四 条件 #5；`O-E` → 已随 PATCH006（统计板在岗节拍刷新）销项；`O-F` → 容错白名单「焦点联动分态纱」；`O-G` → §四 永久 #14；`O-H` → 已随 FIX008.6（阈值常量镜像）销项；`O-I` → 容错白名单「提醒评估与事件发送失败仅落档」（含 A003 P3-8 裁定）；`O-J` → 已随 PATCH008（托盘菜单窗化）销项。豁免唯一权威源 = 本文件「四」。
 
 **亮点**
 
@@ -1108,13 +1096,7 @@
 - `P3-15 | ui/App.vue:240 ↔ SettingsPanel.vue:53-78,130-135,207-233；TimerCard.vue:259-320；ui/src/title-particles.ts:184-198；TrayMenu.vue:90-105 | 同文案 saveError 不触发 watch；pointerStepped 残留；dialArcs 内 Date.now() 非响应式；光标静止不停帧；先取值后 listen | 已修（先清空再置文案；时间戳判据；secTs 驱动；先 listen 再取值；粒子停帧子项按「不改」结案）`
 - `P3-16 | ui/components/TimerCard.vue:121/186/191；StatsView.vue:438/484/646 | 复杂内部函数缺中文注释 | 已修（按「扫描无 /** */ 的复杂内部函数」补注释，未照旧行号硬改）`
 
-**参考级观察项**（5 条）
-
-- `ui/App.vue:125 与 ui/src/styles/boards.css:270` — BOARD_LEFT=12 与 left:14px 不一致，飞入原点偏 2px ⇒ UI 几何参数
-- `core/src/paths.rs:16` — debug 烧入 CARGO_MANIFEST_DIR ⇒ 仅 dev，2026-09-10 定案有意（有注释依据）
-- `core/src/menu.rs:23 与 core/src/hover.rs:146` — 同为 100ms、语义分属两处 ⇒ 单次使用模块常量
-- `ui/components/TimerCard.vue:552-583` — 未在岗电量墙钟漂移 ≤30s ⇒ 影响极小，需验证
-- `core/src/storage.rs:430` — as u32 计数非负 ⇒ 安全
+**参考级观察项**（5 条，2026-10-18 全量整理后**明细删除防重复**）：去向按原列表顺序记作 `O-A`–`O-E`——`O-A`（`BOARD_LEFT` 与 CSS 差 2px）→ 清理任务 `PATCH014.1`；`O-B` → §四 永久 #28；`O-C` → §四 永久 #35；`O-D` → §四 永久 #30；`O-E` → §四 永久 #29。豁免唯一权威源 = 本文件「四」。
 
 **亮点**
 
@@ -1156,17 +1138,9 @@
 - P3-10 | `ui/components/StatsView.vue:583-586` | `fmtT` 仍手写 `padStart`，未复用 `format.hhmm`（A006-P3-13 同根漏改） | 已修（改 `hhmm`，输出逐字不变）
 - P3-11 | `ui/src/components/TrayHover.vue:30-84` ↔ `ui/src/components/TrayMenu.vue:27-64` | `snap4` +「量内容 + 读 CSS chrome + 向上取 4 倍数」管线逐字重复两份 | 已修（新建 `ui/src/measure-window.ts` 抽公共助手）
 
-**参考级观察项**（7 条，记录不修）
+**参考级观察项**（7 条，2026-10-18 全量整理后**明细删除防重复**）：去向按原列表顺序记作 `O-A`–`O-G`——`O-A`（`--focus-blur` 零消费）→ §四 条件 #25；`O-B` → 容错白名单「单实例唤起失败仅落档」①（预期竞态、刻意不记）；`O-C`（未在岗 10Hz 空转）→ §四 条件 #21；`O-D`（`set_board_backdrop` 返 `()`）→ 容错白名单 PL029；`O-E`（`?? 0` 兜底）→ §四 条件 #27；`O-F`（文案子串表）→ §四 条件 #26；`O-G`（`{ deep: true }`）→ 已随 FIX010.12 销项。豁免唯一权威源 = 本文件「四」。
 
-- `ui/src/styles/glass.css:34` — `--focus-blur` 零消费 ⇒ 条件 2（注释明写「随令牌保留」；A006 未列此令牌 ⇒ 复核修正子代理的「P3 漏改」判定）
-- `core/src/single_instance.rs:56-64` — 首实例建唤前事件前，第二实例 `OpenEventW` 失败即静默退（快速双击可能「无反应」） ⇒ 条件 4（毫秒级竞态，需验证）
-- `core/src/commands/reminder.rs:94-108` — 未在岗时仍 10Hz 空转、每拍取 3 把锁 ⇒ 条件 2（与沙漏同步的精度承诺有注释依据）
-- `core/src/commands/window.rs:21` — `set_board_backdrop` 返回 `()` 非 `Result`（全项目唯一例外） ⇒ 条件 2（白名单 PL029 已登记）
-- `ui/components/StatsView.vue:192`、`ui/components/TimerCard.vue:217`、`ui/src/components/TrayHover.vue:23-25` — `?? 0` 兜底（1970 基准）会画错弧 / 轴末 ⇒ 条件 4（生产不可达：在岗必给 `shift_start`，需验证）
-- `ui/App.vue:263-275` — 错误文案子串表与 Rust 文案强耦合（Rust 改措辞须同步，否则静默落「保存失败」） ⇒ 条件 2（YAGNI，注释已声明同步义务）
-- `ui/src/components/TrayHover.vue:85` — `{ deep: true }` 深比较无必要 ⇒ 条件 1（微耗、单次使用）
-
-豁免判定：本轮新增豁免候选 = 上表 7 条（多命中条件 2/4）；「该进配置未进」零命中；「diag 日志无轮转」豁免（条件豁免 #5）前提被 P2-1 打破 ⇒ P2-1 不可豁免。
+豁免判定：7 条全为新增豁免候选（去向见上）；「该进配置未进」零命中；「diag 日志无轮转」（条件 #5）前提被 P2-1 打破 ⇒ P2-1 不可豁免。
 
 **亮点**
 
@@ -1204,23 +1178,7 @@
 - `P3-14 | workday.rs:4-5（:438）/ lib.rs:6-8 :1008-1013 / settings.rs:98 | 文档/注释失实（Rust+Tauri 组）：OnDuty 携带库行 id、blocks 契约「W/R 交替」在一日多班时不成立、lib.rs 漏 PL029 系统背板 | 已修（FIX008.19：实际改 4 处，另两处已随 .6/.8 完成）`
 - `P3-15 | StatsView.vue:623-626 / format.ts:17 / vitest.config.ts:5-6 / AGENTS.md:266 / x.progress.md 四处 | 文档/注释失实（前端/门禁组）：durText「两档」实为单档、format「三段」实为两段、vitest「不受 vue-tsc 管」与实情相反、AGENTS 的 core:event 论述、台账 PATCH006.1–.4 标「未实现」 | 已修（FIX008.20：五处逐条按实情改写）`
 
-**参考级观察项**：15 条全部维持参考级、不提升（用户 2026-10-17 确认）；格式 `位置 — 一句话 ⇒ 理由类别`。
-
-- `O1 lib.rs:651-669 / commands/reminder.rs:302-308/430-436 — FIX007.2 引入丢失更新窗口（后完成者用陈旧整结构副本覆盖）⇒ 条件 4（四条写路径全主线程串行；移入后台线程即升 P 级）`
-- `O2 storage.rs:156-158 — busy_timeout(0) 零等待（瞬时占用即写失败）⇒ 条件 2（PATCH005.14 有意为之）；与 y.problems#14 叠加面需复看`
-- `O3 storage.rs:199/226-255 — events.kind 无索引 ⇒ 两处全表扫 ⇒ 见 §四 条件 #8`
-- `O4 settings.rs:129-143 — 原子写无 fsync ⇒ 见 §四 条件 #12`
-- `O5 period.rs:15 / commands/reminder.rs:174 — 固定日长回推周一 ⇒ DST 周界偏 1 小时 ⇒ 见 §四 条件 #6`
-- `O6 settings.rs:22-54 — 未 deny_unknown_fields ⇒ 未知键静默忽略 ⇒ 与白名单「字段缺失回退默认」同体外延`
-- `O7 hover.rs:48/114-126、:91-96 / snap.rs:39-54 / session.rs:189-201 — 冗余字段 / 防御兜底 / 双边命中后判者胜 / undo_pause 契约依赖 ⇒ 条件 1/2/4`
-- `O8 single_instance.rs:166-181 — Global\ + NULL DACL 闸门可被同机他用户抢建（DoS 面）⇒ 模块注释已声明第一性取舍`
-- `O9 六个守候线程 + migrate_inner — 零测试覆盖（需 Tauri/线程环境）⇒ 条件 7 同族`
-- `O10 commands/session.rs:272-281 — emit 失败 ? 掉整条命令 ⇒ 本拍不查自动下班 ⇒ 见 §四 永久 #14；兜底线程保证本体`
-- `O11 storage.rs:623-683 — #[cfg(test)] 助手声明 pub（与同文件 pub(crate) 不一致）⇒ 仅测试编译期、零生产暴露面`
-- `O12 Cargo.toml:11-18 / commands/mod.rs:159 / hover.rs:18 / menu.rs:22 — 依赖 pin 风格不一、三处 24.0 同值不同义 ⇒ 条件 1`
-- `O13 前端 A007 二区 7 条（SettingsPanel.vue:53-78 文案子串表、?? 0 兜底、{ deep: true }、glass.css:34 --focus-blur 零消费 等）— 原样在位、未恶化 ⇒ 维持 A007 结论不提升`
-- `O14 前端新增：timer.css:419-421 硬编码 #ff6b4a、TimerCard.vue:438 缺同源注释、StatsView.vue:38-58 三串 invoke、ui/tests/stats-gate.spec.ts:54 观察面、TimerCard 六函数未导出 ⇒ 条件 1/2/4`
-- `O15 ui/src/.mimosa/ — 工具产物落源码目录 ⇒ 条件 1（.gitignore 已覆盖、git status 干净）`
+**参考级观察项**：15 条，2026-10-18 全量整理后**明细删除防重复**（原 `O1`–`O15` 编号保留作索引）——`O1` → §四 条件 #19；`O2` → §四 条件 #18；`O3` → §四 条件 #8；`O4` → §四 条件 #12；`O5` → §四 条件 #6（其中 `period.rs` 那处已随 FIX010.2 删除死函数销项）；`O6` → §四 永久 #27；`O7` → §四 永久 #34；`O8` → §四 永久 #26；`O9` → §四 永久 #33；`O10` → §四 永久 #14；`O11` → 清理任务 `PATCH014.6`；`O12` → §四 条件 #23；`O13` → 见附录 A007 指向（各自去向不一）；`O14` → 硬编码色 `PATCH014.8`，三串 `invoke` / 断言面 / 函数未导出 §四 条件 #28（`TimerCard.vue:438` 注释项因现场已变自然消解）；`O15` → 已销项（A009 确认，`.mimosa/` 已在 `.gitignore`）。豁免唯一权威源 = 本文件「四」。
 
 **亮点**
 
@@ -1242,27 +1200,7 @@
 - P3-4 | `core/src/commands/workday.rs:598`、`:603` | 心跳线程（60s 常驻）两处失败用裸 `warn_diag` ⇒ 锁中毒时约 1 行/分钟无界写日志（其余五个守候线程均已上闩） | 已修（两处补 `warn_diag_once`）
 - P3-5 | `core/src/hover.rs:37`、`:251/253/255`、`core/src/workday.rs:464`（对 `:494`）、`core/src/lib.rs:584` | 文档 / 措辞失实组：① 行①标签写 `正班`，实现恒发 `本班`；② `Band` 区间文档按原始基准为锚（照改会退回 A2.7 / A2.8 已修错值）；③ 留痕事件枚举三处互不一致且都不全；④ `lib.rs:584` 为生产态唯一 `let _ =`，与 A008 亮点「零 `let _ =`」矛盾 | 已修（逐处照实改写；④ 保留丢弃 + 补注释并订正 A008 亮点措辞）
 
-**参考级观察项**（19 条，记录不修；含回落理由）
-
-- `ui/App.vue:131` ↔ `ui/src/styles/boards.css:270` — `BOARD_LEFT = 12` 与 CSS `left: 14px` ⇒ 开板飞出原点 x 偏 2px ⇒ 条件 1（纯视觉 2px，顺手可改）
-- `ui/components/SettingsPanel.vue:31-35` / `:199` / `:395-396` / `:410-411`（+ `ui/App.vue:869-870`） — `onDuty` 与 `autoOutLocked` 同源且 `onDuty ⊆ autoOutLocked` ⇒ `onDuty || autoOutLocked` 恒等后者（死参数） ⇒ 条件 1/4（无行为差异，删改跨父子）
-- `ui/src/components/TrayHover.vue:64-79` ↔ `TrayMenu.vue:54-68` — `html/body/#app` 三层样式链逐字重复 ⇒ 条件 4（抽助手收益有限）
-- `ui/tests/setup.ts:9`、`ui/components/TimerCard.vue:682` — `eslint-disable` 指令而本仓无 eslint ⇒ 条件 1
-- `ui/src/dev/mock-invoke.ts` — DEV 基座缺 `take_auto_out_notice` / `tray_hover_resize` 路由（落 default ⇒ warn + null） ⇒ 条件 1（DEV-only、语义可接受）
-- `ui/components/StatsView.vue:493` 局部 `avgWork`（分）遮蔽 `:643` 计算属性（秒） — 异单位同名 ⇒ 条件 1
-- `ui/App.vue:229-236` `playChime` — `settings` 为 `null` 时 `sound_enabled` 门控被跳过 ⇒ 条件 4（该窗口不存在）
-- `core/src/hover.rs:291/293/294`、`core/src/workday.rs` 多处 — `3_600` 字面量散见多文件 ⇒ 条件 2/3
-- `core/src/settings.rs:70-72/78-80` — `THRESHOLD_DEFAULT` 已提常量而 `default_auto_out_hours()` 等仍裸 `8` ⇒ 条件 3
-- `core/src/storage.rs:510-574` / `:511-526` — 迁移只校验 `workdays`；全新库不置 `model_version=2` ⇒ 条件 1（旧路径仅测试调用 / 无消费者）
-- `core/src/commands/session.rs:109-115` — `.13` 取舍代价：fire 锁中毒时留「孤儿 `segment_end`」 ⇒ 该段少算 ⇒ 见 §四 条件豁免 #17（同源）
-- `core/src/commands/workday.rs:629` — 迁移失败落档含 `{err}`，`VACUUM INTO` 失败消息**可能**内嵌备份路径 ⇒ 条件 2 + 需验证
-- `core/src/workday.rs:596`（测试） — `const DAY: i64 = 864_000` 名不副实 ⇒ 条件 1/3
-- `core/src/lib.rs:31` `pub mod aumid` — 零外部消费者却 `pub`（与私有 mod 不一致） ⇒ 条件 1
-- `core/src/commands/workday.rs:207-212` / `:314-319` / `:451-456` — 「日零时刻 → `%Y-%m-%d`」同构 4 行重复 3 处 ⇒ 条件 4
-- `core/src/lib.rs:415-418` / `:457-460` — 托盘 `rect` 非 `Physical` 时静默 `return` ⇒ 条件 1（依赖锁定 `tray-icon 0.24.2` 恒 `Physical` ⇒ 实测不可达）
-- `core/src/lib.rs:141` / `:331` / `:391` — 吸附锁中毒 / 锚定落位 / 收起失败用无限定 `warn_diag` ⇒ 条件 4（低频，刷不起来）
-- `core/src/commands/window.rs:21-26`、`commands/hover.rs:71-87`、`commands/tray_menu.rs:33-48` — 窗口级命令「失败仅日志、返回 `Ok(())`」 ⇒ 条件 1（白名单在案，有意例外）
-- A008 二区 15 条 + `seal_days_inner` / `unsealed_past_days` 两套「过去日跨度」实现 — 原样在位、未恶化 ⇒ 仍属已登记参考级（后者见 §四 条件豁免 #6 家族）
+**参考级观察项**（19 条，2026-10-18 全量整理后**明细删除防重复**）：去向按原列表顺序记作 `O1`–`O19`——`O1` → 清理任务 `PATCH014.1`；`O2` / `O3` → §四 条件 #29；`O4` → `PATCH014.9`；`O5` → `PATCH014.7`；`O6` → `PATCH014.3`；`O7` → §四 永久 #31；`O8` → `PATCH014.10`；`O9` → `PATCH014.2`；`O10` → §四 永久 #25；`O11` → §四 条件 #17；`O12` → §四 条件 #22；`O13` → `PATCH014.4`；`O14` → `PATCH014.5`；`O15` → `PATCH014.11`；`O16` → 容错白名单 PL028.1 ③；`O17` → §四 条件 #20；`O18` → 容错白名单（装饰层多条）；`O19` → 前半见附录 A008 指向、后半（两套「过去日跨度」）→ §四 条件 #24。豁免唯一权威源 = 本文件「四」。
 
 **亮点**
 
@@ -1277,7 +1215,7 @@
 
 ## 附录 A010：全量代码审计报告（第 9 轮，2026-10-18）
 
-> 状态：✅ 已收口（2026-10-18，本批 = `fix: V0.1.9.8`，哈希见 `git log`；FIX010 任务清单与逐条证据见 `x.progress.md`「FIX010」组；live/目测项去向见 `.temp/pl027-visual-standards.md` **附录 L**）。范围：`core/` 全部 `.rs`（**25 文件 / 11,471 行**）+ `ui/` 全部 `.ts` / `.vue` / `.css`（**29 文件 / 7,468 行**，含 `ui/tests/`）+ `Cargo.toml` / `tauri.conf.json` / `capabilities/default.json` / `package.json` / `vite.config.ts` / `vitest.config.ts` / `tsconfig.json` / `README.md` / `release/README.md` / `AGENTS.md` / `CapsulePulse_plan.md`（排除 `node_modules/`、`dist/`、`target/`、`.temp/`、`.agents/`）。方式：三路只读并行（Rust core 纯逻辑 / Tauri 集成 / 前端）＋主会话对 P 级逐条复读现场核验行号与主张；基线 = `41e8e29`。审计未修改任何文件。豁免比对以本文件「四、审计观察项豁免定案清单」为准（永久 23 / 条件 17）——本轮观察项 **15 组全部维持参考级、不提升**（2026-10-18 用户定案）。
+> 状态：✅ 已收口（2026-10-18，本批 = `fix: V0.1.9.8`，哈希见 `git log`；FIX010 任务清单与逐条证据见 `x.progress.md`「FIX010」组；live/目测项去向见 `.temp/pl027-visual-standards.md` **附录 L**）。范围：`core/` 全部 `.rs`（**25 文件 / 11,471 行**）+ `ui/` 全部 `.ts` / `.vue` / `.css`（**29 文件 / 7,468 行**，含 `ui/tests/`）+ `Cargo.toml` / `tauri.conf.json` / `capabilities/default.json` / `package.json` / `vite.config.ts` / `vitest.config.ts` / `tsconfig.json` / `README.md` / `release/README.md` / `AGENTS.md` / `CapsulePulse_plan.md`（排除 `node_modules/`、`dist/`、`target/`、`.temp/`、`.agents/`）。方式：三路只读并行（Rust core 纯逻辑 / Tauri 集成 / 前端）＋主会话对 P 级逐条复读现场核验行号与主张；基线 = `41e8e29`。审计未修改任何文件。豁免比对以本文件「四、审计观察项豁免定案清单」为准（当时 永久 23 / 条件 17）——本轮观察项 **15 组当时维持参考级、不提升**；**2026-10-18 全量整理时已逐条定案**（整理后 永久 37 / 条件 29），去向见本节「二」。
 
 ### 零、上轮修复复核清单（A009 → FIX009，`41e8e29`）
 
@@ -1314,25 +1252,9 @@
 
 **订正记录（2026-10-18，用户定案）**：① 原 `P2-2` **降为 `P3-12`**——复核发现 `week_start_secs` 在生产路径**零消费者**（现行"本周"口径自 PL022 起走按日遍历 `commands/workday.rs::monday_offset`，不经该函数），故性质是"死代码 + 潜在不精确"而非现行口径错值；修法由"二选一"收窄为**删除**（已落：函数 + 两条用例 + 无用导入一并移除，模块头写明现行周口径指向）。② `P3-3` **降级为纯文档订正**——撤销"用例按判据分流 + 演习"：SQL 必须逐个列出 kind、Rust 无反射，这两种表达本就无法合一，为一个假想的未来变体重写用例属 YAGNI（已落：订正失实注释 + `storage.rs:243` 补同步义务注释）。
 
-### 二、参考级观察项（记录不修；含回落理由）
+### 二、参考级观察项（已全部定案，明细移出防重复）
 
-| 位置                                                                                                                    | 描述                                                                                                                                                                         | 回落理由                                                                                                                |
-| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `core/src/storage.rs:156-158`                                                                                           | `busy_timeout(0ms)`                                                                                                                                                          | 条件 4（单连接 `Mutex<Storage>`，应用内无第二写者）                                                                     |
-| `core/src/hover.rs:16/18/145-151`                                                                                       | `WINDOW_WIDTH=228` / `HEIGHT_MIN` / `DWELL_MS` / `WATCH_STEP_MS` 等                                                                                                          | 条件 1（UI 几何 / 时序常量）                                                                                            |
-| `core/src/reminder.rs:21`                                                                                               | `repeat = 300s` 固定                                                                                                                                                         | 条件 2（有注释依据、用户定案）                                                                                          |
-| `core/src/session.rs:194-201`                                                                                           | `undo_pause` 对契约外 `paused_from` 静默返回                                                                                                                                 | 条件 4（调用方恒传合法快照）                                                                                            |
-| `core/src/workday.rs:168-169`                                                                                           | `basis_hours + 4×steps` u32 理论溢出                                                                                                                                         | 条件 4（需 ~1e9 次加班事件，不可达）                                                                                    |
-| `core/src/storage.rs:508-580`、`:663-688`                                                                               | 迁移只校验 `workdays`；`session_pairs` 与 `reduce_day` 同构                                                                                                                  | 条件 1 / 4（A009 在位；仅测试夹具）                                                                                     |
-| `core/src/settings.rs:78-80`、`core/src/workday.rs:614`、`core/src/hover.rs:293-296`                                    | 裸 `8` / `DAY=864_000` / `3_600` 字面量                                                                                                                                      | 条件 2 / 3（A009 在位）                                                                                                 |
-| `core/src/lib.rs:31`                                                                                                    | `pub mod aumid` 零外部消费者                                                                                                                                                 | 条件 1（A009 在位）                                                                                                     |
-| `core/src/menu.rs:122`                                                                                                  | 菜单守候线程无「已在守候」闩（<100ms 内再右键可并存两条，均幂等 hide）                                                                                                       | 条件 1 + 需验证（无行为差异）                                                                                           |
-| `core/src/lib.rs:699-717`、`commands/reminder.rs:301-308/435-442`                                                       | 「锁内取副本 → 锁外落盘 → 再锁写回」理论可丢更新                                                                                                                             | 条件 1 / 4（主线程串行路径，实际不可达；FIX007.2 已取舍）                                                               |
-| `core/src/lib.rs:196/332/392/573`、`menu.rs:115/153`                                                                    | 低频点用无限定 `warn_diag`                                                                                                                                                   | 条件 4（每次动作一次，刷不起来；A009 同族）                                                                             |
-| `core/src/aumid.rs:60`、`single_instance.rs`                                                                            | `Global\` 对象 NULL DACL（本机他用户可抢先持有 ⇒ 启动 DoS）                                                                                                                  | 条件 1 / 4（不承载数据；FIX006.10 已论证暴露面）                                                                        |
-| `core/src/lib.rs:415-418/455-461`、`commands/tray_menu.rs:33-48`、`commands/hover.rs:71-87`、`commands/window.rs:21-26` | 托盘 `rect` 非 `Physical` 静默 return；窗口级命令失败仅日志返回 `Ok(())`；`set_board_backdrop` 返回 `()`                                                                     | 条件 1（依赖锁定 / 装饰层白名单在案，A009 在位）                                                                        |
-| 前端 A009 二区原样在位组 + 本轮新增 `ui/src/components/TrayHover.vue:35`                                                | `html/body/#app` 样式链重复、`mock-invoke` 缺两条路由、`SettingsPanel` 死参数、`BOARD_LEFT` 差 2px、`avgWork` 异单位同名、`--focus-blur`、eslint 指令；`{ deep: true }` 冗余 | 条件 1 / 2 / 4（A009 逐条已录；`deep` 属纯微开销）                                                                      |
-| `ui/src/styles/*.css` 多处硬编码暗色值                                                                                  | 不支持浅色主题                                                                                                                                                               | `index.html` 锁 `data-theme="dark"`，`App.vue:883-884` 已注明「单态外观为设计定案」；浅色整体复核见 `y.problems.md` #11 |
+> 2026-10-18 全量整理：15 组全部有去处，**原表明细已删除**（去向按原表行序记作 `R1`–`R15`）。`R1` / `R10` → §四 条件 #18 / #19；`R2` → 永久 #35；`R3` → 永久 #3；`R4` → 永久 #34；`R5` → 永久 #24；`R6` → 永久 #25；`R7` → 清理任务 `PATCH014.2`（裸 `8`）/ `.4`（`DAY`）/ `.10`（`3_600`）；`R8` → `PATCH014.5`；`R9` → 永久 #32；`R11` → 条件 #20；`R12` → 永久 #26；`R13` → 容错白名单（PL028.1 ③ / PL029 / 装饰层多条）；`R14` → 见附录 A009 指向（`{ deep: true }` 已随 FIX010.12 销项）；`R15` → `y.problems.md` #11。豁免唯一权威源 = 本文件「四」。
 
 ### 三、亮点
 
@@ -1340,3 +1262,25 @@
 - **FIX009 七项中六项完全在位**，且 `.1` 的「读写两侧同源」经 `git show 41e8e29` 逐行确认无漏改；`.4` 的「低频路径保持裸 `warn_diag`」是正确取舍而非漏改。
 - 生产路径零 `unwrap` / `expect` / `panic`（三路 grep 一致）；SQL 无拼接、无 kind 字面量；`tauri.conf.json` 正确省略 version（回落 `Cargo.toml`）；`capabilities` 三窗齐备。
 - 上轮遗留「计划书 §2.2 / AGENTS 架构要点旧口径」**已消项**（本轮核实）。
+
+---
+
+## 附录 PATCH014：审计观察项可修项清理（堵漏 8 + 整洁 3）（2026-10-18 立项）
+
+> 状态：✅ 已收口（2026-10-18，本批 = `fix: V0.1.9.9`，哈希见 `git log`；任务清单与逐条证据见 `x.progress.md`「PATCH014」组；live / 目测项去向见 `.temp/pl027-visual-standards.md` **附录 M**）。**来源**：2026-10-18 审计观察项全量整理（A001–A010 去重后 37 条）——其中丙类 11 条"可修且简单"经用户定案立项为本次小修批；永久 14 条与条件 12 条已登记本文件「四」（永久 24–37 / 条件 18–29）。**红线**：全部为**零行为变化或纯观感对齐**的改动（不改业务逻辑、不加依赖、不改 IPC 契约）；Rust 侧只动常量 / 可见性 / 字面量，不碰状态机与归约。
+
+**定案口径**
+
+- `.1` **`BOARD_LEFT` 对齐 CSS 现行几何**（A006-O1 + A009-1）：`ui/App.vue:139` 的 `const BOARD_LEFT = 12` 改 `14`——`ui/src/styles/boards.css:270` 已是 CT 浮板几何 `left: 14px`（注释写明"14/14/14，design 12 已随 CT 化退役"），而该常量只用于开板飞入原点 x 计算（`:158`）⇒ 现值令原点偏 2px。验证：`npx vue-tsc --noEmit` 0 + `npm run build` + live（开板 / 关板动画起点与浮板左缘一致、无偏移）。
+- `.2` **自动下班默认值提常量**（A009-9 + A010-7）：`core/src/workday.rs` 的 `AUTO_OUT_MIN_HOURS = 4` / `OVERTIME_CAP_HOURS = 12` 旁新增 `pub const AUTO_OUT_DEFAULT_HOURS: u32 = 8`（注明"产品默认值、非技术硬顶"），`core/src/settings.rs:78` 的 `default_auto_out_hours()` 改返该常量（`workday_auto_out_hours` 的 serde 默认引用不变）。验证：`cargo test` 全绿 + `cargo fmt --check` + `clippy -D warnings`；`default_auto_out_hours` 体内无裸 `8`。
+- `.3` **`StatsView` 同名异单位局部变量改名**（A009-6）：`ui/components/StatsView.vue:551` 的 `const avgWork = avgWorkMin.value;`（单位：分）及 `:552` / `:591` 两处引用改名 `avgWorkMinValue`，与 `:701` 的秒口径 computed `avgWork` 区分（同名遮蔽易误读单位）。验证：`vue-tsc --noEmit` 0 + `npm run build` + live（周卡平均线位置不变）。
+- `.4` **测试基准常量照实命名**（A009-13）：`core/src/workday.rs:614` 的 `const DAY: i64 = 864_000;` 实为"测试基准时刻（10 天偏移）"而非"一天"⇒ 改名 `BASE_TS` 并补注释；同文件用例内引用随改（机械替换）。验证：`cargo test` 全绿（用例零行为变化）。
+- `.5` **`aumid` 模块可见性收敛**（A009-14 + A010-8）：`core/src/lib.rs:31` 的 `pub mod aumid;` 改 `pub(crate) mod aumid;`——模块内函数仅经 `crate::aumid::` 被 `lib.rs` setup 调用，全 crate 无外部消费者；其余 `pub mod` 一律保留（`core/tests/` 集成测试面）。验证：`cargo check` + `clippy -D warnings` + `cargo doc --no-deps` 零 warning。
+- `.6` **`#[cfg(test)]` 助手可见性收敛**（A008-O11）：`core/src/storage.rs` 的 `workday_open_with_events`（`:631`）/ `workday_close_with_event`（`:644`）/ `session_count`（`:655`）/ `all_total`（`:661`）四处 `pub fn` 改 `pub(crate) fn`（`cfg(test)` 项对集成测试不可见 ⇒ `pub` 无意义；与同文件 `create_legacy_tables_for_test` 等既有 `pub(crate)` 统一）。验证：`cargo test` 全绿 + `clippy -D warnings`。
+- `.7` **DEV 基座补两条命令路由**（A009-5）：`ui/src/dev/mock-invoke.ts` 增 `case "take_auto_out_notice"`（返回 `null`，照 `take_recovery_notice` 写法）与 `case "tray_hover_resize"`（返回 `null`）——两条命令在 `core/src/lib.rs:938/946` 有注册，DEV 基座缺路由会落 `default` 分支（warn + null）。验证：`vue-tsc --noEmit` 0 + DEV 基座 console 无该两条的 warn。
+- `.8` **表盘冒号色改令牌**（A008-O14）：`ui/src/styles/timer.css:419-421` 三处硬编码 `#ff6b4a` 改 `var(--work)`（`--work: #ff6b4a` 在本仓样式层唯一定义、值相同），注释随改为"= 工作段令牌 `--work`"。验证：`prettier --check` + `npm run build` + live（冒号颜色不变）。
+- `.9` **删两处无主 `eslint-disable`**（A009-4）：`ui/tests/setup.ts:9` 删 `/* eslint-disable @typescript-eslint/no-empty-function */`；`ui/components/TimerCard.vue:685` 删 `<!-- eslint-disable-next-line vue/no-v-html -->`（本仓无 eslint ⇒ 指令恒不生效；`v-html="dialArcsSvg"` 是既有实现，将来若引入 eslint 由配置统一声明规则而非行内注释）。验证：`vue-tsc --noEmit` 0 + `npm run build` + `npm test`。
+- `.10` **秒 / 小时字面量提常量**（A009-8）：`core/src/hover.rs:291/293/294` 及 `core/src/workday.rs` 同族的 `3_600` 提为 `pub(crate) const SECS_PER_HOUR: i64 = 3_600`（放 `core/src/period.rs`，与周期常量同处），全部引用改调。验证：`cargo test` 全绿 + `clippy -D warnings`。
+- `.11` **抽"日零时刻键"助手**（A009-15）：`core/src/commands/workday.rs` 三处同构（`:207-212` / `:314-319` / `:451-456`：时间戳 → 本地日零时刻 → `format("%Y-%m-%d")`）抽为 `fn day_key(dt: i64) -> String` 单一来源，三处调用点改调；文件内测试区同类写法（`:1129/1267/1315/1349`）按需复用。验证：`cargo test` 全绿（键值逐字不变）+ `clippy -D warnings`。
+
+**收口要求**：全门禁（`cargo fmt --check` / `clippy --all-targets -- -D warnings` / `cargo test` / `cargo doc --no-deps` / `prettier --check` / `vue-tsc --noEmit` / `npm test` / `npm run build`）+ live 目测（`.1` / `.8` 两处观感项）→ 版本推进（第四段 R 递增）+ 本附录状态改 ✅ + `x.progress.md` 本组整组入已完成区。

@@ -6,7 +6,6 @@
  * `window.matchMedia`（`StatsView` 用它查"减少动效"偏好）——jsdom 都不实现，
  * 不补会在 mount / setup 期直接抛错。
  */
-/* eslint-disable @typescript-eslint/no-empty-function */
 
 /** 空实现桩：测试只关心"渲染是否发生"，不关心浮钮几何（jsdom 无布局、矩形恒为 0） */
 class ResizeObserverStub {

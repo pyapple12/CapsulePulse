@@ -76,7 +76,7 @@ fn default_true() -> bool {
 }
 
 fn default_auto_out_hours() -> u32 {
-    8
+    crate::workday::AUTO_OUT_DEFAULT_HOURS
 }
 
 fn default_hotkey_visible() -> String {

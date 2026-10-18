@@ -416,9 +416,9 @@
   width: 0;
   overflow: hidden;
   white-space: nowrap;
-  color: #ff6b4a; /* 橙红（= 时钟工作段 --work，用户定案） */
-  -webkit-text-stroke: 1px #ff6b4a;
-  border-right: 0 solid #ff6b4a;
+  color: var(--work); /* 橙红（= 时钟工作段令牌 --work；PATCH014.8 起走令牌，值不变） */
+  -webkit-text-stroke: 1px var(--work);
+  border-right: 0 solid var(--work);
   transition:
     width 0.45s ease,
     border-right-width 0.45s ease;
