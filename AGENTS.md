@@ -172,7 +172,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **路径处理**：Rust 强制使用 `std::path::Path` / `PathBuf`，禁止手拼字符串路径；运行时数据目录经 dirs crate / 配置解析，禁止硬编码机器路径；TS 使用 `path.join` / `URL`，禁止字符串拼接路径
 - **临时文件**：所有临时生成的脚本/文件必须写入项目根目录下的 `.temp/` 文件夹（gitignore），禁止散落在源码目录
 - **文件修改必须用 edit 工具**：修改既有文件（.rs/.ts/.vue/.md/.json/.toml）一律用 edit 的精确 oldString/newString 替换，禁止用 python -c 或 PowerShell 脚本做内容替换（易踩引号/缩进坑）；新建 .temp 探针脚本不受限
-- **版本双轨**：机器版本只存 `core/Cargo.toml` 的 `version`（三段式 X.Y.Z，Cargo 强制 semver，本项目单 crate 非 workspace）；对外正式文本（commit 标题、README 徽章、发布说明）一律写四段式 `VX.Y.Z.R`——前三段与 Cargo.toml 一致，第四段 R 为修订号，只随提交历史记录、不入任何配置文件（递增规则见"Commit 提交规范"）；`tauri.conf.json` 省略 version 字段（Tauri 回落读 Cargo.toml），`package.json` 的 version 为 npm 生态必填字段、不参与发布——豁免于单一来源，不派生不注入（对齐系列项目 FIX001.25 豁免先例）
+- **版本双轨**：机器版本只存 `core/Cargo.toml` 的 `version`（三段式 X.Y.Z，Cargo 强制 semver，本项目单 crate 非 workspace）；对外正式文本**分两类**——**README 徽章用三段式**（值 = `Cargo.toml` 的 `version` 即时推进，链接指向 `releases` 页；照系列项目 CapsuleTODO 口径），**commit 标题与发布说明用四段式 `VX.Y.Z.R`**（前三段与 Cargo.toml 一致，第四段 R 为修订号，只随提交历史记录、不入任何配置文件；递增规则见"Commit 提交规范"）；`tauri.conf.json` 省略 version 字段（Tauri 回落读 Cargo.toml），`package.json` 的 version 为 npm 生态必填字段、不参与发布——豁免于单一来源，不派生不注入（对齐系列项目 FIX001.25 豁免先例）
 - **Shell 命令**：执行命令前先检测当前 shell（`echo $SHELL` 或检查系统），本机 Windows 环境；避免使用 Linux-only 或 PowerShell-only 工具，优先跨 shell 兼容命令
 - **PowerShell 中文编码**：bash 工具的 pwsh 会话带 `-NoProfile`，不加载 `$PROFILE`，输出中文前必须先设置编码：`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;`
 - **Git 操作**：未经用户明确要求，不得擅自执行 `git add`、`git commit` 或任何其他 Git 写操作
@@ -199,7 +199,7 @@ y.problems.md     # 问题与远期改进备忘录（只增不删、编号递增
 - **资产名** `CapsulePulse_v<X.Y.Z>_win_x64.zip`（zip 内 `capsule-pulse.exe` + `README.md`，根目录平铺，不带 `configs/`、`data/`）
 - **Release 正文与 `release/README.md` 均中英双语**：先**整段中文**、再**整段英文**（不逐段对照）
 - **Release 正文结构**：🚀 更新内容（✨ 新特性 / 🐛 修复 / 📝 说明）+ 对应英文段；**「修复」从 `git diff <上个 tag>..HEAD` 全量提取**、每条一句话
-- **README 双口径**（沿版本双轨）：徽章 = 代码版本（随 `Cargo.toml` 即时推进）；下载链接 = 实际发布产物（**发版后才改**，提前改 = 指向不存在文件 404）
+- **README 双口径**（沿版本双轨）：**徽章 = 代码版本**（三段式，值随 `Cargo.toml` 即时推进；链接指向 `releases` 页）；下载链接 = 实际发布产物（**发版后才改**，提前改 = 指向不存在文件 404）
 - `release/README.md` = 随包使用说明（入库、版本化）；脚注版本号随发版更新
 
 ### 发布流程（顺序）

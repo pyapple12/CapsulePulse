@@ -2,15 +2,14 @@
 
 **简体中文** | [English](#english)
 
-[![Version](https://img.shields.io/badge/Version-0.2.0.0-blue.svg)](core/Cargo.toml)
+[![CI](https://github.com/pyapple12/CapsulePulse/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg)](../../releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11-0078D6.svg)](#下载)
 [![Rust](https://img.shields.io/badge/Rust-1.96-orange.svg)](https://www.rust-lang.org)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-<!-- 待补：CI 徽章（建 .github/workflows/ci.yml 后启用）
-[![CI](https://github.com/pyapple12/CapsulePulse/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
--->
+[![Stars](https://img.shields.io/github/stars/pyapple12/CapsulePulse?label=Stars)](../../stargazers)
+[![Downloads](https://img.shields.io/github/downloads/pyapple12/CapsulePulse/total?label=Downloads)](../../releases)
 
 <!-- 待补：预览图（放 images/Github-Preview-Image.jpg 后启用）
 <p align="center">
